@@ -25,6 +25,14 @@ const N = (v) => (v === '' || v === null || v === undefined ? 0 : (numFR(v) ?? 0
 const LUB_TYPES = ['5W30 1L','5W30 5L','20W50 5L','15W40 5L','80W90 1L','50 SAE 5L','Dexron 1L','Dot4 1L','10W40 5L','5W40 5L','Graisse','Liquide refroid.','Nettoyant injecteur','Nettoyant essence']
   .map(nom => ({ nom, conditionnement_nom: null, conditionnement_qte: null, unite: 'bidon' }))
 const GAZ = [['3','3 kg'],['6','6 kg'],['12','12 kg'],['38','38 kg']]
+// Repli affiché le temps que expense_categories charge (catalogue admin, voir migration_v100) —
+// jamais utilisé une fois la requête terminée, même si elle revient vide.
+const FALLBACK_EXP_CATS = [
+  { key: 'SBEE', label: 'SBEE', non_cash: false },
+  { key: 'SUPERETTE', label: 'SUPERETTE', non_cash: false },
+  { key: 'CARBURANT', label: 'Carburant / déplacement (propriétaire)', non_cash: true },
+  { key: 'AUTRE', label: 'AUTRE', non_cash: false },
+]
 // Jusqu'à 10 machines par station (chacune : une pompe essence + une gasoil) — voir
 // stations.nombre_machines (Stations & équipe). Les colonnes au-delà du nombre réellement
 // utilisé par une station restent vides en base, sans impact.
@@ -73,7 +81,6 @@ export default function Submit() {
   const [showAll, setShowAll] = useState(!!params.get('date'))
   const [f, setF] = useState(EMPTY)
   const [lub, setLub] = useState({})
-  const [lubSplit, setLubSplit] = useState({})   // {nom: {cartons, unites}} — édition assistée carton/bidon, purement local
   const [lubVendu, setLubVendu] = useState({})   // {nom: quantité vendue aujourd'hui} — pour la commission réelle (prix vente − prix achat), plus une estimation à %
   const [lubVenduSplit, setLubVenduSplit] = useState({})
   const [lubTheorique, setLubTheorique] = useState({})   // {nom: stock_theorique} — v_stock_theorique, pour l'écart en direct
@@ -91,6 +98,8 @@ export default function Submit() {
   // au submit final, un moment plus sûr que juste après la prise de vue (voir lib/image.js).
   const rawPhotoPathsRef = useRef([])
   const [lubTypes, setLubTypes] = useState(LUB_TYPES)    // références lubrifiant (dynamiques)
+  const [gazPrices, setGazPrices] = useState({})          // {"3 kg": prix_vente, ...} — pour déduire les espèces gaz des bouteilles vendues
+  const [expenseCategories, setExpenseCategories] = useState([])   // catalogue admin (table expense_categories), à la place de la liste figée
   const [settings, setSettings] = useState({ essence_pv: 725, gasoil_pv: 750, marge_unitaire: 25 })
   const [prods, setProds] = useState([])                 // catalogue supérette/autre (vendeuse)
   const [sales, setSales] = useState([])                 // lignes de vente du jour : {product_id, nom, quantite, prix_vente}
@@ -127,7 +136,9 @@ export default function Submit() {
 
   useEffect(() => { supabase.from('settings').select('*').eq('id', 1).maybeSingle().then(({ data }) => data && setSettings(data)) }, [])
   useEffect(() => { supabase.from('suppliers').select('id,nom,categorie').order('nom').then(({ data }) => setSuppliers(data || [])) }, [])
-  useEffect(() => { supabase.from('products').select('nom, unite, conditionnement_nom, conditionnement_qte').eq('categorie', 'lubrifiant').eq('actif', true).order('ordre').then(({ data }) => { if (data && data.length) setLubTypes(data) }) }, [])
+  useEffect(() => { supabase.from('products').select('nom, unite, conditionnement_nom, conditionnement_qte, prix_vente').eq('categorie', 'lubrifiant').eq('actif', true).order('ordre').then(({ data }) => { if (data && data.length) setLubTypes(data) }) }, [])
+  useEffect(() => { supabase.from('products').select('nom,prix_vente').eq('categorie', 'gaz').then(({ data }) => { const m = {}; (data || []).forEach(p => m[p.nom] = N(p.prix_vente)); setGazPrices(m) }) }, [])
+  useEffect(() => { supabase.from('expense_categories').select('*').eq('actif', true).order('ordre').then(({ data }) => setExpenseCategories(data || [])) }, [])
   useEffect(() => { if (!stationId) return; supabase.from('v_stock_theorique').select('produit, stock_theorique').eq('station_id', stationId).eq('categorie', 'lubrifiant').then(({ data }) => { const m = {}; (data || []).forEach(r => m[r.produit] = N(r.stock_theorique)); setLubTheorique(m) }) }, [stationId])
   useEffect(() => { if (stationId) load(date) }, [date, stationId])
 
@@ -192,7 +203,7 @@ export default function Submit() {
     // trompeur (laisserait croire à un incident alors que c'est le cas normal).
     else if (draft?.f) { setF(draft.f); setLub(draft.lub || {}); setLubVendu(draft.lubVendu || {}) }
     else { setF({ ...EMPTY, ess_pu: settings.essence_pv, gas_pu: settings.gasoil_pv }); setLub({}); setLubVendu({}) }
-    setLubSplit({}); setLubVenduSplit({})
+    setLubVenduSplit({})
     // Dépenses/versements/achats : la base fait autorité dès qu'il y a quelque chose ; sinon,
     // on retombe sur le brouillon local (ex. après un rechargement inattendu de la page).
     setExpenses(ex.data?.length ? ex.data : (draft?.expenses || []))
@@ -223,7 +234,7 @@ export default function Submit() {
       <Button type="button" size="sm" icon="camera" block disabled={!!meterPhotoBusy[k]}
         style={{ marginTop: 'var(--sp-2)', ...(meterHasPhoto(k, label) ? { color: 'var(--state-ok)', borderColor: 'var(--state-ok)' } : {}) }}
         onClick={() => document.getElementById(`meter-photo-${k}`)?.click()}>
-        {meterPhotoBusy[k] ? 'Envoi…' : meterHasPhoto(k, label) ? 'Photo ✓ (reprendre)' : 'Ajouter la photo (optionnel)'}
+        {meterPhotoBusy[k] ? 'Envoi…' : meterHasPhoto(k, label) ? 'Photo ✓' : 'Photo'}
       </Button>
       {/* Pas de capture="environment" : forcer l'appareil photo natif en plein écran est le
           changement d'activité le plus lourd pour l'OS — sur téléphone à mémoire faible, c'est ce
@@ -324,6 +335,14 @@ export default function Submit() {
     setAttachments(p => p.filter(x => x.id !== a.id))
   }
 
+  // Catégories de dépense (catalogue admin, expense_categories) : seule CARBURANT (prélèvement
+  // propriétaire) est non-cash par défaut — une catégorie créée par l'admin peut aussi l'être.
+  // Si le catalogue n'a pas encore chargé, on retombe sur l'ancien comportement figé.
+  const expCats = expenseCategories.length ? expenseCategories : FALLBACK_EXP_CATS
+  const nonCashCat = (categorie) => {
+    const cat = expCats.find(c => c.key === categorie)
+    return cat ? cat.non_cash : (categorie || '').toUpperCase() === 'CARBURANT'
+  }
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   // valeur brute pendant la frappe, reformatée avec séparateurs de milliers à la sortie du champ
   const numProps = (k) => ({ value: f[k], onChange: e => set(k, e.target.value), onBlur: () => set(k, formatThousands(f[k])) })
@@ -339,6 +358,22 @@ export default function Submit() {
   const locked = !isAdmin && date < daysAgoIso(joursCorrection)
   const lockedMsg = `Journée verrouillée : vous pouvez créer ou corriger un jour des ${joursCorrection} derniers jours seulement. Au-delà, demandez à la direction.`
   const nombreMachines = Math.min(MAX_MACHINES, Math.max(1, Number(current?.nombre_machines) || 4))
+  // Choix admin par station (Stations & équipe) : déclarer le STOCK (matin, réconciliation),
+  // la quantité VENDUE (16h, commission réelle), ou les deux (comportement historique, par défaut).
+  const suiviMode = current?.suivi_lub_gaz || 'les_deux'
+  const showStockLubGaz = suiviMode === 'stock' || suiviMode === 'les_deux'
+  const showVenduLubGaz = suiviMode === 'vendu' || suiviMode === 'les_deux'
+  // Espèces gaz/lubrifiant déduites des quantités vendues déjà saisies ci-dessous (× prix de
+  // vente actuel) — le gérant ne les retape plus. Uniquement quand la quantité vendue est
+  // effectivement déclarée (showVenduLubGaz) ; sinon (station en mode "stock" seul) il n'y a
+  // rien dont les déduire, et le champ reste une saisie manuelle (voir plus bas).
+  const gazEspeceCalc = GAZ.reduce((s, [k, lab]) => s + N(f['gaz_vendu_' + k]) * N(gazPrices[lab]), 0)
+  const lubEspeceCalc = lubTypes.reduce((s, pr) => s + N(lubVendu[pr.nom]) * N(pr.prix_vente), 0)
+  // Libellés des compteurs — réutilisés pour l'affichage (meterMachine) ET pour la vérification
+  // "photo obligatoire" dans save() : doivent rester identiques aux deux endroits, sinon
+  // meterHasPhoto (qui compare au préfixe de attachments.note) ne retrouverait pas la photo.
+  const matinMeterDefs = machineNums(nombreMachines).flatMap(n => [[`e${n}_m`, `Essence ${n}`], [`g${n}_m`, `Gasoil ${n}`]])
+  const meters16hDefs = machineNums(nombreMachines).flatMap(n => [[`e${n}`, `Pompe E${n}`], [`g${n}`, `Pompe G${n}`]])
   // Mouvement compteur du matin (aujourd'hui − dernier relevé matin saisi) : dispo dès que les
   // relevés d'ouverture sont remplis, avant même d'atteindre l'étape « Ventes carburant ».
   const eOpenNow = machineNums(nombreMachines).reduce((s, n) => s + N(f['e' + n + '_m']), 0)
@@ -352,6 +387,14 @@ export default function Submit() {
     if (essCompteur != null && f.ess_litres === '') set('ess_litres', String(essCompteur))
     if (gasCompteur != null && f.gas_litres === '') set('gas_litres', String(gasCompteur))
   }, [essCompteur, gasCompteur])
+  useEffect(() => {
+    if (!showVenduLubGaz) return
+    set('gaz_espece', gazEspeceCalc ? formatThousands(String(Math.round(gazEspeceCalc))) : '0')
+  }, [gazEspeceCalc, showVenduLubGaz])
+  useEffect(() => {
+    if (!showVenduLubGaz) return
+    set('lubrifiant_espece', lubEspeceCalc ? formatThousands(String(Math.round(lubEspeceCalc))) : '0')
+  }, [lubEspeceCalc, showVenduLubGaz])
   // Litres/Prix/Bon/Espèces sont 4 champs saisis indépendamment — rien ne garantit que
   // Bon + Espèces corresponde à Litres × Prix/L. Vérification en temps réel, non bloquante
   // (juste un repère visuel), pour repérer une saisie incohérente avant l'envoi.
@@ -410,10 +453,31 @@ export default function Submit() {
     if (moment === 'matin' && metersMatin.some(k => f[k] === '' || f[k] === null || f[k] === undefined)) {
       fail(`Relevés du matin obligatoires : remplis les ${metersMatin.length} index des pompes avant d'envoyer.`, 'meters-matin', matinMetersRef); return
     }
-    // Les photos (justificatif dépense, bordereau versement, compteur) sont RECOMMANDÉES mais
-    // plus bloquantes à l'envoi — le gérant doit toujours pouvoir envoyer ses chiffres même quand
-    // la prise de photo échoue sur son téléphone (rechargement d'écran, appareil bas de gamme).
-    // Les montants/index restent, eux, obligatoires (checks ci-dessus et ci-dessous, inchangés).
+    // Les photos (justificatif dépense, bordereau versement, compteur) sont recommandées mais
+    // pas bloquantes par défaut — le gérant doit pouvoir envoyer ses chiffres même quand la
+    // prise de photo échoue (rechargement d'écran, appareil bas de gamme). L'admin peut changer
+    // ça (Stations & équipe → Paramètres → « Photo obligatoire ») : dans ce cas, elles deviennent
+    // bloquantes comme n'importe quel autre champ obligatoire.
+    if (settings.photo_obligatoire) {
+      if (moment === 'apres-midi') {
+        const manquantes = meters16hDefs.filter(([k, label]) => !meterHasPhoto(k, label))
+        if (manquantes.length) {
+          fail(`Photo obligatoire : ajoutez la photo du compteur pour ${manquantes.map(([, l]) => l).join(', ')} avant d'envoyer.`, 'meters-16h', apresmidiMetersRef); return
+        }
+      }
+      if (moment === 'matin' || showAll) {
+        const manquantes = matinMeterDefs.filter(([k, label]) => !meterHasPhoto(k, label))
+        if (manquantes.length) {
+          fail(`Photo obligatoire : ajoutez la photo du compteur pour ${manquantes.map(([, l]) => l).join(', ')} avant d'envoyer.`, 'meters-matin', matinMetersRef); return
+        }
+      }
+      if (expenses.some(e => N(e.montant) > 0 && !nonCashCat(e.categorie) && !e.photo_path)) {
+        fail('Photo obligatoire : ajoutez le justificatif de chaque dépense avant d\'envoyer.', 'expenses', expensesRef); return
+      }
+      if (deposits.some(d => N(d.montant) > 0 && !d.photo_path)) {
+        fail('Photo obligatoire : ajoutez la photo du bordereau pour chaque versement avant d\'envoyer.', 'deposits', depositsRef); return
+      }
+    }
     if (deposits.some(d => N(d.montant) > 0 && (!d.periode_debut || !d.periode_fin))) {
       fail('Indiquez la période concernée (du… au…) pour chaque versement.', 'deposits', depositsRef); return
     }
@@ -505,7 +569,7 @@ export default function Submit() {
       const exRows = []
       for (const e of expenses) {
         if (N(e.montant) <= 0) continue
-        const isCarb = (e.categorie || '').toUpperCase() === 'CARBURANT'
+        const isCarb = nonCashCat(e.categorie)
         const row = { report_date: date, station_id: sid, categorie: e.categorie || "AUTRE", montant: numFR(e.montant),
           motif: e.motif || (isCarb ? 'Carburant / déplacement propriétaire' : null),
           justificatif: true, photo_path: e.photo_path || null, created_by: session.user.id,
@@ -759,6 +823,7 @@ export default function Submit() {
               </AlertBanner>
             )}
           </FormSection>
+          {showStockLubGaz && (<>
           <FormSection title="Bouteilles de gaz en stock" style={{ marginTop: 'var(--sp-4)' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
               {GAZ.map(([k, lab]) => (
@@ -770,38 +835,17 @@ export default function Submit() {
             </div>
           </FormSection>
           <FormSection title="Lubrifiants en stock" style={{ marginTop: 'var(--sp-4)' }}>
+            <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>Nombre de bidons en stock, par référence — c'est cette info que vous mettez à jour chaque matin.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 'var(--sp-4)' }}>
               {lubTypes.map(pr => {
                 const t = pr.nom
-                const hasCondit = N(pr.conditionnement_qte) > 0
                 const th = lubTheorique[t]
-                const declare = N(lub[t])
-                const ecart = (th != null && lub[t] != null) ? declare - th : null
+                const ecart = (th != null && lub[t] != null) ? N(lub[t]) - th : null
                 return (
                   <div key={t} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
                     <span style={{ font: '400 14px/1.2 var(--font-ui)', color: 'var(--text-body)' }}>{t}</span>
-                    {!hasCondit ? (
-                      <Input size="sm" type="text" inputMode="numeric" numeric value={lub[t] ?? ''} placeholder="0" style={{ width: 90 }}
-                        onChange={e => setLub(p => ({ ...p, [t]: e.target.value === '' ? undefined : Number(e.target.value) }))} />
-                    ) : (() => {
-                      const split = lubSplit[t] || { cartons: '', unites: '' }
-                      const updateSplit = (patch) => {
-                        const next = { ...split, ...patch }
-                        setLubSplit(p => ({ ...p, [t]: next }))
-                        const total = N(next.cartons) * N(pr.conditionnement_qte) + N(next.unites)
-                        setLub(p => ({ ...p, [t]: total || undefined }))
-                      }
-                      return (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-                          <Input size="sm" type="text" inputMode="numeric" numeric value={split.cartons} placeholder="0" style={{ width: 55 }}
-                            onChange={e => updateSplit({ cartons: e.target.value })} />
-                          <span style={{ font: '400 12px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>{pr.conditionnement_nom || 'carton'}(s) +</span>
-                          <Input size="sm" type="text" inputMode="numeric" numeric value={split.unites} placeholder="0" style={{ width: 55 }}
-                            onChange={e => updateSplit({ unites: e.target.value })} />
-                          <span style={{ font: '400 12px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>{pr.unite || 'unité'}(s) = {declare}</span>
-                        </div>
-                      )
-                    })()}
+                    <Input size="sm" type="text" inputMode="numeric" numeric value={lub[t] ?? ''} placeholder="0" style={{ width: 90 }}
+                      onChange={e => setLub(p => ({ ...p, [t]: e.target.value === '' ? undefined : Number(e.target.value) }))} />
                     {ecart != null && (
                       <span style={{ font: '400 12px/1.3 var(--font-ui)', color: Math.abs(ecart) < 0.5 ? 'var(--state-ok)' : 'var(--state-alarm)' }}>
                         Théorique {th} — écart {ecart > 0 ? '+' : ''}{ecart}{Math.abs(ecart) >= 0.5 ? ' à justifier' : ''}
@@ -812,6 +856,7 @@ export default function Submit() {
               })}
             </div>
           </FormSection>
+          </>)}
         </Panel>
       )}
 
@@ -823,7 +868,6 @@ export default function Submit() {
           <FormSection title={`Essence — ${settings.essence_pv} F/L`}>
             <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
               <Field label="Litres" style={{ flex: '1 1 140px' }} hint={essCompteur != null ? `Compteurs : ${essCompteur.toLocaleString('fr-FR')} L` : undefined}><Input type="text" inputMode="decimal" numeric {...numProps('ess_litres')} /></Field>
-              <Field label="Prix / L" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric {...numProps('ess_pu')} /></Field>
               <Field label="Vente à bon" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric {...numProps('ess_bon')} /></Field>
             </div>
             <Field label="Vente en espèces" style={{ marginTop: 'var(--sp-3)' }}><Input type="text" inputMode="decimal" numeric {...numProps('ess_espece')} /></Field>
@@ -837,7 +881,6 @@ export default function Submit() {
           <FormSection title={`Gasoil — ${settings.gasoil_pv} F/L`} style={{ marginTop: 'var(--sp-4)' }}>
             <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
               <Field label="Litres" style={{ flex: '1 1 140px' }} hint={gasCompteur != null ? `Compteurs : ${gasCompteur.toLocaleString('fr-FR')} L` : undefined}><Input type="text" inputMode="decimal" numeric {...numProps('gas_litres')} /></Field>
-              <Field label="Prix / L" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric {...numProps('gas_pu')} /></Field>
               <Field label="Vente à bon" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric {...numProps('gas_bon')} /></Field>
             </div>
             <Field label="Vente en espèces" style={{ marginTop: 'var(--sp-3)' }}><Input type="text" inputMode="decimal" numeric {...numProps('gas_espece')} /></Field>
@@ -863,6 +906,7 @@ export default function Submit() {
         {!isPompiste && <Panel>
           <StepHead n="4" title="Gaz &amp; autres ventes" />
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Bouteilles vendues aujourd'hui, et recettes en espèces des autres pôles.</p>
+          {showVenduLubGaz && (<>
           <FormSection title="Bouteilles de gaz vendues">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
               {GAZ.map(([k, lab]) => (
@@ -911,10 +955,15 @@ export default function Submit() {
               })}
             </div>
           </FormSection>
+          </>)}
           <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', marginTop: 'var(--sp-4)' }}>
-            <Field label="Espèces gaz" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('gaz_espece')} /></Field>
+            {showVenduLubGaz
+              ? <Field label="Espèces gaz" style={{ flex: '1 1 160px' }} hint="Calculé depuis les bouteilles vendues ci-dessus"><Input type="text" value={f.gaz_espece || '0'} disabled /></Field>
+              : <Field label="Espèces gaz" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('gaz_espece')} /></Field>}
             <Field label="Espèces supérette" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('superette_espece')} /></Field>
-            <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('lubrifiant_espece')} /></Field>
+            {showVenduLubGaz
+              ? <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }} hint="Calculé depuis les lubrifiants vendus ci-dessus"><Input type="text" value={f.lubrifiant_espece || '0'} disabled /></Field>
+              : <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('lubrifiant_espece')} /></Field>}
           </div>
           <Field label="Total des bons en cours (cumul)" style={{ marginTop: 'var(--sp-3)' }}><Input type="text" inputMode="decimal" numeric {...numProps('total_bon_cumul')} /></Field>
         </Panel>}
@@ -977,14 +1026,16 @@ export default function Submit() {
                 <div key={i} style={{ padding: 'var(--sp-4)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
                   <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
                     <Field label="Type" style={{ flex: '1 1 200px' }}>
-                      <Select value={e.categorie || 'SBEE'} onChange={ev => upd(setExpenses, i, 'categorie', ev.target.value)} style={{ width: '100%' }}
-                        options={[{ value: 'SBEE', label: 'SBEE' }, { value: 'SUPERETTE', label: 'SUPERETTE' }, { value: 'CARBURANT', label: 'Carburant / déplacement (propriétaire)' }, { value: 'AUTRE', label: 'AUTRE' }]} />
+                      <Select value={e.categorie || expCats[0]?.key || 'SBEE'} onChange={ev => upd(setExpenses, i, 'categorie', ev.target.value)} style={{ width: '100%' }}
+                        options={expCats.map(c => ({ value: c.key, label: c.label }))} />
                     </Field>
                     <Field label="Montant" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric value={e.montant || ''} onChange={ev => upd(setExpenses, i, 'montant', ev.target.value)} /></Field>
                   </div>
                   <Field label="Motif"><Input value={e.motif || ''} onChange={ev => upd(setExpenses, i, 'motif', ev.target.value)} placeholder="ex : recharge électricité" /></Field>
-                  {(e.categorie || '').toUpperCase() === 'CARBURANT' ? (
-                    <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Prélèvement carburant du propriétaire : <b>charge non-cash</b> (aucun paiement en espèces). Pas de reçu requis ; remonte chaque mois au Point financier sous « Carburant / déplacement (auto) » et n'est pas décompté du cash à verser.</p>
+                  {nonCashCat(e.categorie) ? (
+                    e.categorie === 'CARBURANT'
+                      ? <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Prélèvement carburant du propriétaire : <b>charge non-cash</b> (aucun paiement en espèces). Pas de reçu requis ; remonte chaque mois au Point financier sous « Carburant / déplacement (auto) » et n'est pas décompté du cash à verser.</p>
+                      : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}><b>Charge non-cash</b> (aucun paiement en espèces) — pas de justificatif requis.</p>
                   ) : (<>
                     <Field label="Photo du justificatif (recommandée)">
                       <Input type="file" accept="image/*" disabled={!!expPhotoBusy[i]}
@@ -997,7 +1048,7 @@ export default function Submit() {
                 </div>
               ))}
             </div>
-            <Button onClick={() => setExpenses(p => [...p, { categorie: 'SBEE', montant: '' }])} style={{ marginTop: 'var(--sp-4)' }}>+ Ajouter une dépense</Button>
+            <Button onClick={() => setExpenses(p => [...p, { categorie: expCats[0]?.key || 'SBEE', montant: '' }])} style={{ marginTop: 'var(--sp-4)' }}>+ Ajouter une dépense</Button>
           </>}
         </Panel>
 

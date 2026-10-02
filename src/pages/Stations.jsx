@@ -28,6 +28,8 @@ export default function Stations() {
   const [permissions, setPermissions] = useState([])
   const [rolePerms, setRolePerms] = useState([])
   const [profileStations, setProfileStations] = useState({})   // {profileId: [stationId,...]}
+  const [expenseCats, setExpenseCats] = useState([])
+  const [newExpCat, setNewExpCat] = useState({ key: '', label: '', non_cash: false })
   const [selectedRole, setSelectedRole] = useState(null)
   const [newRole, setNewRole] = useState({ key: '', label: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
@@ -44,7 +46,7 @@ export default function Stations() {
   const [tab, setTab] = useState(() => TABS[0]?.value || 'stations')
 
   async function load() {
-    const [s, u, st, r, p, rp, ps] = await Promise.all([
+    const [s, u, st, r, p, rp, ps, ec] = await Promise.all([
       supabase.from('stations').select('*').order('id'),
       supabase.from('profiles').select('id, full_name, role, station_id, approved').order('full_name'),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
@@ -52,11 +54,13 @@ export default function Stations() {
       supabase.from('permissions').select('*').order('category').order('label'),
       supabase.from('role_permissions').select('*'),
       supabase.from('profile_stations').select('*'),
+      supabase.from('expense_categories').select('*').order('ordre'),
     ])
     setStations(s.data || []); setUsers(u.data || []); setSettings(st.data || null)
     setRoles(r.data || []); setPermissions(p.data || []); setRolePerms(rp.data || [])
     const psm = {}; for (const x of (ps.data || [])) (psm[x.profile_id] = psm[x.profile_id] || []).push(x.station_id)
     setProfileStations(psm)
+    setExpenseCats(ec.data || [])
     setSelectedRole(prev => prev || (r.data || [])[0]?.key || null)
   }
   useEffect(() => { load() }, [])
@@ -71,6 +75,7 @@ export default function Stations() {
       seuil_gaz: num(s.seuil_gaz), seuil_lubrifiant: num(s.seuil_lubrifiant),
       capacite_essence: num(s.capacite_essence) ?? 20000, capacite_gasoil: num(s.capacite_gasoil) ?? 20000,
       nombre_machines: Math.min(10, Math.max(1, num(s.nombre_machines) ?? 4)),
+      suivi_lub_gaz: s.suivi_lub_gaz || 'les_deux',
     }).eq('id', s.id)
     error ? fail(error) : flash('Station enregistrée')
   }
@@ -159,8 +164,25 @@ export default function Stations() {
       pompe_inactive_apres: num(settings.pompe_inactive_apres) ?? 5,
       jours_correction_gerant: Math.max(0, num(settings.jours_correction_gerant) ?? 2),
       deconnexion_auto_heures: Math.max(1, num(settings.deconnexion_auto_heures) ?? 24),
+      photo_obligatoire: !!settings.photo_obligatoire,
     }).eq('id', 1)
     error ? fail(error) : flash('Prix enregistrés')
+  }
+
+  async function addExpCat(e) {
+    e.preventDefault()
+    const key = (newExpCat.key || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+    if (!key || !newExpCat.label.trim()) { setErr('Renseignez une clé et un libellé.'); return }
+    const { error } = await supabase.from('expense_categories').insert({ key, label: newExpCat.label.trim(), non_cash: !!newExpCat.non_cash, is_system: false })
+    if (error) fail(error); else { setNewExpCat({ key: '', label: '', non_cash: false }); load(); flash('Catégorie de dépense créée') }
+  }
+  async function toggleExpCatActif(c, actif) {
+    const { error } = await supabase.from('expense_categories').update({ actif }).eq('id', c.id)
+    error ? fail(error) : load()
+  }
+  async function deleteExpCat(c) {
+    const { error } = await supabase.from('expense_categories').delete().eq('id', c.id)
+    error ? fail(error) : (load(), flash('Catégorie supprimée'))
   }
 
   const upS = (id, k, v) => setStations(p => p.map(s => s.id === id ? { ...s, [k]: v } : s))
@@ -235,6 +257,10 @@ export default function Stations() {
                   <Input type="number" numeric min={1} max={10} value={s.nombre_machines ?? 4} onChange={e => upS(s.id, 'nombre_machines', e.target.value)} />
                 </Field>
               </div>
+              <Field label="Gaz &amp; lubrifiant — ce que le gérant déclare" hint="Stock (matin, anti-coulage) / Vendu (16h, commission réelle) / les deux (défaut)" style={{ maxWidth: 280 }}>
+                <Select value={s.suivi_lub_gaz || 'les_deux'} onChange={e => upS(s.id, 'suivi_lub_gaz', e.target.value)} style={{ width: '100%' }}
+                  options={[{ value: 'les_deux', label: 'Stock + Vendu (défaut)' }, { value: 'stock', label: 'Stock seul' }, { value: 'vendu', label: 'Vendu seul' }]} />
+              </Field>
               <Button tone="primary" onClick={() => saveStation(s)} style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>
             </div>
           ))}
@@ -363,6 +389,12 @@ export default function Stations() {
               </p>
               <Field label="Essence + Gasoil" style={{ maxWidth: 160 }}><Input type="number" numeric value={settings.seuil_rupture ?? 250} onChange={e => setSettings({ ...settings, seuil_rupture: e.target.value })} /></Field>
             </FormSection>
+            <FormSection title="Photos (compteurs, dépenses, versements)">
+              <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
+                Par défaut, les photos sont recommandées mais n'empêchent jamais l'envoi d'une saisie (le gérant doit pouvoir envoyer ses chiffres même si la prise de photo échoue sur son téléphone). Active cette option pour les rendre obligatoires : la saisie sera bloquée tant que la photo manque.
+              </p>
+              <Checkbox label="Photo obligatoire (bloquante à l'envoi)" checked={!!settings.photo_obligatoire} onChange={v => setSettings({ ...settings, photo_obligatoire: v })} />
+            </FormSection>
             <FormSection title="Financement des commandes">
               <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
                 Quand les bons seront virés directement en banque, désactive cette option : le formulaire de commande n'affichera plus que le chèque comme mode de paiement (carburant + gaz/lubrifiant).
@@ -394,6 +426,37 @@ export default function Stations() {
               </Field>
             </FormSection>
             <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>Enregistrer les prix</Button>
+          </form>
+        </Panel>
+      )}
+
+      {tab === 'parametres' && (
+        <Panel title="Catégories de dépense" flush>
+          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+            Liste proposée au gérant dans Saisie du jour → « Dépenses en espèces ». Les catégories système (SBEE, SONEB, SUPERETTE, CARBURANT, AUTRE) ne peuvent pas être supprimées ; tu peux en créer d'autres ou désactiver celles dont tu n'as plus besoin.
+          </p>
+          <div style={{ margin: 'var(--sp-4) var(--gutter-panel) 0', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            {expenseCats.map(c => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-3)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)' }}>
+                <span style={{ flex: 1, font: '400 15px/1.3 var(--font-ui)', color: 'var(--text-body)' }}>
+                  {c.label}
+                  {c.is_system && <span style={{ marginLeft: 6, color: 'var(--text-muted)', font: '400 12px/1.25 var(--font-ui)' }}>(système)</span>}
+                  {c.non_cash && <span style={{ marginLeft: 6, color: 'var(--text-muted)', font: '400 12px/1.25 var(--font-ui)' }}>— non-cash</span>}
+                </span>
+                <Checkbox label="Actif" checked={c.actif} onChange={v => toggleExpCatActif(c, v)} />
+                {!c.is_system && <Button size="sm" tone="danger" onClick={() => deleteExpCat(c)}>Suppr.</Button>}
+              </div>
+            ))}
+          </div>
+          <form onSubmit={addExpCat} style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'end', padding: 'var(--gutter-panel)', marginTop: 'var(--sp-4)', borderTop: '1px solid var(--border-hairline)' }}>
+            <Field label="Nouvelle catégorie — clé" style={{ flex: '1 1 160px' }}>
+              <Input value={newExpCat.key} onChange={e => setNewExpCat({ ...newExpCat, key: e.target.value })} placeholder="ex : TELEPHONE" />
+            </Field>
+            <Field label="Libellé" style={{ flex: '1 1 200px' }}>
+              <Input value={newExpCat.label} onChange={e => setNewExpCat({ ...newExpCat, label: e.target.value })} placeholder="ex : Téléphone / internet" />
+            </Field>
+            <Checkbox label="Non-cash (pas de justificatif requis)" checked={newExpCat.non_cash} onChange={v => setNewExpCat({ ...newExpCat, non_cash: v })} />
+            <Button type="submit" tone="dark" size="sm">+ Créer</Button>
           </form>
         </Panel>
       )}

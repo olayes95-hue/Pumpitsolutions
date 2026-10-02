@@ -25,9 +25,13 @@ export function AuthProvider({ children }) {
   const [profileLoading, setProfileLoading] = useState(true)
   const [deconnexionHeures, setDeconnexionHeures] = useState(DECONNEXION_DEFAUT_HEURES)
 
-  async function loadProfile(userId) {
+  async function loadProfile(userId, { silent = false } = {}) {
     if (!userId) { setProfile(null); setPermissions(new Set()); setProfileLoading(false); return }
-    setProfileLoading(true)
+    // silent : utilisé pour un rafraîchissement de jeton (voir onAuthStateChange plus bas) —
+    // ne fait PAS repasser profileLoading à true, sinon App.jsx démonte tout l'arbre (y compris
+    // la page en cours, ex. Saisie du jour) le temps du calcul, et l'écran revient à son état
+    // par défaut au lieu de garder celui sur lequel l'utilisateur était.
+    if (!silent) setProfileLoading(true)
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
     setProfile(data || null)
     // L'admin n'a jamais de ligne dans role_permissions (son accès passe toujours par
@@ -39,7 +43,7 @@ export function AuthProvider({ children }) {
     } else {
       setPermissions(new Set())
     }
-    setProfileLoading(false)
+    if (!silent) setProfileLoading(false)
   }
 
   useEffect(() => {
@@ -56,8 +60,12 @@ export function AuthProvider({ children }) {
       setLoading(false)
     })
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
+      // TOKEN_REFRESHED/USER_UPDATED se déclenchent aussi au retour sur l'onglet (reprise du
+      // rafraîchissement automatique du jeton par le SDK après une mise en arrière-plan) —
+      // ce n'est pas une vraie connexion/déconnexion, donc silencieux (voir loadProfile).
+      const silent = event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED'
       setSession(s)
-      await loadProfile(s?.user?.id)
+      await loadProfile(s?.user?.id, { silent })
       if (event === 'SIGNED_IN') localStorage.setItem(SIGNIN_KEY, String(Date.now()))
       if (event === 'SIGNED_OUT') localStorage.removeItem(SIGNIN_KEY)
     })
