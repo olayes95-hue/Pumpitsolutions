@@ -99,12 +99,13 @@ left join profiles pr on pr.id = ph.changed_by;
 grant select on v_price_history to authenticated;
 alter view public.v_price_history set (security_invoker = on);
 
-insert into permissions (key, label, category) values
-  ('view_price_history', 'Historique des prix', 'Pilotage')
-on conflict (key) do nothing;
+insert into permissions (key, label, category)
+select 'view_price_history', 'Historique des prix', 'Pilotage'
+where not exists (select 1 from permissions where key = 'view_price_history');
 
-insert into role_permissions (role_key, permission_key) values
-  ('directeur', 'view_price_history')
-on conflict do nothing;
+insert into role_permissions (role_key, permission_key)
+select 'directeur', 'view_price_history'
+where exists (select 1 from roles where key = 'directeur')
+  and not exists (select 1 from role_permissions where role_key = 'directeur' and permission_key = 'view_price_history');
 
 commit;

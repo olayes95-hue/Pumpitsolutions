@@ -38,10 +38,22 @@ create table if not exists expense_categories (
   is_system boolean not null default false,
   actif boolean not null default true,
   ordre int not null default 100,
-  created_at timestamptz default now(),
-  unique (organisation_id, key)
+  created_at timestamptz default now()
 );
 
+-- Garanti explicitement par son nom (plutôt que "unique (...)" inline dans le create table) :
+-- si la table existait déjà sans cette contrainte (ex. tentative précédente interrompue avant
+-- d'arriver ici), le create table if not exists ci-dessus ne l'aurait pas ajoutée.
+do $$ begin
+  if not exists (
+    select 1 from pg_constraint where conrelid = 'expense_categories'::regclass and conname = 'expense_categories_org_key_key'
+  ) then
+    alter table expense_categories add constraint expense_categories_org_key_key unique (organisation_id, key);
+  end if;
+end $$;
+
+-- "where not exists" plutôt que "on conflict" : fonctionne même si la ligne précédente n'a pas
+-- pu créer la contrainte pour une raison imprévue (jamais d'erreur bloquante sur ce seed).
 insert into expense_categories (organisation_id, key, label, non_cash, is_system, ordre)
 select o.id, c.key, c.label, c.non_cash, true, c.ordre
 from organisations o
@@ -52,7 +64,9 @@ cross join (values
   ('CARBURANT', 'Carburant / déplacement (propriétaire)', true, 40),
   ('AUTRE', 'AUTRE', false, 50)
 ) as c(key, label, non_cash, ordre)
-on conflict (organisation_id, key) do nothing;
+where not exists (
+  select 1 from expense_categories ec where ec.organisation_id = o.id and ec.key = c.key
+);
 
 create index if not exists idx_expense_categories_org on expense_categories(organisation_id);
 
