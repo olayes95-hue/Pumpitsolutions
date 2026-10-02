@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from './supabase'
+import { inclut } from './formules'
 
 const AuthCtx = createContext(null)
 export const useAuth = () => useContext(AuthCtx)
@@ -13,6 +14,8 @@ export function AuthProvider({ children }) {
   const [permissions, setPermissions] = useState(new Set())
   const [roleLabel, setRoleLabel] = useState('')
   const [organisation, setOrganisation] = useState(null)
+  const [organisationReady, setOrganisationReady] = useState(false)
+  const [orgVersion, setOrgVersion] = useState(0)
   const [loading, setLoading] = useState(true)
   // Distinct de `loading` (qui ne couvre que le tout premier chargement de la session) :
   // à chaque connexion/changement de session, onAuthStateChange met `session` à jour
@@ -72,10 +75,11 @@ export function AuthProvider({ children }) {
   // Organisation (client) du compte. Le cloisonnement est fait par la base (RLS) :
   // cette lecture ne sert qu'à l'affichage (nom du client, code d'invitation).
   useEffect(() => {
-    if (!profile?.organisation_id) { setOrganisation(null); return }
+    if (!profile?.organisation_id) { setOrganisation(null); setOrganisationReady(true); return }
+    setOrganisationReady(false)
     supabase.from('organisations').select('*').eq('id', profile.organisation_id).maybeSingle()
-      .then(({ data }) => setOrganisation(data || null))
-  }, [profile?.organisation_id])
+      .then(({ data }) => { setOrganisation(data || null); setOrganisationReady(true) })
+  }, [profile?.organisation_id, orgVersion])
 
   // Seuil de déconnexion auto, réglable par l'admin (Stations & équipe) — utile sur les
   // téléphones partagés en station, pour ne pas rester connecté indéfiniment.
@@ -115,7 +119,17 @@ export function AuthProvider({ children }) {
     // (celui qui gère tous les clients). Voir supabase/migration_v96_multiclient.sql.
     organisation,
     isPlatformAdmin: !!profile?.is_platform_admin,
+    // Abonnement : formule du client, fonctions qu'elle inclut, suspension.
+    // Un client suspendu ne reçoit plus aucune donnée de la base (voir current_org_id()) ;
+    // l'administrateur de la plateforme n'est jamais bloqué.
+    formule: organisation?.formule,
+    has: (fonction) => inclut(organisation?.formule, fonction),
+    suspendu: organisation?.statut === 'suspendu' && !profile?.is_platform_admin,
+    // Tant que l'organisation n'est pas connue, on ne sait ni la formule ni l'état de
+    // l'abonnement : l'application attend avant d'afficher quoi que ce soit.
+    organisationReady,
     refreshProfile: () => loadProfile(session?.user?.id),
+    refreshOrganisation: () => setOrgVersion(v => v + 1),
     // Raccourci en dur, indépendant de la matrice — ne peut jamais être cassé par une
     // mauvaise manipulation dans l'écran Rôles (voir garde-fous du RBAC).
     can: (key) => profile?.role === 'admin' || permissions.has(key),

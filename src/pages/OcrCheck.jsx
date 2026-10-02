@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { PhotoImage } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate } from '../lib/format'
@@ -30,7 +31,6 @@ export default function OcrCheck() {
     setRows(data || [])
   }
   useEffect(() => { load() }, [stationId])
-  const url = (p) => supabase.storage.from(BORDEREAUX_BUCKET).getPublicUrl(p).data.publicUrl
 
   async function analyser(dep) {
     setErr(''); setBusy(dep.id)
@@ -67,9 +67,7 @@ export default function OcrCheck() {
 
   const columns = [
     { key: 'photo', header: 'Photo', render: r => (
-      <a href={url(r.photo_path)} target="_blank" rel="noreferrer">
-        <img src={url(r.photo_path)} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-default)', display: 'block' }} />
-      </a>
+      <PhotoImage path={r.photo_path} size={64} />
     ) },
     { key: 'date', header: 'Date', render: r => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

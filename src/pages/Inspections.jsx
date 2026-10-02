@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { PhotoImage } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { frDate, today } from '../lib/format'
@@ -59,7 +60,6 @@ export default function Inspections() {
     setList((await supabase.from('inspections').select('*').eq('station_id', stationId).order('date_controle', { ascending: false })).data || [])
   }
   useEffect(() => { load() }, [stationId])
-  const photoUrl = (p) => supabase.storage.from(BORDEREAUX_BUCKET).getPublicUrl(p).data.publicUrl
 
   function togglePompe(key, checked) {
     setPompesSel(p => {
@@ -308,9 +308,7 @@ export default function Inspections() {
                     </div>
                   )}
                   {c.fiche_photo_path && (
-                    <a href={photoUrl(c.fiche_photo_path)} target="_blank" rel="noreferrer">
-                      <img src={photoUrl(c.fiche_photo_path)} alt="fiche" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-default)', marginTop: 'var(--sp-4)', display: 'block' }} />
-                    </a>
+                    <PhotoImage path={c.fiche_photo_path} alt="Fiche d'intervention" size={96} style={{ marginTop: 'var(--sp-4)' }} />
                   )}
                   <div style={{ marginTop: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-2)' }}>
                     {isAdmin && c.a_adresser_direction && !c.traite && (

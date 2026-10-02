@@ -1,0 +1,70 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/auth.jsx'
+import { fcfa } from '../lib/format'
+import { etatClient, ouvrirClient, il_y_a } from './outils'
+import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
+import { Button } from '../ds/pumpit/components/core/Button.jsx'
+import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
+import { MetricTile } from '../ds/pumpit/components/data/MetricTile.jsx'
+import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
+
+// Supervision : l'état de chaque client en une ligne, sans avoir à l'ouvrir.
+// Les chiffres viennent de la fonction bo_supervision(), qui ne renvoie que des compteurs.
+export default function Overview() {
+  const { organisation } = useAuth()
+  const [rows, setRows] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function load() {
+    const { data, error } = await supabase.rpc('bo_supervision')
+    if (error) { setErr(error.message); setRows([]); return }
+    setRows(data || [])
+  }
+  useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t) }, [])
+
+  async function ouvrir(o) {
+    setBusy(true)
+    try { await ouvrirClient(o.id) } catch (e) { setErr(e.message || String(e)); setBusy(false) }
+  }
+
+  const liste = rows || []
+  const suspendus = liste.filter(o => o.statut === 'suspendu').length
+  const impaye = liste.reduce((s, o) => s + Number(o.montant_impaye || 0), 0)
+  const demandes = liste.reduce((s, o) => s + Number(o.demandes_ouvertes || 0), 0)
+  const stations = liste.reduce((s, o) => s + Number(o.nb_stations || 0), 0)
+  const aJour = liste.reduce((s, o) => s + Number(o.stations_a_jour || 0), 0)
+
+  const cols = [
+    { key: 'nom', header: 'Client', render: o => <span><b style={{ fontWeight: 600 }}>{o.nom}</b><span style={{ color: 'var(--text-muted)' }}> · {o.formule}</span></span> },
+    { key: 'etat', header: 'État', render: o => { const e = etatClient(o); return <Badge tone={e.tone}>{e.label}</Badge> } },
+    { key: 'saisies', header: 'Saisies du jour', render: o => Number(o.nb_stations) ? `${o.stations_a_jour} sur ${o.nb_stations}` : 'Aucune station' },
+    { key: 'derniere_activite', header: 'Dernière saisie', optional: '1', muted: true, render: o => il_y_a(o.derniere_activite) },
+    { key: 'comptes_en_attente', header: 'À valider', optional: '2', numeric: true, align: 'right', render: o => Number(o.comptes_en_attente) ? `${o.comptes_en_attente} compte${Number(o.comptes_en_attente) > 1 ? 's' : ''}` : '—' },
+    { key: 'montant_impaye', header: 'À régler', numeric: true, align: 'right', optional: '1', render: o => Number(o.montant_impaye) ? fcfa(o.montant_impaye) : '—' },
+    { key: 'demandes_ouvertes', header: 'Demandes', numeric: true, align: 'right', optional: '1', render: o => Number(o.demandes_ouvertes) ? <Link to="/admin/assistance">{o.demandes_ouvertes}</Link> : '—' },
+    { key: 'action', header: '', align: 'right', render: o => o.id === organisation?.id
+      ? <Badge tone="info">Ouvert</Badge>
+      : <Button size="sm" tone="dark" disabled={busy} onClick={() => ouvrir(o)}>Ouvrir</Button> },
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
+      {err && <AlertBanner tone="alarm" title="Supervision indisponible" onDismiss={() => setErr('')}>{err}</AlertBanner>}
+      <div className="pi-bo-kpis">
+        <MetricTile label="Clients" value={liste.length} sub={suspendus ? `dont ${suspendus} suspendu${suspendus > 1 ? 's' : ''}` : 'tous actifs'} status={suspendus ? 'alarm' : undefined} />
+        <MetricTile label="Stations à jour aujourd'hui" value={`${aJour} / ${stations}`} sub="au moins une saisie envoyée" />
+        <MetricTile label="Factures à régler" value={fcfa(impaye)} status={impaye > 0 ? 'warn' : undefined} />
+        <MetricTile label="Demandes d'assistance" value={demandes} sub="non résolues" status={demandes > 0 ? 'warn' : undefined} />
+      </div>
+      <Panel title="Clients" meta={rows ? `${liste.length}` : 'chargement…'} flush
+        actions={<Button size="sm" icon="rotate-ccw" onClick={load}>Actualiser</Button>}>
+        {liste.length ? <DataTable columns={cols} rows={liste} zebra={false} rowStatus={o => etatClient(o).rang} />
+          : <PanelEmpty icon="users" label={rows ? 'Aucun client.' : 'Chargement…'} />}
+      </Panel>
+    </div>
+  )
+}

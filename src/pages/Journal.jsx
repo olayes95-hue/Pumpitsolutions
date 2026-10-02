@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { filtrerAlertes } from '../lib/formules'
+import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate, today, lastDayOfMonth } from '../lib/format'
 import { ALERT_TONES } from '../lib/tones'
@@ -40,6 +42,7 @@ export function pumpStatus(rows, key, n) {
 
 export default function Journal() {
   const { stationId, current } = useStation()
+  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
   const nav = useNavigate()
   const [moments, setMoments] = useState(new Set())
   const [forecast, setForecast] = useState(null)
@@ -120,7 +123,7 @@ export default function Journal() {
     // v_alerts n'a aucune notion de "traité" (vue calculée) — sans ce filtre, une alerte
     // marquée traitée sur la page Alertes continuait d'apparaître ici indéfiniment.
     const dismissedKeys = new Set((dis.data || []).map(x => x.report_date + '|' + x.type))
-    const activeAlerts = (al.data || []).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
+    const activeAlerts = filtrerAlertes(al.data, formule).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
     setAlerts(activeAlerts.sort((a, b) => (a.gravite === 'haute' ? -1 : 1) - (b.gravite === 'haute' ? -1 : 1)))
     setPendingCount(po.count || 0)
     setPompeInactiveApres(N(st.data?.pompe_inactive_apres) || 5)

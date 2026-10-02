@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { filtrerAlertes } from '../lib/formules'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { frDate } from '../lib/format'
@@ -20,6 +21,7 @@ const key = (a) => `${a.report_date}|${a.type}`
 export default function AlertsPage() {
   const { session, isAdmin } = useAuth()
   const { stationId } = useStation()
+  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
   const nav = useNavigate()
   const [alerts, setAlerts] = useState([])
   const [dismissed, setDismissed] = useState(new Set())
@@ -35,7 +37,7 @@ export default function AlertsPage() {
     if (!stationId) return
     setLoading(true)
     const { data } = await supabase.from('v_alerts').select('*').eq('station_id', stationId).order('report_date', { ascending: false })
-    setAlerts(data || [])
+    setAlerts(filtrerAlertes(data, formule))
     const { data: d } = await supabase.from('alert_dismissals').select('report_date,type').eq('station_id', stationId)
     setDismissed(new Set((d || []).map(x => `${x.report_date}|${x.type}`)))
     setLoading(false)

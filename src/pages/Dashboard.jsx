@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { filtrerAlertes } from '../lib/formules'
+import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate, lastDayOfMonth } from '../lib/format'
 import { ALERT_TONES } from '../lib/tones'
@@ -38,6 +40,7 @@ function periodBounds(year, month) {
 
 export default function Dashboard() {
   const { stationId } = useStation()
+  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
   const nav = useNavigate()
   const [months, setMonths] = useState([])   // v_ventes_mensuelles (agrégé, rapide)
   const [alerts, setAlerts] = useState([])   // v_alerts des 60 derniers jours (station active), triées par gravité
@@ -129,7 +132,7 @@ export default function Dashboard() {
       supabase.from('v_stock_forecast').select('*').eq('station_id', stationId).maybeSingle(),
       supabase.from('v_reorder').select('*').eq('station_id', stationId),
     ])
-    setStock(ls.data || null); setForecast(sf.data || null); setReorder(ro.data || [])
+    setStock(ls.data || null); setForecast(sf.data || null); setReorder(has('prevision') ? (ro.data || []) : [])
     setRefreshedAt(new Date().toLocaleTimeString('fr-FR'))
   }
   useEffect(() => { if (!stationId) return
@@ -153,7 +156,7 @@ export default function Dashboard() {
       // v_alerts n'a aucune notion de "traité" (vue calculée) — sans ce filtre, une alerte
       // marquée traitée sur la page Alertes continuait d'apparaître ici indéfiniment.
       const dismissedKeys = new Set((dis.data || []).map(x => x.report_date + '|' + x.type))
-      const activeAlerts = (al.data || []).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
+      const activeAlerts = filtrerAlertes(al.data, formule).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
       setAlerts(activeAlerts.sort((a, b) => (a.gravite === 'haute' ? -1 : 1) - (b.gravite === 'haute' ? -1 : 1)))
     })
   }, [stationId])

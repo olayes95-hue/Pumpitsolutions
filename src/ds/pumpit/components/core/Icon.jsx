@@ -7,6 +7,7 @@ import {
   Circle, TrendingUp, TrendingDown, Minus, OctagonAlert, TriangleAlert, Info, Check,
   Wrench, Download, Plus, Image, Clock, Moon, ClipboardList, Fuel, Droplet,
   Sun, Gauge, Wallet, Settings, Inbox,
+  MessageCircle, Phone, Send, ArrowLeft, Printer, Users, Paperclip, LifeBuoy, Receipt, ExternalLink, Activity,
 } from 'lucide-react';
 
 // Registre explicite : n'importer que les icônes utilisées garde le bundle léger.
@@ -25,6 +26,8 @@ const REGISTRY = {
   wrench: Wrench, download: Download, plus: Plus, image: Image, clock: Clock, moon: Moon,
   'clipboard-list': ClipboardList, fuel: Fuel, droplet: Droplet,
   sun: Sun, gauge: Gauge, wallet: Wallet, settings: Settings, inbox: Inbox,
+  'message-circle': MessageCircle, phone: Phone, send: Send, 'arrow-left': ArrowLeft, printer: Printer, users: Users,
+  paperclip: Paperclip, 'life-buoy': LifeBuoy, receipt: Receipt, 'external-link': ExternalLink, activity: Activity,
 };
 
 // Charte : bibliothèque Lucide, trait de 2 px, extrémités arrondies, une seule couleur par icône.

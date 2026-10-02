@@ -1,5 +1,6 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
+import { supabase } from './lib/supabase'
 import { useAuth } from './lib/auth.jsx'
 import { StationProvider, useStation } from './lib/station.jsx'
 import Login from './pages/Login.jsx'
@@ -29,23 +30,25 @@ const Stock = lazy(() => import('./pages/Stock.jsx'))
 const Aide = lazy(() => import('./pages/Aide.jsx'))
 const Journal = lazy(() => import('./pages/Journal.jsx'))
 const Entreprise = lazy(() => import('./pages/Entreprise.jsx'))
+const Assistance = lazy(() => import('./pages/Assistance.jsx'))
+const AdminApp = lazy(() => import('./admin/AdminApp.jsx'))
 
 // Rôles historiques (gérant, pompiste, vendeuse, admin) : accès opérationnel d'office.
 // Tout autre rôle (directeur, comptable, rôle créé depuis l'écran Rôles) ne l'obtient
 // que par la permission manage_orders.
 function useAccess() {
-  const { profile, isAdmin, isPompiste, isVendeuse, isPlatformAdmin, can } = useAuth()
+  const { profile, isAdmin, isPompiste, isVendeuse, isPlatformAdmin, can, has } = useAuth()
   const op = isAdmin || profile?.role === 'gerant' || isPompiste || isVendeuse || can('manage_orders')
-  // Page Entreprise : code d'invitation pour l'administrateur d'un client, gestion des
-  // clients pour l'administrateur de la plateforme.
+  // Page Entreprise : code d'invitation, abonnement et factures, pour l'administrateur du
+  // client. La gestion des clients est dans le back-office (/admin).
   const org = isAdmin || isPlatformAdmin
-  return { op, can, isVendeuse, org, isPlatformAdmin }
+  return { op, can, isVendeuse, org, isPlatformAdmin, has }
 }
 
 // Les cinq espaces de l'application. Chaque entrée n'apparaît que si le profil y a droit ;
 // un espace sans entrée disparaît de la navigation.
 function useSpaces() {
-  const { op, can, isVendeuse, org, isPlatformAdmin } = useAccess()
+  const { op, can, isVendeuse, org, isPlatformAdmin, has } = useAccess()
   const spaces = [
     { key: 'jour', label: "Aujourd'hui", icon: 'sun', items: [
       op && { to: '/saisie', icon: 'file-pen-line', label: isVendeuse ? 'Saisie supérette' : 'Saisie du jour' },
@@ -64,19 +67,22 @@ function useSpaces() {
       can('manage_suppliers') && { to: '/fournisseurs', icon: 'factory', label: 'Fournisseurs' },
     ] },
     { key: 'finance', label: 'Finance', icon: 'wallet', items: [
-      can('view_finance') && { to: '/finance', icon: 'chart-column', label: 'Point financier' },
-      can('view_bank_recon') && { to: '/rapprochement', icon: 'landmark', label: 'Rapprochement' },
-      can('view_ocr_check') && { to: '/verif-photos', icon: 'camera', label: 'Bordereaux' },
+      can('view_finance') && has('finance') && { to: '/finance', icon: 'chart-column', label: 'Point financier' },
+      can('view_bank_recon') && has('finance') && { to: '/rapprochement', icon: 'landmark', label: 'Rapprochement' },
+      can('view_ocr_check') && has('bordereaux') && { to: '/verif-photos', icon: 'camera', label: 'Bordereaux' },
     ] },
     { key: 'reglages', label: 'Réglages', icon: 'settings', items: [
       (can('manage_stations_config') || can('manage_team')) && { to: '/stations', icon: 'building-2', label: 'Stations et équipe' },
-      org && { to: '/entreprise', icon: 'landmark', label: isPlatformAdmin ? 'Clients' : 'Entreprise' },
-      can('view_audit_log') && { to: '/audit', icon: 'search', label: "Journal d'audit" },
+      org && { to: '/entreprise', icon: 'landmark', label: 'Entreprise' },
+      can('view_audit_log') && has('audit') && { to: '/audit', icon: 'search', label: "Journal d'audit" },
       { to: '/aide', icon: 'circle-question-mark', label: 'Aide' },
+      { to: '/assistance', icon: 'life-buoy', label: 'Assistance' },
     ] },
   ].map(s => ({ ...s, items: s.items.filter(Boolean) })).filter(s => s.items.length)
-  // Un espace Réglages réduit à la seule page Aide s'appelle simplement « Aide ».
-  return spaces.map(s => (s.key === 'reglages' && s.items.length === 1) ? { ...s, label: 'Aide', icon: 'circle-question-mark' } : s)
+  // Sans page de réglage (gérant, pompiste, vendeuse), l'espace ne contient que l'aide et
+  // l'assistance : il s'appelle alors simplement « Aide ».
+  const aideSeule = (s) => s.items.every(i => i.to === '/aide' || i.to === '/assistance')
+  return spaces.map(s => (s.key === 'reglages' && aideSeule(s)) ? { ...s, label: 'Aide', icon: 'life-buoy' } : s)
 }
 
 function StationPicker() {
@@ -89,14 +95,29 @@ function StationPicker() {
 }
 
 function Shell({ children }) {
-  const { profile, roleLabel, organisation, signOut } = useAuth()
+  const { profile, roleLabel, organisation, isPlatformAdmin, signOut } = useAuth()
   const nav = useNavigate()
+  const [reponses, setReponses] = useState(0)
   const { pathname } = useLocation()
   const spaces = useSpaces()
   const space = spaces.find(s => s.items.some(i => pathname.startsWith(i.to))) || spaces[0]
   const page = space?.items.find(i => pathname.startsWith(i.to)) || space?.items[0]
   const initial = (profile?.full_name || '?').slice(0, 1).toUpperCase()
   const logout = () => signOut().then(() => nav('/'))
+
+  // Sur téléphone, la rangée de sous-pages défile : on amène la page courante à l'écran.
+  useEffect(() => {
+    document.querySelector('.pi-subnav a.active')?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [pathname])
+
+  // Pastille « réponse de l'assistance non lue ».
+  useEffect(() => {
+    const compter = () => supabase.from('assistance_demandes').select('id', { count: 'exact', head: true }).eq('non_lu_client', true)
+      .then(({ count }) => setReponses(count || 0))
+    compter()
+    const t = setInterval(compter, 60000)
+    return () => clearInterval(t)
+  }, [pathname])
 
   return (
     <Viewport>
@@ -108,10 +129,18 @@ function Shell({ children }) {
               <div key={s.key}>
                 <div className="pi-side-group">{s.label}</div>
                 {s.items.map(it => (
-                  <NavLink key={it.to} to={it.to}><Icon name={it.icon} size={18} />{it.label}</NavLink>
+                  <NavLink key={it.to} to={it.to}><Icon name={it.icon} size={18} />{it.label}
+                    {it.to === '/assistance' && reponses > 0 && <span className="pi-count">{reponses}</span>}
+                  </NavLink>
                 ))}
               </div>
             ))}
+            {isPlatformAdmin && (
+              <div>
+                <div className="pi-side-group">Plateforme</div>
+                <Link to="/admin"><Icon name="activity" size={18} />Back-office</Link>
+              </div>
+            )}
           </nav>
           <div className="pi-side-user">
             <span className="pi-avatar" aria-hidden="true">{initial}</span>
@@ -127,6 +156,7 @@ function Shell({ children }) {
           <div className="pi-mobile-brand">
             <img src="/brand/pumpit-logo-inverse.png" alt="PumpIT" />
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {isPlatformAdmin && <Link to="/admin" className="pi-ghost-dark" title="Back-office" aria-label="Back-office"><Icon name="activity" size={18} /></Link>}
               <span className="pi-avatar" aria-hidden="true" style={{ width: 30, height: 30, fontSize: 13 }}>{initial}</span>
               <button type="button" className="pi-ghost-dark" title="Se déconnecter" aria-label="Se déconnecter" onClick={logout}><Icon name="log-out" size={18} /></button>
             </span>
@@ -155,6 +185,7 @@ function Shell({ children }) {
             <Link key={s.key} to={s.items[0].to} className={s.key === space?.key ? 'active' : undefined}
               aria-current={s.key === space?.key ? 'page' : undefined}>
               <Icon name={s.icon} size={22} />{s.label}
+              {s.key === 'reglages' && reponses > 0 && <span className="pi-dot" />}
             </Link>
           ))}
         </nav>
@@ -181,19 +212,43 @@ function PendingApproval() {
   )
 }
 
+// Abonnement suspendu : la base ne renvoie plus aucune donnée à ce client. On l'explique
+// clairement plutôt que d'afficher une application vide. L'administrateur du client garde
+// l'accès à ses factures.
+function Suspended() {
+  const { organisation, isAdmin, signOut } = useAuth()
+  return (
+    <div className="center" style={{ flexDirection: 'column', gap: 'var(--sp-5)', textAlign: 'center', padding: 'var(--sp-6)' }}>
+      <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 40 }} />
+      <h2 style={{ fontSize: 24 }}>Accès suspendu</h2>
+      <p style={{ font: '400 15px/1.55 var(--font-ui)', color: 'var(--text-secondary)', maxWidth: 460, margin: 0 }}>
+        L'abonnement de {organisation?.nom || 'votre entreprise'} est suspendu. Vos données sont conservées et l'accès revient dès le règlement.
+        {isAdmin ? ' Vos factures sont ci-dessous.' : ' Contactez votre administrateur.'}
+      </p>
+      <div style={{ width: '100%', maxWidth: 720, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
+        <Suspense fallback={null}>
+          {isAdmin && <Entreprise facturesSeules />}
+          <Assistance />
+        </Suspense>
+      </div>
+      <Button tone="outline" onClick={signOut}>Se déconnecter</Button>
+    </div>
+  )
+}
+
 function Loading() {
   return <div className="center" style={{ minHeight: '50dvh' }}>Chargement…</div>
 }
 
 function AppRoutes() {
-  const { op, can, isVendeuse, org } = useAccess()
+  const { op, can, isVendeuse, org, has } = useAccess()
   // Première page accessible, dans l'ordre Aujourd'hui > Stock > Pilotage > Finance :
   // sert de destination à toute route interdite au profil courant.
   function home() {
     if (op) return isVendeuse ? '/stock' : '/saisie'
     if (can('validate_orders')) return '/commandes'
     if (can('view_dashboard')) return '/tableau'
-    if (can('view_finance')) return '/finance'
+    if (can('view_finance') && has('finance')) return '/finance'
     if (can('view_history')) return '/historique'
     return '/aide'
   }
@@ -214,13 +269,14 @@ function AppRoutes() {
           <Route path="/commandes" element={guard(op || can('validate_orders'), <Orders />)} />
           <Route path="/produits" element={guard(can('manage_products'), <Products />)} />
           <Route path="/fournisseurs" element={guard(can('manage_suppliers'), <Suppliers />)} />
-          <Route path="/finance" element={guard(can('view_finance'), <Finance />)} />
-          <Route path="/rapprochement" element={guard(can('view_bank_recon'), <BankRecon />)} />
-          <Route path="/verif-photos" element={guard(can('view_ocr_check'), <OcrCheck />)} />
+          <Route path="/finance" element={guard(can('view_finance') && has('finance'), <Finance />)} />
+          <Route path="/rapprochement" element={guard(can('view_bank_recon') && has('finance'), <BankRecon />)} />
+          <Route path="/verif-photos" element={guard(can('view_ocr_check') && has('bordereaux'), <OcrCheck />)} />
           <Route path="/stations" element={guard(can('manage_stations_config') || can('manage_team'), <Stations />)} />
           <Route path="/entreprise" element={guard(org, <Entreprise />)} />
-          <Route path="/audit" element={guard(can('view_audit_log'), <AuditLog />)} />
+          <Route path="/audit" element={guard(can('view_audit_log') && has('audit'), <AuditLog />)} />
           <Route path="/aide" element={<Aide />} />
+          <Route path="/assistance" element={<Assistance />} />
           <Route path="*" element={<Navigate to={home()} />} />
         </Routes>
       </Suspense>
@@ -229,7 +285,8 @@ function AppRoutes() {
 }
 
 export default function App() {
-  const { session, loading, profileLoading, profile } = useAuth()
+  const { session, loading, profileLoading, profile, suspendu, organisationReady, isPlatformAdmin } = useAuth()
+  const { pathname } = useLocation()
   if (loading) return <Loading />
   if (!session) return <Login />
   // profileLoading (et pas seulement `!profile`) : à chaque connexion, la session est connue
@@ -237,6 +294,13 @@ export default function App() {
   // même pour un compte déjà validé.
   if (profileLoading) return <Loading />
   if (!profile?.approved) return <PendingApproval />
+  if (!organisationReady) return <Loading />
+  if (suspendu) return <Suspended />
+  // Back-office : espace séparé de l'application des clients, réservé à l'administrateur
+  // de la plateforme. Les données, elles, sont protégées par la base quel que soit l'écran.
+  if (pathname.startsWith('/admin')) {
+    return isPlatformAdmin ? <Suspense fallback={<Loading />}><AdminApp /></Suspense> : <Navigate to="/" />
+  }
   return (
     <StationProvider>
       <AppRoutes />

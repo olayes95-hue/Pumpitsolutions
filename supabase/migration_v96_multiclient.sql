@@ -59,10 +59,17 @@ alter table public.profiles enable trigger user;
 -- ------------------------------------------------------------
 -- 2. Fonctions d'identité
 -- ------------------------------------------------------------
+-- La v97 redéfinit cette fonction : si elle est déjà appliquée, on ne l'écrase pas.
+do $guard$ begin
+  if to_regprocedure('public.my_organisation_id()') is null then
+    execute $v96$
 create or replace function public.current_org_id()
 returns bigint language sql stable security definer set search_path = public as $$
   select organisation_id from public.profiles where id = auth.uid();
 $$;
+    $v96$;
+  end if;
+end $guard$;
 
 create or replace function public.is_platform_admin()
 returns boolean language sql stable security definer set search_path = public as $$
@@ -101,7 +108,9 @@ revoke execute on function public.set_organisation_id() from anon, authenticated
 do $$
 declare
   t record;
-  exclues text[] := array['organisations','profiles','roles','permissions','role_permissions'];
+  exclues text[] := array['organisations','profiles','roles','permissions','role_permissions',
+                          'formules','plateforme_reglages','factures',      -- v97 : gérées par leurs propres règles
+                          'assistance_demandes','assistance_messages'];  -- v99 : idem (la plateforme lit tous les clients)
   nullable text[] := array['audit_log'];   -- lignes écrites par trigger, parfois sans station ni utilisateur
 begin
   -- `stations` en premier : le trigger des autres tables lit stations.organisation_id.
@@ -184,6 +193,10 @@ create trigger trg_prevent_org_change before update on public.profiles
 -- Inscription : le code d'invitation saisi à la création du compte rattache
 -- le nouveau profil à son organisation. Le compte reste « en attente » :
 -- l'administrateur du client le valide et lui attribue une station, comme avant.
+-- La v97 redéfinit cette fonction : si elle est déjà appliquée, on ne l'écrase pas.
+do $guard$ begin
+  if to_regprocedure('public.my_organisation_id()') is null then
+    execute $v96$
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare v_org bigint;
@@ -195,6 +208,9 @@ begin
   on conflict (id) do nothing;
   return new;
 end; $$;
+    $v96$;
+  end if;
+end $guard$;
 revoke execute on function public.handle_new_user() from anon, authenticated;
 
 -- ------------------------------------------------------------
@@ -203,9 +219,14 @@ revoke execute on function public.handle_new_user() from anon, authenticated;
 alter table public.organisations enable row level security;
 grant select, insert, update, delete on public.organisations to authenticated;
 
-drop policy if exists p_org_sel on public.organisations;
-create policy p_org_sel on public.organisations for select to authenticated
-  using (id = (select public.current_org_id()) or (select public.is_platform_admin()));
+-- La v97 remplace cette règle : si elle est déjà appliquée, on ne l'écrase pas.
+do $guard$ begin
+  if to_regprocedure('public.my_organisation_id()') is null then
+    drop policy if exists p_org_sel on public.organisations;
+    create policy p_org_sel on public.organisations for select to authenticated
+      using (id = (select public.current_org_id()) or (select public.is_platform_admin()));
+  end if;
+end $guard$;
 
 drop policy if exists p_org_write on public.organisations;
 create policy p_org_write on public.organisations for all to authenticated
@@ -315,6 +336,10 @@ end; $$;
 -- ------------------------------------------------------------
 -- Crée un client. Ses réglages (prix, marges, seuils) sont copiés depuis
 -- l'organisation courante : son administrateur les ajuste ensuite.
+-- La v97 redéfinit cette fonction : si elle est déjà appliquée, on ne l'écrase pas.
+do $guard$ begin
+  if to_regprocedure('public.my_organisation_id()') is null then
+    execute $v96$
 create or replace function public.create_organisation(p_nom text)
 returns public.organisations language plpgsql security definer set search_path = public as $$
 declare v_org public.organisations;
@@ -331,6 +356,9 @@ begin
   return v_org;
 end; $$;
 revoke execute on function public.create_organisation(text) from anon;
+    $v96$;
+  end if;
+end $guard$;
 
 -- Fait passer l'administrateur de la plateforme dans une autre organisation.
 create or replace function public.switch_organisation(p_org bigint)
@@ -365,11 +393,14 @@ do $$
 begin
   if to_regclass('storage.objects') is not null
      and exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'bordereaux_read') then
-    drop policy if exists "bordereaux_read" on storage.objects;
-    create policy "bordereaux_read" on storage.objects for select to authenticated
-      using (bucket_id = 'bordereaux'
-        and exists (select 1 from public.stations s where s.id::text = (storage.foldername(name))[1])
-        and (is_admin() or (storage.foldername(name))[1] = my_station()::text));
+    -- La v97 remplace la règle de lecture : si elle est déjà appliquée, on ne l'écrase pas.
+    if to_regprocedure('public.can_read_photo(text)') is null then
+      drop policy if exists "bordereaux_read" on storage.objects;
+      create policy "bordereaux_read" on storage.objects for select to authenticated
+        using (bucket_id = 'bordereaux'
+          and exists (select 1 from public.stations s where s.id::text = (storage.foldername(name))[1])
+          and (is_admin() or (storage.foldername(name))[1] = my_station()::text));
+    end if;
     drop policy if exists "bordereaux_insert" on storage.objects;
     create policy "bordereaux_insert" on storage.objects for insert to authenticated
       with check (bucket_id = 'bordereaux'
@@ -424,7 +455,7 @@ begin
   select string_agg(c.relname, ', ') into manquantes
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind = 'r'
-    and c.relname not in ('organisations','roles','permissions','role_permissions')
+    and c.relname not in ('organisations','roles','permissions','role_permissions','formules','plateforme_reglages','factures','assistance_demandes','assistance_messages')
     and not exists (select 1 from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname and p.policyname = 'tenant_isolation');
   if manquantes is not null then
     raise exception 'Tables sans règle tenant_isolation : %', manquantes;

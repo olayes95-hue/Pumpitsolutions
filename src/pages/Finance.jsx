@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { PhotoLink } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate, today } from '../lib/format'
@@ -405,7 +406,6 @@ export default function Finance() {
 
   const anneeOptions = annees.map(a => ({ value: a, label: a }))
   const moisOptions = [{ value: '', label: 'Année entière' }, ...MONTHS.map(m => ({ value: `${annee}-${m}`, label: `${annee}-${m}` }))]
-  const photoUrl = (p) => supabase.storage.from(BORDEREAUX_BUCKET).getPublicUrl(p).data.publicUrl
 
   const chargesColumns = [
     { key: 'mois', header: 'Mois' },
@@ -416,7 +416,7 @@ export default function Finance() {
         <Badge tone={c.statut === 'paye' ? 'ok' : 'idle'}>{c.statut === 'paye' ? `Payé${c.date_paiement ? ' ' + frDate(c.date_paiement) : ''}` : 'À payer'}</Badge>
         {can('manage_finance') && <Button size="sm" onClick={() => togglePaye(c)} disabled={locked.has(c.mois)}>{c.statut === 'paye' ? 'Marquer à payer' : 'Marquer payé'}</Button>}
       </div>) },
-    { key: 'photo', header: 'Justif.', render: c => c.photo_path ? <a href={photoUrl(c.photo_path)} target="_blank" rel="noreferrer">Voir</a> : <span style={{ color: 'var(--text-muted)' }}>—</span> },
+    { key: 'photo', header: 'Justif.', render: c => c.photo_path ? <PhotoLink path={c.photo_path}>Voir</PhotoLink> : <span style={{ color: 'var(--text-muted)' }}>—</span> },
     { key: 'par', header: 'Saisi par', muted: true, render: c => <span title={c.created_at ? frDate(c.created_at) : ''}>{profiles[c.created_by] || '—'}</span> },
     { key: 'montant', header: 'Montant', numeric: true, align: 'right', render: c => <span style={{ color: c.categorie === REVENU_CAT ? 'var(--state-ok)' : 'inherit' }}>{fcfa(c.montant)}</span> },
     { key: 'actions', header: '', align: 'right', render: c => can('manage_finance') && <Button size="sm" tone="danger" onClick={() => delCharge(c)} disabled={locked.has(c.mois)}>Suppr.</Button> },
@@ -695,7 +695,7 @@ export default function Finance() {
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
                     <b style={{ color: m.type === 'virement_bons' ? 'var(--state-ok)' : 'var(--state-alarm)' }}>{m.type === 'virement_bons' ? '+' : '−'}{fcfa(m.montant)}</b>
-                    {m.photo_path && <a href={photoUrl(m.photo_path)} target="_blank" rel="noreferrer">Photo</a>}
+                    {m.photo_path && <PhotoLink path={m.photo_path}>Photo</PhotoLink>}
                     {can('manage_finance') && <Button size="sm" tone="danger" onClick={() => delMouvementBanque(m)}>Suppr.</Button>}
                   </span>
                 </div>

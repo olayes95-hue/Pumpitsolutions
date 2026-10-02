@@ -1,11 +1,21 @@
 -- ============================================================
---  Retour arrière de la v96 (multi-clients)
+--  Retour arrière du multi-clients (v96, v97, v98)
 -- ============================================================
---  À n'utiliser que tant qu'il n'existe QU'UN SEUL client : dès qu'un
---  second client a des données, revenir en arrière les mélangerait.
---  Le script refuse de s'exécuter dans ce cas.
---  Les colonnes organisation_id sont conservées (inoffensives) : la v96
---  pourra être rejouée telle quelle.
+--  Revenir à une base mono-client n'a de sens qu'avec UN SEUL client :
+--  avec plusieurs, les données se mélangeraient. Le script refuse donc
+--  de s'exécuter s'il reste plus d'un client.
+--
+--  S'il y en a plusieurs, supprimez d'abord les autres (irréversible) :
+--      select public.delete_organisation(2, 'Nom exact du client');
+--  puis lancez ce script. Pour garder leurs données, restaurez plutôt la
+--  sauvegarde faite avant la v96.
+--
+--  Les colonnes organisation_id et les tables de la v97 (formules,
+--  factures…) sont conservées : elles sont inoffensives et la v96 pourra
+--  être rejouée telle quelle.
+--
+--  Si l'ancienne application doit resservir, rendez aussi le bucket public :
+--      update storage.buckets set public = true where id = 'bordereaux';
 -- ============================================================
 begin;
 
@@ -77,13 +87,14 @@ begin
 end; $$;
 
 drop function if exists public.create_organisation(text);
+drop function if exists public.create_organisation(text, text);
 drop function if exists public.switch_organisation(bigint);
 drop function if exists public.assign_organisation(uuid, bigint);
 
 -- Photos : règles d'origine (v64)
 do $$
 begin
-  if exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'bordereaux_read') then
+  if to_regclass('storage.objects') is not null then
     drop policy if exists "bordereaux_read" on storage.objects;
     create policy "bordereaux_read" on storage.objects for select to authenticated
       using (bucket_id = 'bordereaux' and (is_admin() or (storage.foldername(name))[1] = my_station()::text));
@@ -92,5 +103,10 @@ begin
       with check (bucket_id = 'bordereaux' and (is_admin() or (storage.foldername(name))[1] = my_station()::text));
   end if;
 end $$;
+
+-- Fonctions de la v97 : supprimées en dernier (plus rien n'en dépend), pour que
+-- v96 puis v97 se rejouent proprement.
+drop function if exists public.can_read_photo(text);
+drop function if exists public.my_organisation_id() cascade;
 
 commit;

@@ -54,6 +54,7 @@ const AUTRE_MOUVEMENT_SOURCES = [
 export default function Stock() {
   const { session, isAdmin, isVendeuse, isPompiste } = useAuth()
   const { stationId } = useStation()
+  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
   const [stock, setStock] = useState([])
   const [valeur, setValeur] = useState([])
   const [mvts, setMvts] = useState([])
@@ -96,7 +97,7 @@ export default function Stock() {
       supabase.from('v_reorder_produit').select('*').eq('station_id', stationId),
     ])
     setStock(sp.data || []); setValeur(sv.data || []); setMvts(mv.data || []); setSorties(so.data || []); setProducts(pr.data || [])
-    setTheorique(th.data || []); setSnapshots(sn.data || []); setReorder(ro.data || [])
+    setTheorique(th.data || []); setSnapshots(sn.data || []); setReorder(has('prevision') ? (ro.data || []) : [])
   }
   useEffect(() => { load() }, [stationId])
   const flash = (m) => { setMsg(m); setErr(''); setTimeout(() => setMsg(''), 2500) }

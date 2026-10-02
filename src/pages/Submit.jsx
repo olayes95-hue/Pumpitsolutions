@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { PhotoThumb } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, today, numFR, frDate, formatThousands } from '../lib/format'
@@ -312,7 +313,6 @@ export default function Submit() {
     }
   }
 
-  const photoUrl = (path) => supabase.storage.from(BORDEREAUX_BUCKET).getPublicUrl(path).data.publicUrl
   function addFiles(e) {
     const files = Array.from(e.target.files || [])
     setNewPhotos(p => [...p, ...files.map(file => ({ file, categorie: 'compteur' }))])
@@ -719,8 +719,8 @@ export default function Submit() {
             onClick={() => setOpenPhotosJour(v => !v)} style={{ transform: openPhotosJour ? 'rotate(180deg)' : 'none' }} />}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-4)' }}>
             {attachments.map(a => (
-              <EvidenceThumb key={a.id} src={photoUrl(a.photo_path)} label={a.categorie} timestamp={a.note} status="none" size={92}
-                onClick={() => window.open(photoUrl(a.photo_path), '_blank')} onRemove={() => delAttachment(a)} />
+              <PhotoThumb key={a.id} path={a.photo_path} label={a.categorie} timestamp={a.note} status="none" size={92}
+                onRemove={() => delAttachment(a)} />
             ))}
           </div>
         </Panel>

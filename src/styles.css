@@ -101,4 +101,29 @@ summary{cursor:pointer}
 @media (max-width:899px){[data-optional="2"]{display:none}}
 @media (max-width:599px){[data-optional="1"]{display:none}}
 @media print{.pi-side,.pi-bottom,.pi-top,.pi-subnav,.pi-mobile-brand{display:none!important}.content{padding:0;max-width:none}body{background:#FFFFFF}}
+/* ---------- facture imprimable (charte : papeterie, facture A4) ---------- */
+.pi-print-sheet{display:none}
+.pi-facture{font-family:var(--font-ui);color:var(--nuit);font-size:13px;line-height:1.5}
+.pi-facture h1{font:var(--fw-black) 30px/1 var(--font-display);letter-spacing:-.02em}
+.pi-facture table{width:100%;border-collapse:collapse;margin-top:28px}
+.pi-facture th{text-align:left;font-weight:600;color:var(--ardoise);padding:8px 10px;border-bottom:2px solid var(--nuit)}
+.pi-facture td{padding:10px;border-bottom:1px solid var(--filet)}
+.pi-facture .r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pi-facture .bloc{background:var(--brume);border-radius:16px;padding:14px 16px;flex:1}
+.pi-facture .et{font-weight:600;color:var(--ardoise);font-size:12px;margin-bottom:4px}
+@media print{
+  body.pi-printing #root{display:none!important}
+  body.pi-printing .pi-print-sheet{display:block}
+  body.pi-printing{background:#FFFFFF}
+  .pi-facture .bloc{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @page{size:A4;margin:16mm}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- back-office ---------- */
+.pi-bo-tag{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:var(--radius-full);background:var(--citron);color:var(--nuit);
+  font:var(--fw-bold) 12px/1 var(--font-ui);white-space:nowrap}
+.pi-bo-kpis{display:grid;gap:var(--sp-4);grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:899px){.pi-bo-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.pi-bo-split{display:grid;gap:var(--sp-5);grid-template-columns:minmax(280px,380px) minmax(0,1fr);align-items:start}
+@media (max-width:899px){.pi-bo-split{grid-template-columns:minmax(0,1fr)}.pi-bo-split[data-open="true"] .pi-bo-list{display:none}.pi-bo-split[data-open="false"] .pi-bo-thread{display:none}}

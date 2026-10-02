@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { PhotoThumb } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate } from '../lib/format'
@@ -30,6 +31,7 @@ const POLE_FILTER_OPTIONS = [
 // un seul tableau + panneau de détail maintenant.
 export default function History() {
   const { stationId, current } = useStation()
+  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
   const { isAdmin } = useAuth()
   const nav = useNavigate()
   const [rows, setRows] = useState([])
@@ -46,7 +48,7 @@ export default function History() {
   const [quickFilter, setQuickFilter] = useState('tous')   // tous | ecarts | attente | photos (filtre les LIGNES)
   const [poleFilter, setPoleFilter] = useState('tous')      // tous | carburant | gaz_lub | superette (filtre les COLONNES)
   const [detailDate, setDetailDate] = useState(null)
-  const [detailExtra, setDetailExtra] = useState({ at: [], dep: [], exp: [], urls: {} })   // chargé à la demande, pour le seul jour ouvert
+  const [detailExtra, setDetailExtra] = useState({ at: [], dep: [], exp: [] })   // chargé à la demande, pour le seul jour ouvert
   const nombreMachines = Math.min(10, Math.max(1, N(current?.nombre_machines) || 4))
 
   useEffect(() => { if (!stationId) return; (async () => {
@@ -92,17 +94,8 @@ export default function History() {
         supabase.from('deposits').select('*').eq('report_date', detailDate).eq('station_id', stationId),
         supabase.from('expenses').select('*').eq('report_date', detailDate).eq('station_id', stationId),
       ])
-      const paths = [
-        ...(at.data || []).map(x => x.photo_path),
-        ...(dep.data || []).filter(x => x.photo_path).map(x => x.photo_path),
-        ...(exp.data || []).filter(x => x.photo_path).map(x => x.photo_path),
-      ].filter(Boolean)
-      let urls = {}
-      if (paths.length) {
-        const { data: signed } = await supabase.storage.from(BORDEREAUX_BUCKET).createSignedUrls(paths, 3600)
-        for (const s of (signed || [])) if (s.signedUrl) urls[s.path] = s.signedUrl
-      }
-      setDetailExtra({ at: at.data || [], dep: dep.data || [], exp: exp.data || [], urls })
+      // Les liens signés sont demandés par PhotoThumb au moment de l'affichage (lib/photos.jsx).
+      setDetailExtra({ at: at.data || [], dep: dep.data || [], exp: exp.data || [] })
     })()
   }, [detailDate, stationId])
 
@@ -229,7 +222,6 @@ export default function History() {
     ...detailExtra.dep.filter(x => x.photo_path).map(x => ({ ...x, categorie: 'versement ' + x.pole, note: fcfa(x.montant) })),
     ...detailExtra.exp.filter(x => x.photo_path).map(x => ({ ...x, categorie: 'justificatif ' + (x.categorie || ''), note: fcfa(x.montant) })),
   ]
-  const photoUrl = (p) => detailExtra.urls[p] || supabase.storage.from(BORDEREAUX_BUCKET).getPublicUrl(p).data.publicUrl
 
   return (
     <Panel
@@ -241,7 +233,7 @@ export default function History() {
         <Select size="sm" value={year} onChange={e => setYear(e.target.value)} options={yearOptions} />
         <Select size="sm" value={month} onChange={e => setMonth(e.target.value)} options={MONTH_OPTIONS} />
         {(year !== 'all' || month !== 'all') && <Button size="sm" onClick={() => { setYear('all'); setMonth('all') }}>Réinitialiser</Button>}
-        <Button size="sm" onClick={exportCsv} disabled={!frows.length}>Exporter (CSV)</Button>
+        {has('export') && <Button size="sm" onClick={exportCsv} disabled={!frows.length}>Exporter (CSV)</Button>}
       </>}
     >
       <div style={{ padding: 'var(--gutter-panel)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
@@ -326,7 +318,7 @@ export default function History() {
                 <Section title="Photos du jour">
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-4)' }}>
                     {photos.map((x, i) => (
-                      <EvidenceThumb key={i} src={photoUrl(x.photo_path)} label={x.categorie} timestamp={x.note} status="none" size={92} onClick={() => window.open(photoUrl(x.photo_path), '_blank')} />
+                      <PhotoThumb key={i} path={x.photo_path} label={x.categorie} timestamp={x.note} status="none" size={92} />
                     ))}
                   </div>
                 </Section>

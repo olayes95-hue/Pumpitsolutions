@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { PhotoLink } from '../lib/photos.jsx'
 import { uploadEvidence } from '../lib/image'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
@@ -751,7 +752,7 @@ export default function Orders() {
                           {cat === 'carburant' && r.cuve_avant != null && r.cuve_apres != null && ` (cuve ${N(r.cuve_avant).toLocaleString('fr-FR')} → ${N(r.cuve_apres).toLocaleString('fr-FR')})`}
                         </span>
                         <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center' }}>
-                          {r.photo_path && <a href={supabase.storage.from(BORDEREAUX_BUCKET).getPublicUrl(r.photo_path).data.publicUrl} target="_blank" rel="noreferrer">Photo</a>}
+                          {r.photo_path && <PhotoLink path={r.photo_path}>Photo</PhotoLink>}
                           {isAdmin && <>
                             <Button size="sm" onClick={() => startEditRec(r)}>Modifier</Button>
                             <Button size="sm" tone="danger" onClick={() => deleteRec(o, r)}>Supprimer</Button>
