@@ -22,6 +22,14 @@ export function fonctionsDe(formules, cle) {
   return ORIGINE[cle] || null
 }
 
+// Activités de l'offre `cle` (carburant, lubrifiant, gaz, superette).
+// Renvoie null quand elles ne sont pas connues : toutes les activités restent alors ouvertes.
+export const ACTIVITES = [['carburant', 'Carburant'], ['lubrifiant', 'Lubrifiants'], ['gaz', 'Gaz'], ['superette', 'Supérette']]
+export function activitesDe(formules, cle) {
+  const ligne = (formules || []).find(f => f.key === cle)
+  return ligne && Array.isArray(ligne.activites) ? ligne.activites : null
+}
+
 // État de l'essai et de l'accès d'un client. Même règle que organisation_accessible() côté base.
 export function etatAbonnement(org, reglages, aujourdhui) {
   if (!org) return { enEssai: false, essaiTermine: false, bloque: false, motif: null, joursRestants: null }

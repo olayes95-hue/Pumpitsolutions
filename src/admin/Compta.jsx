@@ -30,6 +30,7 @@ export default function Compta() {
   const [factures, setFactures] = useState([])
   const [orgs, setOrgs] = useState([])
   const [formules, setFormules] = useState([])
+  const [stations, setStations] = useState([])
   const [annee, setAnnee] = useState(today().slice(0, 4))
   const [mois, setMois] = useState(today().slice(5, 7))        // '' = toute l'année
   const [filtre, setFiltre] = useState('toutes')
@@ -50,6 +51,8 @@ export default function Compta() {
       supabase.from('formules').select('*'),
     ])
     setFactures(f.data || []); setOrgs(o.data || []); setFormules(p.data || [])
+    const st = await supabase.rpc('bo_stations')
+    setStations(st.data || [])
   }
   useEffect(() => { load() }, [])
 
@@ -61,9 +64,10 @@ export default function Compta() {
   const encaissees = valides.filter(f => f.statut === 'payee' && dansPeriode(f.paye_le))
   const dues = valides.filter(f => f.statut === 'emise')
   // Revenu mensuel récurrent : prix de l'offre des clients actifs et payants (hors essai, hors suspendus).
-  const prixDe = Object.fromEntries(formules.map(f => [f.key, Number(f.prix_mensuel || 0)]))
-  const payants = orgs.filter(o => ['actif', 'retard'].includes(etatClient(o, emetteur).cle) && prixDe[o.formule] > 0)
-  const mrr = payants.reduce((s, o) => s + prixDe[o.formule], 0)
+  // Le prix d'une offre s'entend par station : le montant mensuel d'un client additionne ses stations.
+  const mensuelDe = (id) => stations.filter(s => s.organisation_id === id).reduce((t, s) => t + Number(s.prix_mensuel || 0), 0)
+  const payants = orgs.filter(o => ['actif', 'retard'].includes(etatClient(o, emetteur).cle) && mensuelDe(o.id) > 0)
+  const mrr = payants.reduce((s, o) => s + mensuelDe(o.id), 0)
 
   const douze = derniersMois(12).map(m => ({
     mois: libelleMois(m),
@@ -114,7 +118,7 @@ export default function Compta() {
   }
 
   const orgChoisie = orgs.find(o => String(o.id) === String(emission.org))
-  const montantEmission = orgChoisie ? (prixDe[orgChoisie.formule] || 0) * emission.mois : 0
+  const montantEmission = orgChoisie ? mensuelDe(orgChoisie.id) * emission.mois : 0
   const annees = [...new Set([today().slice(0, 4), ...factures.map(f => f.date_emission.slice(0, 4))])].sort().reverse()
 
   const cols = [
@@ -197,7 +201,7 @@ export default function Compta() {
           <Field label="Nombre de mois"><NumericStepper value={emission.mois} min={1} max={24} onChange={v => setEmission({ ...emission, mois: Math.round(v) || 1 })} /></Field>
           <Button type="submit" tone="primary" disabled={busy || !montantEmission}>{montantEmission ? `Émettre ${fcfa(montantEmission)} HT` : 'Émettre'}</Button>
         </form>
-        {orgChoisie && !montantEmission && <p style={{ color: 'var(--text-muted)', margin: 'var(--sp-3) 0 0' }}>L'offre de ce client est gratuite : rien à facturer.</p>}
+        {orgChoisie && !montantEmission && <p style={{ color: 'var(--text-muted)', margin: 'var(--sp-3) 0 0' }}>Ce client n'a aucune station payante : rien à facturer.</p>}
       </Panel>
 
       <Panel title="Journal des factures" meta={`${libellePeriode}, ${journal.length}`} flush actions={<Button size="sm" icon="download" disabled={!journal.length} onClick={exporter}>Exporter (CSV)</Button>}>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useOffre } from '../lib/offre.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate, numFR, today } from '../lib/format'
@@ -54,7 +55,7 @@ const AUTRE_MOUVEMENT_SOURCES = [
 export default function Stock() {
   const { session, isAdmin, isVendeuse, isPompiste } = useAuth()
   const { stationId } = useStation()
-  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
+  const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const [stock, setStock] = useState([])
   const [valeur, setValeur] = useState([])
   const [mvts, setMvts] = useState([])
@@ -77,7 +78,7 @@ export default function Stock() {
 
   function openAction(action, overrides) { setNm({ ...blank(action), ...overrides }); setAction(action); setErr('') }
   function blank(action) {
-    const base = { categorie: isVendeuse ? 'superette' : 'gaz', produit: '', quantite: '', qteCartons: '', qteUnites: '', valeur: '', note: '', date_mouvement: today() }
+    const base = { categorie: isVendeuse ? 'superette' : (activite('gaz') ? 'gaz' : activite('lubrifiant') ? 'lubrifiant' : 'superette'), produit: '', quantite: '', qteCartons: '', qteUnites: '', valeur: '', note: '', date_mouvement: today() }
     if (action === 'sortie') return { ...base, type: 'sortie', source: 'casse' }
     if (action === 'ajustement') return { ...base, type: 'ajustement', source: 'inventaire' }
     if (action === 'correction') return { ...base, type: 'ajustement', source: 'correction_inventaire' }
@@ -143,7 +144,10 @@ export default function Stock() {
 
   const valTotal = valeur.reduce((s, v) => s + N(v.valeur), 0)
   const stockByCat = useMemo(() => { const o = {}; stock.forEach(s => { (o[s.categorie] = o[s.categorie] || []).push(s) }); return o }, [stock])
-  const cats = isVendeuse ? [['superette', 'Supérette']] : CATS
+  // Catégories limitées aux activités de l'offre de la station.
+  const cats = (isVendeuse ? [['superette', 'Supérette']] : CATS).filter(([k]) => activite(k))
+  const premiereCat = cats[0]?.[0]
+  useEffect(() => { if (premiereCat && !cats.some(([k]) => k === catTab)) setCatTab(premiereCat) }, [premiereCat, catTab])
 
   // Produits sous seuil, toutes catégories comptées confondues (gaz + lubrifiant) — la
   // supérette est suivie en valeur, pas en quantité par produit, donc pas de seuil ici.
@@ -388,7 +392,7 @@ export default function Stock() {
 
         return (
           <Panel title={`${catLabel} — toutes les infos`} flush>
-            <Tabs items={[{ value: 'gaz', label: 'Gaz' }, { value: 'lubrifiant', label: 'Lubrifiant' }, { value: 'superette', label: 'Supérette' }]} value={catTab} onChange={setCatTab} />
+            <Tabs items={cats.map(([value, label]) => ({ value, label }))} value={catTab} onChange={setCatTab} />
             <div style={{ padding: 'var(--gutter-panel)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
 
               {catTab !== 'superette' ? (

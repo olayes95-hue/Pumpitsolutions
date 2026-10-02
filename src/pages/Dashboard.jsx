@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useOffre } from '../lib/offre.jsx'
 import { filtrerAlertes } from '../lib/formules'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
@@ -40,7 +41,7 @@ function periodBounds(year, month) {
 
 export default function Dashboard() {
   const { stationId } = useStation()
-  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
+  const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const nav = useNavigate()
   const [months, setMonths] = useState([])   // v_ventes_mensuelles (agrégé, rapide)
   const [alerts, setAlerts] = useState([])   // v_alerts des 60 derniers jours (station active), triées par gravité

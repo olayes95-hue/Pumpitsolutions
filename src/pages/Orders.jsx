@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { useOffre } from '../lib/offre.jsx'
 import { PhotoLink } from '../lib/photos.jsx'
 import { uploadEvidence } from '../lib/image'
 import { useAuth } from '../lib/auth.jsx'
@@ -31,6 +32,10 @@ const blankNf = () => ({ categorie: 'carburant', mode_paiement: 'cheque', rows: 
 export default function Orders() {
   const { session, isAdmin, isPompiste, can } = useAuth()
   const { stationId } = useStation()
+  const { activite } = useOffre()
+  // Catégories proposées : celles des activités de l'offre de la station. L'affichage des
+  // commandes passées, lui, garde tous les libellés (CATS).
+  const cats = CATS.filter(([k]) => activite(k))
   const [orders, setOrders] = useState([])
   const [products, setProducts] = useState([])
   const [settings, setSettings] = useState({ essence_pa: 705, gasoil_pa: 730, taux_perte_acceptable: 5 })
@@ -361,7 +366,7 @@ export default function Orders() {
   // par étape (à valider / à lancer / à réceptionner) plutôt qu'un simple compteur, pour voir
   // tout de suite combien reste bloqué à valider vs déjà engagé en livraison.
   const ETAPE_LABEL = { proposee: 'à valider', validee: 'à lancer', lancee: 'à réceptionner', partielle: 'à réceptionner' }
-  const commandesEnCoursParPole = CATS.map(([key, label]) => {
+  const commandesEnCoursParPole = cats.map(([key, label]) => {
     const os = orders.filter(o => (o.categorie || 'carburant') === key && EN_COURS_STATUTS.includes(o.statut))
     const parEtape = {}
     for (const o of os) parEtape[ETAPE_LABEL[o.statut]] = (parEtape[ETAPE_LABEL[o.statut]] || 0) + orderMontant(o)
@@ -485,7 +490,7 @@ export default function Orders() {
           <form onSubmit={propose} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
             <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
               <Field label="Catégorie" style={{ flex: '1 1 180px' }}>
-                <Select value={nf.categorie} onChange={e => changeCat(e.target.value)} options={CATS.map(([k, l]) => ({ value: k, label: l }))} style={{ width: '100%' }} />
+                <Select value={nf.categorie} onChange={e => changeCat(e.target.value)} options={cats.map(([k, l]) => ({ value: k, label: l }))} style={{ width: '100%' }} />
               </Field>
               <Field label="Date de proposition" style={{ flex: '1 1 180px' }}>
                 <Input type="date" value={nf.date_proposition} max={today()} onChange={e => setNf({ ...nf, date_proposition: e.target.value })} />
@@ -660,7 +665,7 @@ export default function Orders() {
             </div>
             <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               <Button size="sm" tone={fCat === 'tous' ? 'dark' : 'neutral'} onClick={() => setFCat('tous')}>Toutes catégories</Button>
-              {CATS.map(([k, l]) => <Button key={k} size="sm" tone={fCat === k ? 'dark' : 'neutral'} onClick={() => setFCat(k)}>{l}</Button>)}
+              {cats.map(([k, l]) => <Button key={k} size="sm" tone={fCat === k ? 'dark' : 'neutral'} onClick={() => setFCat(k)}>{l}</Button>)}
             </div>
             <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
               <Select size="sm" value={fStatut} onChange={e => setFStatut(e.target.value)}

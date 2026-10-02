@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { useOffre } from '../lib/offre.jsx'
 import { PhotoThumb } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
@@ -75,6 +76,7 @@ function clearDraft(stationId, date) {
 export default function Submit() {
   const { session, isAdmin, isPompiste, isVendeuse } = useAuth()
   const { stationId, current } = useStation()
+  const { activite } = useOffre()   // activités incluses dans l'offre de la station (carburant, lubrifiant, gaz, superette)
   const [params] = useSearchParams()
   const [date, setDate] = useState(params.get('date') || today())
   const [moment, setMoment] = useState(['matin', 'apres-midi', 'soir'].includes(params.get('moment')) ? params.get('moment') : defaultMoment())
@@ -418,7 +420,7 @@ export default function Submit() {
     if (moment === 'matin' && !showAll) return (<>
       <MetricTile label="Essence en cuve" value={f.ess_stock !== '' ? Math.round(N(f.ess_stock)).toLocaleString('fr-FR') : '—'} unit={f.ess_stock !== '' ? 'L' : ''} />
       <MetricTile label="Gasoil en cuve" value={f.gas_stock !== '' ? Math.round(N(f.gas_stock)).toLocaleString('fr-FR') : '—'} unit={f.gas_stock !== '' ? 'L' : ''} />
-      <MetricTile label="Bouteilles de gaz" value={GAZ.reduce((s, [k]) => s + N(f['gaz_stock_' + k]), 0)} unit="b." />
+      {activite('gaz') && <MetricTile label="Bouteilles de gaz" value={GAZ.reduce((s, [k]) => s + N(f['gaz_stock_' + k]), 0)} unit="b." />}
     </>)
     if (moment === 'apres-midi' && !showAll) return (<>
       <MetricTile label="Litres vendus" value={(N(f.ess_litres) + N(f.gas_litres)).toLocaleString('fr-FR')} unit="L" />
@@ -696,7 +698,21 @@ export default function Submit() {
     } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
   }
 
+  // Listes limitées aux activités de l'offre de la station.
+  const typesAchat = [{ value: 'gaz', label: 'Gaz' }, { value: 'lubrifiant', label: 'Lubrifiant' }, { value: 'superette', label: 'Supérette' }, { value: 'autre', label: 'Autre' }]
+    .filter(o => o.value === 'autre' || activite(o.value))
+  const polesVersement = [
+    { value: 'carburant', label: 'Carburant' },
+    activite('gaz') && activite('lubrifiant') && { value: 'gaz_lubrifiant', label: 'Gaz + Lubrifiant' },
+    activite('gaz') && { value: 'gaz', label: 'Gaz seul' },
+    activite('lubrifiant') && { value: 'lubrifiant', label: 'Lubrifiant seul' },
+    activite('superette') && { value: 'superette', label: 'Supérette' },
+  ].filter(Boolean)
+
   // ===== VENDEUSE : accès à la Saisie du jour, UNIQUEMENT la partie supérette =====
+  if (isVendeuse && !activite('superette')) return (
+    <AlertBanner tone="info" title="Supérette non incluse">La supérette ne fait pas partie de l'offre de cette station. Contactez votre administrateur.</AlertBanner>
+  )
   if (isVendeuse) return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
       <Panel title="Date" bodyStyle={{ display: 'none' }} actions={<Input size="sm" type="date" value={date} onChange={e => setDate(e.target.value)} max={today()} />} />
@@ -823,8 +839,7 @@ export default function Submit() {
               </AlertBanner>
             )}
           </FormSection>
-          {showStockLubGaz && (<>
-          <FormSection title="Bouteilles de gaz en stock" style={{ marginTop: 'var(--sp-4)' }}>
+          {activite('gaz') && showStockLubGaz && <FormSection title="Bouteilles de gaz en stock" style={{ marginTop: 'var(--sp-4)' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
               {GAZ.map(([k, lab]) => (
                 <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
@@ -833,8 +848,8 @@ export default function Submit() {
                 </div>
               ))}
             </div>
-          </FormSection>
-          <FormSection title="Lubrifiants en stock" style={{ marginTop: 'var(--sp-4)' }}>
+          </FormSection>}
+          {activite('lubrifiant') && showStockLubGaz && <FormSection title="Lubrifiants en stock" style={{ marginTop: 'var(--sp-4)' }}>
             <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>Nombre de bidons en stock, par référence — c'est cette info que vous mettez à jour chaque matin.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 'var(--sp-4)' }}>
               {lubTypes.map(pr => {
@@ -855,8 +870,7 @@ export default function Submit() {
                 )
               })}
             </div>
-          </FormSection>
-          </>)}
+          </FormSection>}
         </Panel>
       )}
 
@@ -904,10 +918,9 @@ export default function Submit() {
         </Panel>
 
         {!isPompiste && <Panel>
-          <StepHead n="4" title="Gaz &amp; autres ventes" />
+          <StepHead n="4" title={activite('gaz') ? 'Gaz et autres ventes' : 'Autres ventes'} />
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Bouteilles vendues aujourd'hui, et recettes en espèces des autres pôles.</p>
-          {showVenduLubGaz && (<>
-          <FormSection title="Bouteilles de gaz vendues">
+          {activite('gaz') && showVenduLubGaz && <FormSection title="Bouteilles de gaz vendues">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
               {GAZ.map(([k, lab]) => (
                 <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
@@ -916,8 +929,8 @@ export default function Submit() {
                 </div>
               ))}
             </div>
-          </FormSection>
-          <FormSection title="Lubrifiants vendus" style={{ marginTop: 'var(--sp-4)' }}>
+          </FormSection>}
+          {activite('lubrifiant') && showVenduLubGaz && <FormSection title="Lubrifiants vendus" style={{ marginTop: 'var(--sp-4)' }}>
             <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
               Quantité vendue par référence aujourd'hui — sert à calculer la vraie commission (prix de vente − prix d'achat), plus une estimation à %.
             </p>
@@ -954,16 +967,15 @@ export default function Submit() {
                 )
               })}
             </div>
-          </FormSection>
-          </>)}
+          </FormSection>}
           <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', marginTop: 'var(--sp-4)' }}>
-            {showVenduLubGaz
+            {activite('gaz') && (showVenduLubGaz
               ? <Field label="Espèces gaz" style={{ flex: '1 1 160px' }} hint="Calculé depuis les bouteilles vendues ci-dessus"><Input type="text" value={f.gaz_espece || '0'} disabled /></Field>
-              : <Field label="Espèces gaz" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('gaz_espece')} /></Field>}
-            <Field label="Espèces supérette" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('superette_espece')} /></Field>
-            {showVenduLubGaz
+              : <Field label="Espèces gaz" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('gaz_espece')} /></Field>)}
+            {activite('superette') && <Field label="Espèces supérette" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('superette_espece')} /></Field>}
+            {activite('lubrifiant') && (showVenduLubGaz
               ? <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }} hint="Calculé depuis les lubrifiants vendus ci-dessus"><Input type="text" value={f.lubrifiant_espece || '0'} disabled /></Field>
-              : <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('lubrifiant_espece')} /></Field>}
+              : <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('lubrifiant_espece')} /></Field>)}
           </div>
           <Field label="Total des bons en cours (cumul)" style={{ marginTop: 'var(--sp-3)' }}><Input type="text" inputMode="decimal" numeric {...numProps('total_bon_cumul')} /></Field>
         </Panel>}
@@ -990,8 +1002,8 @@ export default function Submit() {
                 <div key={i} style={{ padding: 'var(--sp-4)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
                   <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
                     <Field label="Type" style={{ flex: '1 1 160px' }}>
-                      <Select value={d.type || 'gaz'} onChange={e => upd(setDeliveries, i, 'type', e.target.value)} style={{ width: '100%' }}
-                        options={[{ value: 'gaz', label: 'Gaz' }, { value: 'lubrifiant', label: 'Lubrifiant' }, { value: 'superette', label: 'Supérette' }, { value: 'autre', label: 'Autre' }]} />
+                      <Select value={d.type || typesAchat[0].value} onChange={e => upd(setDeliveries, i, 'type', e.target.value)} style={{ width: '100%' }}
+                        options={typesAchat} />
                     </Field>
                     <Field label="Quantité" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric value={d.quantite || ''} onChange={e => upd(setDeliveries, i, 'quantite', e.target.value)} /></Field>
                   </div>
@@ -1012,7 +1024,7 @@ export default function Submit() {
                 </div>
               ))}
             </div>
-            <Button onClick={() => setDeliveries(p => [...p, { type: 'gaz', unite: 'bouteilles' }])} style={{ marginTop: 'var(--sp-4)' }}>+ Ajouter un achat</Button>
+            <Button onClick={() => setDeliveries(p => [...p, typesAchat[0].value === 'gaz' ? { type: 'gaz', unite: 'bouteilles' } : { type: typesAchat[0].value }])} style={{ marginTop: 'var(--sp-4)' }}>+ Ajouter un achat</Button>
           </>}
         </Panel>
 
@@ -1063,7 +1075,7 @@ export default function Submit() {
                   <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
                     <Field label="Source (pôle) *" style={{ flex: '1 1 180px' }}>
                       <Select value={d.pole || 'carburant'} onChange={ev => setDeposits(p => p.map((x, j) => j === i ? { ...x, pole: ev.target.value, _dupWarn: undefined, forceDoublon: false } : x))} style={{ width: '100%' }}
-                        options={[{ value: 'carburant', label: 'Carburant' }, { value: 'gaz_lubrifiant', label: 'Gaz + Lubrifiant' }, { value: 'gaz', label: 'Gaz seul' }, { value: 'lubrifiant', label: 'Lubrifiant seul' }, { value: 'superette', label: 'Supérette' }]} />
+                        options={polesVersement} />
                     </Field>
                     <Field label="Montant versé *" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric value={d.montant || ''} onChange={ev => setDeposits(p => p.map((x, j) => j === i ? { ...x, montant: ev.target.value, _dupWarn: undefined, forceDoublon: false } : x))} /></Field>
                   </div>

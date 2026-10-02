@@ -44,14 +44,18 @@ export default function FactureSheet({ facture, client, emetteur, onDone }) {
         </div>
 
         <table>
-          <thead><tr><th>Désignation</th><th className="r">Qté</th><th className="r">Prix unitaire</th><th className="r">Montant</th></tr></thead>
+          <thead><tr><th>Désignation</th><th className="r">Stations × mois</th><th className="r">Prix unitaire</th><th className="r">Montant</th></tr></thead>
           <tbody>
-            <tr>
-              <td>{facture.designation}<div style={{ color: 'var(--ardoise)' }}>Du {frDate(facture.periode_debut)} au {frDate(facture.periode_fin)}</div></td>
-              <td className="r">{Number(facture.quantite)}</td>
-              <td className="r">{fcfa(facture.prix_unitaire)}</td>
-              <td className="r">{fcfa(facture.montant_ht)}</td>
-            </tr>
+            {/* Depuis la v101 : une ligne par offre (quantité = stations × mois). Les factures plus anciennes n'ont qu'une ligne. */}
+            {(Array.isArray(facture.lignes) && facture.lignes.length ? facture.lignes
+              : [{ designation: facture.designation, quantite: facture.quantite, prix_unitaire: facture.prix_unitaire, montant: facture.montant_ht }]).map((l, i) => (
+              <tr key={i}>
+                <td>{l.designation}{i === 0 && <div style={{ color: 'var(--ardoise)' }}>Du {frDate(facture.periode_debut)} au {frDate(facture.periode_fin)}</div>}</td>
+                <td className="r">{Number(l.quantite)}</td>
+                <td className="r">{fcfa(l.prix_unitaire)}</td>
+                <td className="r">{fcfa(l.montant)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
 

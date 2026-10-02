@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
 import { fcfa } from '../lib/format'
+import { ACTIVITES } from '../lib/formules'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
@@ -20,7 +21,8 @@ export default function Offres() {
   const { refreshOrganisation } = useAuth()
   const [offres, setOffres] = useState([])
   const [fonctions, setFonctions] = useState([])
-  const [usage, setUsage] = useState({})            // offre -> nombre de clients
+  const [usage, setUsage] = useState({})            // offre -> nombre de stations (ou de clients si l'offre est leur défaut)
+  const [activites, setActivites] = useState({})    // offre -> Set des activités cochées (brouillon)
   const [matrice, setMatrice] = useState({})        // offre -> Set des fonctions cochées (brouillon)
   const [modifie, setModifie] = useState(false)
   const [fiche, setFiche] = useState(null)          // offre en cours d'édition ou de création
@@ -37,8 +39,13 @@ export default function Offres() {
       supabase.from('organisations').select('formule'),
     ])
     setOffres(f.data || []); setFonctions(c.data || [])
-    const u = {}; for (const x of o.data || []) u[x.formule] = (u[x.formule] || 0) + 1
+    // Une offre est « utilisée » si une station l'a, ou si elle est l'offre par défaut d'un client.
+    const st = await supabase.rpc('bo_stations')
+    const u = {}
+    for (const x of st.data || []) u[x.formule] = (u[x.formule] || 0) + 1
+    for (const x of o.data || []) u[x.formule] = u[x.formule] || 1
     setUsage(u)
+    setActivites(Object.fromEntries((f.data || []).map(x => [x.key, new Set(x.activites || ACTIVITES.map(a => a[0]))])))
     setMatrice(Object.fromEntries((f.data || []).map(x => [x.key, new Set(x.fonctions || [])])))
     setModifie(false)
   }
@@ -48,12 +55,17 @@ export default function Offres() {
     setMatrice(m => { const s = new Set(m[offre]); s.has(fonction) ? s.delete(fonction) : s.add(fonction); return { ...m, [offre]: s } })
     setModifie(true)
   }
+  function basculerActivite(offre, a) {
+    if (a === 'carburant') return                    // le carburant est le socle de toutes les offres
+    setActivites(m => { const s = new Set(m[offre]); s.has(a) ? s.delete(a) : s.add(a); return { ...m, [offre]: s } })
+    setModifie(true)
+  }
   async function enregistrerMatrice() {
     for (const o of offres) {
-      const { error } = await supabase.from('formules').update({ fonctions: [...(matrice[o.key] || [])] }).eq('key', o.key)
+      const { error } = await supabase.from('formules').update({ fonctions: [...(matrice[o.key] || [])], activites: ACTIVITES.map(a => a[0]).filter(a => activites[o.key]?.has(a)) }).eq('key', o.key)
       if (error) return fail(error)
     }
-    ok('Fonctions enregistrées. Elles s\'appliquent à la prochaine connexion des clients.'); await load(); refreshOrganisation()
+    ok('Contenu des offres enregistré. Il s\'applique à la prochaine connexion des clients.'); await load(); refreshOrganisation()
   }
 
   async function enregistrerFiche(e) {
@@ -66,7 +78,7 @@ export default function Offres() {
       const key = cleDepuis(fiche.label)
       if (!key) return fail('Nom invalide.')
       if (offres.some(o => o.key === key)) return fail('Une offre porte déjà ce nom.')
-      const { error } = await supabase.from('formules').insert({ key, ...champs, fonctions: [], actif: true })
+      const { error } = await supabase.from('formules').insert({ key, ...champs, fonctions: [], activites: ['carburant'], actif: true })
       if (error) return fail(error)
       ok('Offre créée. Cochez ses fonctions dans le tableau ci-dessous.')
     } else {
@@ -83,7 +95,7 @@ export default function Offres() {
   }
   async function supprimer(o) {
     const { error } = await supabase.from('formules').delete().eq('key', o.key)
-    if (error) return fail(/foreign key/i.test(error.message) ? 'Cette offre est utilisée (par un client ou par l\'essai gratuit). Désactivez-la, ou changez d\'abord l\'offre des clients concernés.' : error)
+    if (error) return fail(/foreign key/i.test(error.message) ? 'Cette offre est utilisée (par une station, comme offre par défaut d\'un client, ou par l\'essai gratuit). Désactivez-la, ou changez d\'abord l\'offre des stations concernées.' : error)
     ok('Offre supprimée.'); setFiche(null); load()
   }
 
@@ -104,9 +116,9 @@ export default function Offres() {
                   <span style={{ font: '700 18px/1.2 var(--font-display)' }}>{o.label}</span>
                   {!o.actif && <Badge tone="idle">Désactivée</Badge>}
                 </div>
-                <div><span style={{ font: '800 26px/1.1 var(--font-display)' }}>{Number(o.prix_mensuel) ? fcfa(o.prix_mensuel) : 'Gratuit'}</span>{Number(o.prix_mensuel) ? <span style={{ color: 'var(--text-muted)' }}> / mois</span> : null}</div>
+                <div><span style={{ font: '800 26px/1.1 var(--font-display)' }}>{Number(o.prix_mensuel) ? fcfa(o.prix_mensuel) : 'Gratuit'}</span>{Number(o.prix_mensuel) ? <span style={{ color: 'var(--text-muted)' }}> / station / mois</span> : null}</div>
                 {o.description && <p style={{ margin: 0, font: '400 14px/1.45 var(--font-ui)', color: 'var(--text-secondary)' }}>{o.description}</p>}
-                <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>{usage[o.key] || 0} client{(usage[o.key] || 0) > 1 ? 's' : ''} · {(o.fonctions || []).length} fonction{(o.fonctions || []).length > 1 ? 's' : ''} en option</span>
+                <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>{usage[o.key] || 0} station{(usage[o.key] || 0) > 1 ? 's' : ''} · {(o.activites || []).length} activité{(o.activites || []).length > 1 ? 's' : ''} · {(o.fonctions || []).length} fonction{(o.fonctions || []).length > 1 ? 's' : ''}</span>
                 <Button size="sm" style={{ alignSelf: 'flex-start', marginTop: 'auto' }} onClick={() => { setErr(''); setFiche({ ...o }) }}>Modifier</Button>
               </div>
             ))}
@@ -114,10 +126,10 @@ export default function Offres() {
         )}
       </Panel>
 
-      <Panel title="Fonctions incluses dans chaque offre" flush
-        actions={<Button size="sm" tone="primary" disabled={!modifie} onClick={enregistrerMatrice}>Enregistrer les fonctions</Button>}>
+      <Panel title="Contenu de chaque offre" flush
+        actions={<Button size="sm" tone="primary" disabled={!modifie} onClick={enregistrerMatrice}>Enregistrer</Button>}>
         <p style={{ color: 'var(--text-muted)', margin: 0, padding: '0 var(--gutter-panel) var(--sp-4)' }}>
-          Saisie du jour, stock, commandes, historique, tableau de bord et alertes de caisse sont dans toutes les offres. Cochez ce que chaque offre ajoute.
+          Saisie quotidienne, historique, tableau de bord et alertes de caisse et de versement sont dans toutes les offres. Cochez les activités et les fonctions que chaque offre ajoute.
         </p>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -126,6 +138,17 @@ export default function Offres() {
               {offres.map(o => <th key={o.key} style={th}>{o.label}</th>)}
             </tr></thead>
             <tbody>
+              <tr><td colSpan={offres.length + 1} style={{ ...td, textAlign: 'left', paddingLeft: 'var(--gutter-panel)', background: 'var(--brume)', font: '700 14px/1.3 var(--font-display)' }}>Activités</td></tr>
+              {ACTIVITES.map(([cle, label]) => (
+                <tr key={cle}>
+                  <td style={{ ...td, textAlign: 'left', paddingLeft: 'var(--gutter-panel)' }}>
+                    <div style={{ font: '600 14px/1.3 var(--font-ui)' }}>{label}</div>
+                    {cle === 'carburant' && <div style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Socle de toutes les offres.</div>}
+                  </td>
+                  {offres.map(o => <td key={o.key} style={td}><Checkbox checked={!!activites[o.key]?.has(cle)} disabled={cle === 'carburant'} onChange={() => basculerActivite(o.key, cle)} /></td>)}
+                </tr>
+              ))}
+              <tr><td colSpan={offres.length + 1} style={{ ...td, textAlign: 'left', paddingLeft: 'var(--gutter-panel)', background: 'var(--brume)', font: '700 14px/1.3 var(--font-display)' }}>Fonctions</td></tr>
               {fonctions.map(f => (
                 <tr key={f.key}>
                   <td style={{ ...td, textAlign: 'left', paddingLeft: 'var(--gutter-panel)' }}>
@@ -139,16 +162,16 @@ export default function Offres() {
           </table>
         </div>
         <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: 0, padding: 'var(--sp-4) var(--gutter-panel)' }}>
-          La liste des fonctions correspond à ce que l'application sait activer ou masquer. En ajouter une nouvelle demande un développement.
+          Ces listes correspondent à ce que l'application sait activer ou masquer. Les alertes sur téléphone et l'activité lavage n'existent pas encore dans l'application : elles demandent un développement.
         </p>
       </Panel>
 
-      <Drawer open={!!fiche} title={fiche?.nouvelle ? 'Nouvelle offre' : fiche?.label} meta={fiche && !fiche.nouvelle ? `${usage[fiche.key] || 0} client(s) sur cette offre` : ''} onClose={() => { setFiche(null); setErr('') }}>
+      <Drawer open={!!fiche} title={fiche?.nouvelle ? 'Nouvelle offre' : fiche?.label} meta={fiche && !fiche.nouvelle ? `${usage[fiche.key] || 0} station(s) sur cette offre` : ''} onClose={() => { setFiche(null); setErr('') }}>
         {fiche && (
           <form onSubmit={enregistrerFiche} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
             {err && <AlertBanner tone="alarm" title="Action impossible" onDismiss={() => setErr('')}>{err}</AlertBanner>}
             <Field label="Nom de l'offre" required><Input value={fiche.label || ''} onChange={e => setFiche({ ...fiche, label: e.target.value })} placeholder="ex : Découverte" /></Field>
-            <Field label="Prix par mois" required hint="0 pour une offre gratuite."><Input numeric inputMode="numeric" suffix="F" value={fiche.prix_mensuel ?? ''} onChange={e => setFiche({ ...fiche, prix_mensuel: e.target.value })} /></Field>
+            <Field label="Prix par station et par mois" required hint="0 pour une offre gratuite."><Input numeric inputMode="numeric" suffix="F" value={fiche.prix_mensuel ?? ''} onChange={e => setFiche({ ...fiche, prix_mensuel: e.target.value })} /></Field>
             <Field label="Description" hint="Affichée dans le back-office."><Input value={fiche.description || ''} onChange={e => setFiche({ ...fiche, description: e.target.value })} /></Field>
             <Field label="Ordre d'affichage"><Input numeric inputMode="numeric" value={fiche.ordre ?? 0} onChange={e => setFiche({ ...fiche, ordre: e.target.value })} style={{ maxWidth: 120 }} /></Field>
             <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>{fiche.nouvelle ? 'Créer l\'offre' : 'Enregistrer'}</Button>
@@ -159,7 +182,7 @@ export default function Offres() {
                   <Button tone="danger" disabled={(usage[fiche.key] || 0) > 0} onClick={() => supprimer(fiche)}>Supprimer</Button>
                 </div>
                 <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
-                  Une offre désactivée n'est plus proposée aux nouveaux clients, mais ceux qui l'ont la gardent. La suppression n'est possible que si aucun client ne l'utilise.
+                  Une offre désactivée n'est plus proposée aux nouveaux clients, mais ceux qui l'ont la gardent. La suppression n'est possible que si aucune station ne l'utilise.
                 </p>
               </div>
             )}

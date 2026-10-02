@@ -42,7 +42,7 @@ export default function Overview() {
   const aJour = liste.reduce((s, o) => s + Number(o.stations_a_jour || 0), 0)
 
   const cols = [
-    { key: 'nom', header: 'Client', render: o => <span><b style={{ fontWeight: 600 }}>{o.nom}</b><span style={{ color: 'var(--text-muted)' }}> · {o.formule}</span></span> },
+    { key: 'nom', header: 'Client', render: o => <span><b style={{ fontWeight: 600 }}>{o.nom}</b>{Number(o.montant_mensuel) > 0 && <span style={{ color: 'var(--text-muted)' }}> · {fcfa(o.montant_mensuel)} / mois</span>}</span> },
     { key: 'etat', header: 'État', render: o => { const e = etatClient(o, reglages); return <Badge tone={e.tone}>{e.label}</Badge> } },
     { key: 'saisies', header: 'Saisies du jour', render: o => Number(o.nb_stations) ? `${o.stations_a_jour} sur ${o.nb_stations}` : 'Aucune station' },
     { key: 'derniere_activite', header: 'Dernière saisie', optional: '1', muted: true, render: o => il_y_a(o.derniere_activite) },

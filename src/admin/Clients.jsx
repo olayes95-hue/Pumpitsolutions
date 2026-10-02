@@ -27,6 +27,7 @@ export default function Clients() {
   const [orgs, setOrgs] = useState([])
   const [formules, setFormules] = useState([])
   const [orphans, setOrphans] = useState([])
+  const [stations, setStations] = useState([])     // toutes les stations, avec leur offre et son prix (bo_stations)
   const [target, setTarget] = useState({})
   const [nouveau, setNouveau] = useState({ nom: '', formule: 'pro', essai: true })
   const [ficheId, setFicheId] = useState(null)
@@ -49,6 +50,8 @@ export default function Clients() {
       supabase.from('profiles').select('id, full_name, created_at').is('organisation_id', null).order('created_at', { ascending: false }),
     ])
     setOrgs(o.data || []); setFormules(f.data || []); setOrphans(p.data || [])
+    const st = await supabase.rpc('bo_stations')
+    setStations(st.data || [])
     return o.data || []
   }
   useEffect(() => { load() }, [])
@@ -126,18 +129,30 @@ export default function Clients() {
     ok("Compte rattaché. L'administrateur du client peut maintenant le valider."); load()
   }
 
-  const libelleOffre = (f) => `${f.label} (${Number(f.prix_mensuel) ? fcfa(f.prix_mensuel) + ' / mois' : 'gratuit'})${f.actif === false ? ', désactivée' : ''}`
+  const libelleOffre = (f) => `${f.label} (${Number(f.prix_mensuel) ? fcfa(f.prix_mensuel) + ' / station / mois' : 'gratuit'})${f.actif === false ? ', désactivée' : ''}`
   // Nouveau client : offres actives seulement. Fiche d'un client : aussi son offre actuelle, même désactivée.
   const optionsFormule = formules.filter(f => f.actif !== false).map(f => ({ value: f.key, label: libelleOffre(f) }))
   const optionsFiche = formules.filter(f => f.actif !== false || f.key === fiche?.formule).map(f => ({ value: f.key, label: libelleOffre(f) }))
   const essaiJours = Number(emetteur.essai_jours ?? 30)
-  const prix = Number(formules.find(f => f.key === fiche?.formule)?.prix_mensuel || 0)
+  // Le prix d'une offre s'entend par station et par mois : le montant mensuel d'un client
+  // est la somme des offres de ses stations.
+  const stationsDe = (id) => stations.filter(s => s.organisation_id === id)
+  const mensuelDe = (id) => stationsDe(id).reduce((t, s) => t + Number(s.prix_mensuel || 0), 0)
+  const stationsFiche = fiche ? stationsDe(fiche.id) : []
+  const prix = fiche ? mensuelDe(fiche.id) : 0
   const ht = prix * emission.mois
+
+  async function offreStation(st, formule) {
+    const { error } = await supabase.rpc('station_definir_offre', { p_station: st.station_id, p_formule: formule })
+    if (error) return fail(error)
+    ok(`${st.station} passe en offre ${formules.find(f => f.key === formule)?.label || formule}.`); recharger()
+  }
   const tva = Math.round(ht * Number(emetteur.taux_tva || 0) / 100)
 
   const cols = [
     { key: 'nom', header: 'Client', render: o => <b style={{ fontWeight: 600 }}>{o.nom}</b> },
-    { key: 'formule', header: 'Formule', optional: '1', render: o => formules.find(f => f.key === o.formule)?.label || o.formule },
+    { key: 'stations', header: 'Stations', optional: '1', numeric: true, align: 'right', render: o => stationsDe(o.id).length },
+    { key: 'mensuel', header: 'Par mois', optional: '1', numeric: true, align: 'right', render: o => mensuelDe(o.id) ? fcfa(mensuelDe(o.id)) : '—' },
     { key: 'etat', header: 'État', render: o => { const e = etatClient(o, emetteur); return <Badge tone={e.tone}>{e.label}</Badge> } },
     { key: 'abonnement_jusqu_au', header: "Réglé jusqu'au", optional: '1', render: o => o.abonnement_jusqu_au ? frDate(o.abonnement_jusqu_au) : '—' },
     { key: 'code_invitation', header: 'Code', optional: '2', numeric: true },
@@ -171,7 +186,7 @@ export default function Clients() {
           <Field label="Nom du client" required style={{ flex: '1 1 240px', maxWidth: 380 }}>
             <Input value={nouveau.nom} onChange={e => setNouveau({ ...nouveau, nom: e.target.value })} placeholder="ex : Stations Dossou" />
           </Field>
-          <Field label="Offre"><Select value={nouveau.formule} onChange={e => setNouveau({ ...nouveau, formule: e.target.value })} options={optionsFormule} /></Field>
+          <Field label="Offre de ses stations"><Select value={nouveau.formule} onChange={e => setNouveau({ ...nouveau, formule: e.target.value })} options={optionsFormule} /></Field>
           <Button type="submit" tone="primary" disabled={busy}>Créer le client</Button>
         </form>
         {essaiJours > 0 && <Checkbox checked={nouveau.essai} onChange={v => setNouveau({ ...nouveau, essai: v })} label={`Commencer par un essai gratuit de ${essaiJours} jours`} style={{ marginTop: 'var(--sp-4)' }} />}
@@ -197,9 +212,9 @@ export default function Clients() {
                 <Badge tone={etatClient(fiche, emetteur).tone}>{etatClient(fiche, emetteur).label}</Badge>
                 <span style={{ color: 'var(--text-muted)' }}>{fiche.abonnement_jusqu_au ? `Réglé jusqu'au ${frDate(fiche.abonnement_jusqu_au)}` : 'Aucun paiement enregistré'}</span>
               </div>
-              <Field label="Offre">
+              <Field label="Offre par défaut" hint="Appliquée aux stations que le client créera ensuite.">
                 <Select value={fiche.formule} options={optionsFiche} style={{ width: '100%' }}
-                  onChange={e => majClient({ formule: e.target.value }, 'Formule modifiée. Elle s\'applique à la prochaine connexion du client.')} />
+                  onChange={e => majClient({ formule: e.target.value }, 'Offre par défaut modifiée. Les stations existantes gardent leur offre.')} />
               </Field>
               {fiche.statut === 'suspendu'
                 ? <Button tone="dark" onClick={() => majClient({ statut: 'actif' }, 'Client réactivé.')} style={{ alignSelf: 'flex-start' }}>Réactiver le client</Button>
@@ -207,6 +222,22 @@ export default function Clients() {
                     onClick={() => majClient({ statut: 'suspendu' }, 'Client suspendu : ses comptes ne voient plus aucune donnée.')} style={{ alignSelf: 'flex-start' }}>Suspendre le client</Button>}
               <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
                 Un client suspendu garde ses données. Ses comptes voient un écran « Accès suspendu », ses factures et l'assistance. Encaisser une facture le réactive.
+              </p>
+            </div>
+
+            <div style={bloc}>
+              <h3 style={titre}>Stations et offres</h3>
+              {!stationsFiche.length && <span style={{ color: 'var(--text-muted)' }}>Aucune station. Ouvrez ce client pour créer sa première station.</span>}
+              {stationsFiche.map(st => (
+                <div key={st.station_id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
+                  <span style={{ flex: '1 1 140px', font: '600 14px/1.3 var(--font-ui)' }}>{st.station}</span>
+                  <Select size="sm" value={st.formule} onChange={e => offreStation(st, e.target.value)} style={{ flex: '1 1 200px' }}
+                    options={formules.filter(f => f.actif !== false || f.key === st.formule).map(f => ({ value: f.key, label: libelleOffre(f) }))} />
+                </div>
+              ))}
+              {stationsFiche.length > 0 && <span style={{ font: '700 16px/1.3 var(--font-display)' }}>Total : {fcfa(prix)} par mois</span>}
+              <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
+                Chaque station a sa propre offre : elle fixe son prix, ses fonctions et ses activités. Le client ne peut pas la changer lui-même.
               </p>
             </div>
 
@@ -232,7 +263,7 @@ export default function Clients() {
                 <Button type="submit" tone="primary" disabled={busy || !prix}>Émettre {fcfa(ht + tva)}</Button>
               </form>
               <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>
-                {emission.mois} × {fcfa(prix)}{tva ? ` + TVA ${Number(emetteur.taux_tva)} % (${fcfa(tva)})` : ''}
+                {emission.mois} mois × {fcfa(prix)} ({stationsFiche.length} station{stationsFiche.length > 1 ? 's' : ''}){tva ? ` + TVA ${Number(emetteur.taux_tva)} % (${fcfa(tva)})` : ''}
               </span>
             </div>}
 

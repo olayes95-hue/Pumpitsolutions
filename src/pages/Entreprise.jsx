@@ -19,6 +19,7 @@ export default function Entreprise({ facturesSeules = false }) {
   const emetteur = usePlateforme()
   const [formules, setFormules] = useState([])
   const [factures, setFactures] = useState([])
+  const [stations, setStations] = useState([])
   const [aImprimer, setAImprimer] = useState(null)
   const [copied, setCopied] = useState(false)
   const [err, setErr] = useState('')
@@ -26,6 +27,7 @@ export default function Entreprise({ facturesSeules = false }) {
   useEffect(() => {
     if (!organisation?.id) return
     supabase.from('formules').select('*').order('ordre').then(({ data }) => setFormules(data || []))
+    supabase.from('stations').select('id, nom, formule').order('nom').then(({ data }) => setStations(data || []))
     supabase.from('factures').select('*').eq('organisation_id', organisation.id).order('date_emission', { ascending: false })
       .then(({ data }) => setFactures(data || []))
   }, [organisation?.id])
@@ -35,7 +37,9 @@ export default function Entreprise({ facturesSeules = false }) {
     catch { setErr('Copie impossible. Sélectionnez le code à la main.') }
   }
 
-  const formule = formules.find(f => f.key === organisation?.formule)
+  // Chaque station a sa propre offre ; l'abonnement mensuel additionne leurs prix.
+  const offreDe = (s) => formules.find(f => f.key === (s.formule || organisation?.formule))
+  const mensuel = stations.reduce((t, s) => t + Number(offreDe(s)?.prix_mensuel || 0), 0)
   const enRetard = organisation?.abonnement_jusqu_au && organisation.abonnement_jusqu_au < today()
   const suspendu = !!abonnement?.bloque
   const etat = abonnement?.motif === 'suspendu' ? 'Suspendu' : abonnement?.essaiTermine ? 'Essai terminé' : abonnement?.enEssai ? 'Essai gratuit' : 'Actif'
@@ -51,10 +55,21 @@ export default function Entreprise({ facturesSeules = false }) {
   const blocAbonnement = (
     <Panel title="Abonnement" status={suspendu ? 'alarm' : enRetard ? 'warn' : undefined} flush>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-7)', padding: '0 var(--gutter-panel) var(--sp-5)' }}>
-        <Info label="Offre" value={formule ? formule.label : (organisation?.formule || '—')} sub={formule ? (Number(formule.prix_mensuel) ? `${fcfa(formule.prix_mensuel)} par mois` : 'gratuite') : undefined} />
+        <Info label="Abonnement" value={mensuel ? fcfa(mensuel) : (stations.length ? 'Gratuit' : '—')} sub={mensuel ? `par mois, ${stations.length} station${stations.length > 1 ? 's' : ''}` : undefined} />
         <Info label="État" value={<Badge tone={suspendu ? 'alarm' : abonnement?.enEssai ? 'info' : 'ok'}>{etat}</Badge>} sub={abonnement?.enEssai ? `jusqu'au ${frDate(organisation.essai_jusqu_au)}, ${abonnement.joursRestants} jour${abonnement.joursRestants > 1 ? 's' : ''} restant${abonnement.joursRestants > 1 ? 's' : ''}` : undefined} />
         <Info label="Réglé jusqu'au" value={organisation?.abonnement_jusqu_au ? frDate(organisation.abonnement_jusqu_au) : '—'} sub={enRetard && !suspendu ? 'Échéance dépassée' : undefined} alarm={enRetard} />
       </div>
+      {stations.length > 0 && !facturesSeules && (
+        <div style={{ padding: '0 var(--gutter-panel) var(--sp-5)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+          {stations.map(s => { const o = offreDe(s); return (
+            <div key={s.id} style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-4)', padding: 'var(--sp-3) var(--sp-4)', background: 'var(--brume)', borderRadius: 'var(--radius-1)' }}>
+              <span style={{ flex: 1, font: '600 14px/1.3 var(--font-ui)' }}>{s.nom}</span>
+              <span style={{ font: '400 14px/1.3 var(--font-ui)', color: 'var(--text-secondary)' }}>Offre {o?.label || s.formule || '—'}</span>
+              <span style={{ font: '600 14px/1.3 var(--font-ui)', fontVariantNumeric: 'tabular-nums' }}>{o && Number(o.prix_mensuel) ? fcfa(o.prix_mensuel) : 'gratuit'}</span>
+            </div>) })}
+          <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Pour changer l'offre d'une station, contactez PumpIT depuis la page Assistance.</span>
+        </div>
+      )}
       {factures.length ? <DataTable columns={cols} rows={factures} zebra={false} /> : <PanelEmpty icon="receipt" label="Aucune facture pour le moment." />}
     </Panel>
   )

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useOffre } from '../lib/offre.jsx'
 import { filtrerAlertes } from '../lib/formules'
-import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate, today, lastDayOfMonth } from '../lib/format'
 import { ALERT_TONES } from '../lib/tones'
@@ -43,7 +43,7 @@ export function pumpStatus(rows, key, n) {
 
 export default function Journal() {
   const { stationId, current } = useStation()
-  const { has } = useAuth()   // fonctions incluses dans l'offre du client
+  const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const nav = useNavigate()
   const [moments, setMoments] = useState(new Set())
   const [forecast, setForecast] = useState(null)

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { useOffre } from '../lib/offre.jsx'
 import { PhotoThumb } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
@@ -31,7 +32,7 @@ const POLE_FILTER_OPTIONS = [
 // un seul tableau + panneau de détail maintenant.
 export default function History() {
   const { stationId, current } = useStation()
-  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
+  const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const { isAdmin } = useAuth()
   const nav = useNavigate()
   const [rows, setRows] = useState([])

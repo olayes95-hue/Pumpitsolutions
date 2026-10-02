@@ -3,7 +3,7 @@
 --         agents PumpIT, offres paramétrables, période d'essai,
 --         comptabilité et statistiques
 -- ============================================================
---  À exécuter après la v99. Transactionnel, rejouable.
+--  À exécuter après la v99. Transactionnel, rejouable tant que la v101 n'est pas appliquée.
 --
 --  1. Agents PumpIT : plusieurs personnes gèrent la plateforme, chacune
 --     avec un rôle (super administrateur, support, comptable, commercial).
@@ -17,6 +17,15 @@
 -- ============================================================
 
 begin;
+
+-- Garde-fou : une fois la v101 appliquée, ce script ne doit plus être rejoué
+-- (il écraserait la facturation par station et les statistiques).
+do $$ begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'stations' and column_name = 'formule') then
+    raise exception 'La v101 est déjà appliquée : ne rejouez pas ce script. Seule la v101 se rejoue.';
+  end if;
+end $$;
 
 do $$ begin
   if to_regprocedure('public.assistance_role(bigint)') is null then

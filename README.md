@@ -70,9 +70,10 @@ Une seule base sert plusieurs exploitants. Chaque client est une « organisation
    - `supabase/migration_v96_multiclient.sql` (organisations et cloisonnement) ;
    - `supabase/migration_v97_abonnements_photos.sql` (formules, suspension, factures, droits sur les photos, ancienne application) ;
    - `supabase/migration_v99_backoffice_assistance.sql` (supervision et assistance) ;
-   - `supabase/migration_v100_backoffice_complet.sql` (agents PumpIT, offres paramétrables, période d'essai, statistiques).
+   - `supabase/migration_v100_backoffice_complet.sql` (agents PumpIT, offres paramétrables, période d'essai, statistiques) ;
+   - `supabase/migration_v101_offres_par_station.sql` (une offre par station, activités par offre, facturation par station).
 
-   Chaque script est transactionnel : en cas d'erreur, rien n'est modifié. Une fois la v100 appliquée, seule la v100 se rejoue (les scripts précédents refusent de s'exécuter, pour ne pas écraser ce qu'elle a remplacé).
+   Chaque script est transactionnel : en cas d'erreur, rien n'est modifié. Seul le dernier script appliqué se rejoue : les précédents refusent de s'exécuter, pour ne pas écraser ce que les suivants ont remplacé.
 3. Nommez-vous administrateur de la plateforme et renommez le client initial :
    ```sql
    update public.profiles set is_platform_admin = true
@@ -111,13 +112,25 @@ Espace séparé de l'application des clients, réservé aux agents PumpIT. Chaqu
 3. Cliquez « Ouvrir » sur ce client. Dans Stations et équipe, validez son compte, donnez-lui le rôle administrateur et créez sa première station.
 4. Le client gère ensuite seul son équipe : il retrouve son code dans Réglages > Entreprise.
 
-### Offres et fonctions
+### Offres : par station
 
-Les offres et ce qu'elles contiennent se règlent dans Back-office > Offres, sans toucher au code. Saisie, stock, commandes, historique, tableau de bord et alertes de caisse sont dans toutes les offres. Six fonctions sont activables par offre : alertes anti-fraude complètes, prévision de commande, point financier et rapprochement, vérification des bordereaux, export, journal d'audit.
+Chaque station a sa propre offre. Un client peut avoir une station en Complet et deux en Essentiel. Le prix d'une offre est un prix **par station et par mois**.
 
-- Une offre à 0 F est une offre gratuite : elle n'est jamais facturée.
-- Une offre désactivée n'est plus proposée aux nouveaux clients ; ceux qui l'ont la gardent. La suppression n'est possible que si aucun client ne l'utilise.
-- Ce filtrage masque les menus, les écrans et les boutons : c'est un filtrage d'interface. Ajouter une fonction à la liste demande un développement.
+| | Essentiel | Pro | Complet |
+|---|---|---|---|
+| Prix par station et par mois | 25 000 F | 40 000 F | 75 000 F |
+| Activités | Carburant | Carburant, lubrifiants, gaz | Carburant, lubrifiants, gaz, supérette |
+| Saisie quotidienne, historique, tableau de bord, alertes de caisse et de versement | oui | oui | oui |
+| Export de l'historique | oui | oui | oui |
+| Anti-coulage, écart compteur, prévision de commande | | oui | oui |
+| Point financier et rapprochement, bordereaux, journal d'audit | | | oui |
+
+- **Tout se règle dans Back-office > Offres** : prix, activités et fonctions de chaque offre, création, désactivation, suppression. Le tableau ci-dessus n'est que le réglage de départ.
+- **L'offre d'une station** se choisit dans Back-office > Clients > Gérer > Stations et offres. Le client ne peut pas la changer lui-même (bloqué par la base). Une station créée par le client prend l'offre par défaut de ce client.
+- **Dans l'application**, les menus, les écrans et les activités suivent la station choisie dans le sélecteur : passer d'une station Complet à une station Essentiel masque la finance, le gaz, les lubrifiants et la supérette.
+- **Facturation** : une facture additionne les stations du client, avec une ligne par offre (quantité = stations × mois). Une offre à 0 F n'est jamais facturée.
+- **Limite** : ce filtrage masque les menus, les écrans et les champs de saisie. La base, elle, ne bloque pas les données selon l'offre. Les données déjà saisies pour une activité retirée restent visibles dans l'historique et le tableau de bord.
+- **Pas encore dans l'application** : les alertes sur téléphone (SMS, WhatsApp ou notification) et l'activité lavage, toutes deux prévues par la grille commerciale.
 
 ### Essai gratuit
 
@@ -150,11 +163,11 @@ Les offres et ce qu'elles contiennent se règlent dans Back-office > Offres, san
 
 ### Ce qui a été vérifié
 
-Les migrations ont été testées sur une base PostgreSQL locale reconstruite à partir des fichiers SQL de ce dépôt (schéma + migrations v2 à v95), avec deux clients : 117 contrôles passent et 30 tentatives interdites sont rejetées (lecture ou écriture chez un autre client, élévation de droits, client suspendu ou en fin d'essai, compte non validé, photos, factures, assistance, permissions des agents). Les scripts ont aussi été rejoués, annulés, puis rejoués. Ils n'ont pas été exécutés sur la base de production, et le stockage Supabase y était simulé : la copie de l'étape 1 sert à confirmer.
+Les migrations ont été testées sur une base PostgreSQL locale reconstruite à partir des fichiers SQL de ce dépôt (schéma + migrations v2 à v95), avec deux clients : 127 contrôles passent et 33 tentatives interdites sont rejetées (lecture ou écriture chez un autre client, élévation de droits, client suspendu ou en fin d'essai, compte non validé, photos, factures, assistance, permissions des agents, offre d'une station modifiée par le client). Les scripts ont aussi été rejoués, annulés, puis rejoués. Ils n'ont pas été exécutés sur la base de production, et le stockage Supabase y était simulé : la copie de l'étape 1 sert à confirmer.
 
 ## Reste à faire
 
-- **Paiement en ligne** des abonnements et **appel vocal intégré** : non faits (prestataires payants à choisir).
+- **Paiement en ligne** des abonnements, **alertes sur téléphone** et **appel vocal intégré** : non faits (prestataires payants à choisir).
 - **Rôles personnalisables par client** : aujourd'hui communs à tous.
 - **Activité Lavage** : prévue par la charte (couleur déjà définie), absente de la base.
 - **Un seul bouton vert par écran** : appliqué aux actions de ligne et aux filtres. Les pages Commandes et Stations gardent plusieurs boutons verts dans des formulaires distincts, à arbitrer écran par écran.

@@ -164,6 +164,10 @@ export function AuthProvider({ children }) {
     // Abonnement : offre du client, fonctions incluses, essai, blocage.
     // Un client bloqué (suspendu ou essai terminé) ne reçoit plus aucune donnée de la base
     // (voir current_org_id()) ; un agent PumpIT n'est jamais bloqué.
+    formules,
+    reglagesPlateforme,
+    // `formule`, `offre` et `has` ci-dessous valent pour l'offre par défaut du client. Dans
+    // l'application, utiliser useOffre() (lib/offre.jsx), qui suit la station courante.
     formule: cleOffre,
     offre: formules.find(f => f.key === cleOffre) || null,
     has: (fonction) => !fonctions || fonctions.includes(fonction),

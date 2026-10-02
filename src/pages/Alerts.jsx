@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useOffre } from '../lib/offre.jsx'
 import { filtrerAlertes } from '../lib/formules'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
@@ -21,7 +22,7 @@ const key = (a) => `${a.report_date}|${a.type}`
 export default function AlertsPage() {
   const { session, isAdmin } = useAuth()
   const { stationId } = useStation()
-  const { has, formule } = useAuth()   // fonctions incluses dans la formule du client
+  const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const nav = useNavigate()
   const [alerts, setAlerts] = useState([])
   const [dismissed, setDismissed] = useState(new Set())

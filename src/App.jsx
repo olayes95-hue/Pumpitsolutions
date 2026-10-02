@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from
 import { supabase } from './lib/supabase'
 import { useAuth } from './lib/auth.jsx'
 import { StationProvider, useStation } from './lib/station.jsx'
+import { useOffre } from './lib/offre.jsx'
 import Login from './pages/Login.jsx'
 import NotifBanner from './components/NotifBanner.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
@@ -40,18 +41,22 @@ const AdminApp = lazy(() => import('./admin/AdminApp.jsx'))
 // Tout autre rôle (directeur, comptable, rôle créé depuis l'écran Rôles) ne l'obtient
 // que par la permission manage_orders.
 function useAccess() {
-  const { profile, isAdmin, isPompiste, isVendeuse, isPlatformAdmin, can, has } = useAuth()
+  const { profile, isAdmin, isPompiste, isVendeuse, isPlatformAdmin, can } = useAuth()
+  const { has, activite } = useOffre()   // offre de la station courante
   const op = isAdmin || profile?.role === 'gerant' || isPompiste || isVendeuse || can('manage_orders')
   // Page Entreprise : code d'invitation, abonnement et factures, pour l'administrateur du
   // client. La gestion des clients est dans le back-office (/admin).
   const org = isAdmin || isPlatformAdmin
-  return { op, can, isVendeuse, org, isPlatformAdmin, has }
+  // La page Stock suit le gaz, les lubrifiants et la supérette : sans aucune de ces
+  // activités dans l'offre (carburant seul), elle n'a rien à montrer.
+  const stock = op && (isVendeuse ? activite('superette') : (activite('gaz') || activite('lubrifiant') || activite('superette')))
+  return { op, can, isVendeuse, org, isPlatformAdmin, has, stock }
 }
 
 // Les cinq espaces de l'application. Chaque entrée n'apparaît que si le profil y a droit ;
 // un espace sans entrée disparaît de la navigation.
 function useSpaces() {
-  const { op, can, isVendeuse, org, isPlatformAdmin, has } = useAccess()
+  const { op, can, isVendeuse, org, isPlatformAdmin, has, stock } = useAccess()
   const spaces = [
     { key: 'jour', label: "Aujourd'hui", icon: 'sun', items: [
       op && { to: '/saisie', icon: 'file-pen-line', label: isVendeuse ? 'Saisie supérette' : 'Saisie du jour' },
@@ -65,7 +70,7 @@ function useSpaces() {
       can('view_price_history') && { to: '/historique-prix', icon: 'tag', label: 'Historique des prix' },
     ] },
     { key: 'stock', label: 'Stock', icon: 'package', items: [
-      op && { to: '/stock', icon: isVendeuse ? 'shopping-cart' : 'package', label: isVendeuse ? 'Supérette' : 'Stock et mouvements' },
+      stock && { to: '/stock', icon: isVendeuse ? 'shopping-cart' : 'package', label: isVendeuse ? 'Supérette' : 'Stock et mouvements' },
       (op || can('validate_orders')) && { to: '/commandes', icon: 'truck', label: 'Commandes' },
       can('manage_products') && { to: '/produits', icon: 'book-open', label: 'Produits et prix' },
       can('manage_suppliers') && { to: '/fournisseurs', icon: 'factory', label: 'Fournisseurs' },
@@ -254,11 +259,11 @@ function Loading() {
 }
 
 function AppRoutes() {
-  const { op, can, isVendeuse, org, has } = useAccess()
+  const { op, can, isVendeuse, org, has, stock } = useAccess()
   // Première page accessible, dans l'ordre Aujourd'hui > Stock > Pilotage > Finance :
   // sert de destination à toute route interdite au profil courant.
   function home() {
-    if (op) return isVendeuse ? '/stock' : '/saisie'
+    if (op) return isVendeuse ? (stock ? '/stock' : '/saisie') : '/saisie'
     if (can('validate_orders')) return '/commandes'
     if (can('view_dashboard')) return '/tableau'
     if (can('view_finance') && has('finance')) return '/finance'
@@ -279,7 +284,7 @@ function AppRoutes() {
           <Route path="/historique" element={guard(can('view_history'), <History />)} />
           <Route path="/historique-prix" element={guard(can('view_price_history'), <PriceHistory />)} />
           <Route path="/saisies" element={<Navigate to="/historique" />} />
-          <Route path="/stock" element={guard(op, <Stock />)} />
+          <Route path="/stock" element={guard(stock, <Stock />)} />
           <Route path="/commandes" element={guard(op || can('validate_orders'), <Orders />)} />
           <Route path="/produits" element={guard(can('manage_products'), <Products />)} />
           <Route path="/fournisseurs" element={guard(can('manage_suppliers'), <Suppliers />)} />

@@ -1,5 +1,5 @@
 -- ============================================================
---  Retour arrière du multi-clients (v96 à v100)
+--  Retour arrière du multi-clients (v96 à v101)
 -- ============================================================
 --  Revenir à une base mono-client n'a de sens qu'avec UN SEUL client :
 --  avec plusieurs, les données se mélangeraient. Le script refuse donc
@@ -48,6 +48,10 @@ begin
   end loop;
 end $$;
 drop trigger if exists trg_prevent_org_change on public.profiles;
+-- v101 : l'offre par station n'a plus de sens sans clients. La colonne est gardée mais libérée,
+-- pour que la v100 puis la v101 se rejouent.
+drop trigger if exists trg_station_offre on public.stations;
+alter table public.stations drop column if exists formule;
 
 -- Unicités d'origine
 alter table public.products drop constraint if exists products_org_categorie_nom_key;
@@ -114,5 +118,6 @@ drop function if exists public.is_agent() cascade;
 drop function if exists public.organisation_accessible(public.organisations) cascade;
 drop function if exists public.create_organisation(text, text, boolean);
 drop function if exists public.bo_supervision();
+drop function if exists public.bo_stations();
 
 commit;
