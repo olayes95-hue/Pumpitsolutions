@@ -1,0 +1,14 @@
+{
+  "name": "PumpIT",
+  "short_name": "PumpIT",
+  "description": "Pilotez votre station, où que vous soyez.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B1F17",
+  "theme_color": "#0B1F17",
+  "lang": "fr",
+  "icons": [
+    { "src": "/brand/pumpit-icone-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/pumpit-icone-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,192 @@
+/* PumpIT : tokens du design system (charte graphique v1.0, septembre 2026).
+   Source unique des couleurs, typographies, espacements et rayons.
+   Ne jamais coder en dur une couleur ou une police déjà portée par un token. */
+
+:root{
+/* ---- marque ---- */
+--vert-pump:#00C26A;     /* actions, niveaux, succès. Jamais en texte courant sur fond clair */
+--vert-pump-hover:#00AD5F;
+--vert-pump-press:#009953;
+--vert-texte:#00874A;    /* liens, texte vert */
+--vert-fonce:#006638;
+--vert-fond:#D6F5E4;
+--nuit:#0B1F17;          /* texte, barre de navigation */
+--nuit-2:#1C3329;
+--citron:#C8F547;        /* réservé aux alertes et aux badges */
+--citron-fond:#EEFAC6;
+--citron-texte:#4F6400;  /* teinte dérivée du Citron, lisible en texte sur fond clair */
+--brume:#F3F6F4;         /* fond d'écran */
+--ardoise:#4A5E55;       /* texte secondaire */
+--foret:#2E4239;
+--sauge:#A9BDB3;
+--sauge-claire:#DDE8E2;
+--filet:#DCE5E0;
+--filet-fonce:#C5D2CB;
+--gris-fond:#E3EBE6;
+--rouge:#E5483B;         /* erreurs et pannes uniquement */
+--rouge-texte:#B3261E;
+--rouge-fond:#FCE3E0;
+
+/* ---- activités (application et rapports uniquement, toujours dans cet ordre) ---- */
+--act-carburants:#00C26A; --act-carburants-fond:#D6F5E4; --act-carburants-texte:#006638;
+--act-lubrifiants:#F2A516; --act-lubrifiants-fond:#FDEFCF; --act-lubrifiants-texte:#7A4F00;
+--act-gaz:#2F7FD8; --act-gaz-fond:#DCEAFB; --act-gaz-texte:#1D4F8C;
+--act-superette:#8B5CF6; --act-superette-fond:#EAE2FE; --act-superette-texte:#5B36B8;
+--act-lavage:#14B8C4; --act-lavage-fond:#D3F3F6; --act-lavage-texte:#0B6B73;
+
+/* ---- rampe neutre ---- */
+--neutre-000:#FFFFFF;
+--neutre-050:var(--brume);
+--neutre-100:#FFFFFF;
+--neutre-200:var(--brume);
+--neutre-300:var(--gris-fond);
+--neutre-400:var(--filet);
+--neutre-500:var(--filet-fonce);
+--neutre-600:var(--sauge);
+--neutre-700:var(--ardoise);
+--neutre-800:var(--foret);
+--neutre-900:var(--nuit);
+--neutre-999:var(--nuit);
+
+/* ---- alias sémantiques ---- */
+--bg-void:#FFFFFF;
+--bg-canvas:var(--brume);
+--surface-panel:#FFFFFF;
+--surface-raised:var(--brume);
+--surface-sunken:var(--gris-fond);
+--surface-field:#FFFFFF;
+--surface-row-hover:var(--brume);
+--surface-row-selected:var(--vert-fond);
+
+--text-primary:var(--nuit);
+--text-body:var(--nuit);
+--text-secondary:var(--foret);
+--text-muted:var(--ardoise);
+--text-disabled:#8A9C93;
+--text-inverse:#FFFFFF;
+--text-link:var(--vert-texte);
+--text-link-hover:var(--vert-fonce);
+
+--border-hairline:var(--filet);
+--border-default:var(--filet-fonce);
+--border-strong:var(--ardoise);
+--border-focus:var(--vert-pump);
+
+/* --accent sert de couleur de texte, de trait ou d'icône : c'est donc le Vert texte.
+   Les aplats (bouton principal, barre de niveau) utilisent --accent-fill. */
+--accent:var(--vert-texte);
+--accent-fill:var(--vert-pump);
+--accent-hover:var(--vert-pump-hover);
+--accent-press:var(--vert-pump-press);
+--accent-quiet:var(--vert-fond);
+
+/* États : --state-x est lisible en texte sur fond clair, --state-x-fill sert aux aplats,
+   --state-x-bg aux fonds teintés, --state-x-text au texte posé sur ce fond. */
+--state-ok:var(--vert-texte);      --state-ok-fill:var(--vert-pump); --state-ok-bg:var(--vert-fond);   --state-ok-text:var(--vert-fonce);
+--state-warn:var(--citron-texte);  --state-warn-fill:var(--citron);  --state-warn-bg:var(--citron-fond); --state-warn-text:var(--nuit);
+--state-alarm:var(--rouge-texte);  --state-alarm-fill:var(--rouge);  --state-alarm-bg:var(--rouge-fond); --state-alarm-text:var(--rouge-texte);
+--state-info:var(--ardoise);       --state-info-fill:var(--ardoise); --state-info-bg:var(--gris-fond);  --state-info-text:var(--nuit);
+--state-idle:var(--ardoise);       --state-idle-fill:var(--sauge);   --state-idle-bg:var(--brume);      --state-idle-text:var(--ardoise);
+
+--scrim:rgba(11,31,23,.5);
+
+/* ---- typographie ---- */
+--font-display:"Outfit","Arial Black",system-ui,sans-serif; /* titres, chiffres */
+--font-ui:"Rubik",Arial,system-ui,sans-serif;               /* textes, interface */
+--font-data:"Rubik",Arial,system-ui,sans-serif;             /* chiffres en tableau (tabulaires) */
+
+--fs-micro:12px;
+--fs-caption:13px;
+--fs-label:14px;
+--fs-body:15px;
+--fs-body-lg:16px;
+--fs-h3:18px;
+--fs-h2:22px;
+--fs-h1:28px;
+--fs-display:40px;
+--fs-readout:32px;
+--fs-input:15px;
+
+--lh-tight:1.1;
+--lh-snug:1.25;
+--lh-normal:1.5;
+--fw-regular:400;
+--fw-medium:500;
+--fw-semibold:600;
+--fw-bold:700;
+--fw-black:800;
+--ls-display:-.03em;
+--ls-normal:0;
+--ls-label:0;
+--ls-micro:0;
+--ls-tabular:0;
+
+/* ---- espacements ---- */
+--sp-0:0px;
+--sp-1:2px;
+--sp-2:6px;
+--sp-3:8px;
+--sp-4:12px;
+--sp-5:16px;
+--sp-6:20px;
+--sp-7:24px;
+--sp-8:28px;
+--sp-9:36px;
+--sp-10:44px;
+--sp-11:56px;
+--sp-12:72px;
+
+--row-h-dense:38px;
+--row-h:46px;
+--row-h-comfy:54px;
+--control-h-sm:34px;
+--control-h:42px;
+--control-h-lg:50px;
+
+--gutter-panel:20px;
+--gutter-screen:24px;
+--sidebar-w:252px;
+--topbar-h:64px;
+--bottomnav-h:64px;
+--content-max:1440px;
+--tap-min:44px;
+
+/* ---- formes : angles arrondis de 14 à 24 px, pilules pour les boutons et badges ---- */
+--radius-0:0px;
+--radius-1:14px;
+--radius-2:16px;
+--radius-card:20px;
+--radius-lg:24px;
+--radius-full:999px;
+
+--bw-hair:1px;
+--bw-thick:2px;
+--bw-accent:4px;
+--border-panel:1px solid transparent;
+--border-control:1.5px solid var(--border-default);
+
+--shadow-pop:0 20px 50px -20px rgba(11,31,23,.28);
+--lift:var(--shadow-pop);
+--focus-ring:0 0 0 3px rgba(0,194,106,.32);
+--well:none;
+--edge-top:none;
+
+/* ---- mouvement ---- */
+--dur-fast:120ms;
+--dur-base:180ms;
+--dur-slow:320ms;
+--ease-sharp:cubic-bezier(.2,0,0,1);
+--t-control:background-color var(--dur-fast) ease,border-color var(--dur-fast) ease,color var(--dur-fast) ease,box-shadow var(--dur-fast) ease;
+}
+
+/* Densité tactile : posée automatiquement sur <html> sous 900 px (voir Viewport.jsx). */
+[data-density="touch"]{
+--control-h-sm:38px;
+--control-h:46px;
+--control-h-lg:54px;
+--row-h-dense:42px;
+--row-h:48px;
+--gutter-panel:16px;
+--gutter-screen:14px;
+--fs-input:16px; /* évite le zoom automatique d'iOS à la saisie */
+}
