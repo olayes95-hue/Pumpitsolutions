@@ -15,7 +15,7 @@ import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 // back-office (/admin).
 // `facturesSeules` : version réduite affichée sur l'écran « Accès suspendu ».
 export default function Entreprise({ facturesSeules = false }) {
-  const { organisation } = useAuth()
+  const { organisation, offre, abonnement } = useAuth()
   const emetteur = usePlateforme()
   const [formules, setFormules] = useState([])
   const [factures, setFactures] = useState([])
@@ -37,7 +37,8 @@ export default function Entreprise({ facturesSeules = false }) {
 
   const formule = formules.find(f => f.key === organisation?.formule)
   const enRetard = organisation?.abonnement_jusqu_au && organisation.abonnement_jusqu_au < today()
-  const suspendu = organisation?.statut === 'suspendu'
+  const suspendu = !!abonnement?.bloque
+  const etat = abonnement?.motif === 'suspendu' ? 'Suspendu' : abonnement?.essaiTermine ? 'Essai terminé' : abonnement?.enEssai ? 'Essai gratuit' : 'Actif'
 
   const cols = [
     { key: 'numero', header: 'Facture', render: f => <b style={{ fontWeight: 600 }}>{f.numero}</b> },
@@ -47,18 +48,18 @@ export default function Entreprise({ facturesSeules = false }) {
     { key: 'action', header: '', align: 'right', render: f => <Button size="sm" icon="printer" onClick={() => setAImprimer(f)}>Imprimer</Button> },
   ]
 
-  const abonnement = (
+  const blocAbonnement = (
     <Panel title="Abonnement" status={suspendu ? 'alarm' : enRetard ? 'warn' : undefined} flush>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-7)', padding: '0 var(--gutter-panel) var(--sp-5)' }}>
-        <Info label="Formule" value={formule ? formule.label : (organisation?.formule || '—')} sub={formule ? `${fcfa(formule.prix_mensuel)} par mois` : undefined} />
-        <Info label="État" value={<Badge tone={suspendu ? 'alarm' : 'ok'}>{suspendu ? 'Suspendu' : 'Actif'}</Badge>} />
+        <Info label="Offre" value={formule ? formule.label : (organisation?.formule || '—')} sub={formule ? (Number(formule.prix_mensuel) ? `${fcfa(formule.prix_mensuel)} par mois` : 'gratuite') : undefined} />
+        <Info label="État" value={<Badge tone={suspendu ? 'alarm' : abonnement?.enEssai ? 'info' : 'ok'}>{etat}</Badge>} sub={abonnement?.enEssai ? `jusqu'au ${frDate(organisation.essai_jusqu_au)}, ${abonnement.joursRestants} jour${abonnement.joursRestants > 1 ? 's' : ''} restant${abonnement.joursRestants > 1 ? 's' : ''}` : undefined} />
         <Info label="Réglé jusqu'au" value={organisation?.abonnement_jusqu_au ? frDate(organisation.abonnement_jusqu_au) : '—'} sub={enRetard && !suspendu ? 'Échéance dépassée' : undefined} alarm={enRetard} />
       </div>
       {factures.length ? <DataTable columns={cols} rows={factures} zebra={false} /> : <PanelEmpty icon="receipt" label="Aucune facture pour le moment." />}
     </Panel>
   )
 
-  if (facturesSeules) return <>{abonnement}<FactureSheet facture={aImprimer} client={organisation} emetteur={emetteur} onDone={() => setAImprimer(null)} /></>
+  if (facturesSeules) return <>{blocAbonnement}<FactureSheet facture={aImprimer} client={organisation} emetteur={emetteur} onDone={() => setAImprimer(null)} /></>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
@@ -76,7 +77,7 @@ export default function Entreprise({ facturesSeules = false }) {
         </div>
       </Panel>
 
-      {abonnement}
+      {blocAbonnement}
       <FactureSheet facture={aImprimer} client={organisation} emetteur={emetteur} onDone={() => setAImprimer(null)} />
     </div>
   )

@@ -140,3 +140,12 @@ summary{cursor:pointer}
 @media (max-width:899px){.pi-bo-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .pi-bo-split{display:grid;gap:var(--sp-5);grid-template-columns:minmax(280px,380px) minmax(0,1fr);align-items:start}
 @media (max-width:899px){.pi-bo-split{grid-template-columns:minmax(0,1fr)}.pi-bo-split[data-open="true"] .pi-bo-list{display:none}.pi-bo-split[data-open="false"] .pi-bo-thread{display:none}}
+@media (max-width:899px){
+  .pi-bottom-scroll{overflow-x:auto;scrollbar-width:none}
+  .pi-bottom-scroll::-webkit-scrollbar{display:none}
+  .pi-bottom-scroll a{flex:0 0 72px}
+}
+.pi-bo-2col{display:grid;gap:var(--sp-5);grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+@media (max-width:1099px){.pi-bo-2col{grid-template-columns:minmax(0,1fr)}}
+.pi-bo-2col.pi-bo-large{grid-template-columns:minmax(0,1.7fr) minmax(0,1fr)}
+@media (max-width:1099px){.pi-bo-2col.pi-bo-large{grid-template-columns:minmax(0,1fr)}}

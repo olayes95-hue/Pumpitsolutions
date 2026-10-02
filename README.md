@@ -69,9 +69,10 @@ Une seule base sert plusieurs exploitants. Chaque client est une « organisation
 2. Dans Supabase > SQL Editor, exécutez l'un après l'autre :
    - `supabase/migration_v96_multiclient.sql` (organisations et cloisonnement) ;
    - `supabase/migration_v97_abonnements_photos.sql` (formules, suspension, factures, droits sur les photos, ancienne application) ;
-   - `supabase/migration_v99_backoffice_assistance.sql` (supervision et assistance).
+   - `supabase/migration_v99_backoffice_assistance.sql` (supervision et assistance) ;
+   - `supabase/migration_v100_backoffice_complet.sql` (agents PumpIT, offres paramétrables, période d'essai, statistiques).
 
-   Chaque script est transactionnel (en cas d'erreur, rien n'est modifié) et peut être rejoué.
+   Chaque script est transactionnel : en cas d'erreur, rien n'est modifié. Une fois la v100 appliquée, seule la v100 se rejoue (les scripts précédents refusent de s'exécuter, pour ne pas écraser ce qu'elle a remplacé).
 3. Nommez-vous administrateur de la plateforme et renommez le client initial :
    ```sql
    update public.profiles set is_platform_admin = true
@@ -86,12 +87,22 @@ Toutes les données existantes sont rattachées au client n° 1, en formule Comp
 
 ### Back-office (`/admin`)
 
-Espace séparé de l'application des clients, réservé à l'administrateur de la plateforme.
+Espace séparé de l'application des clients, réservé aux agents PumpIT. Chaque rubrique demande une permission ; la base applique les mêmes permissions à chaque lecture et à chaque action.
 
-- **Supervision** : pour chaque client, stations à jour aujourd'hui, dernière saisie, comptes à valider, montant à régler, demandes ouvertes. Le bouton « Ouvrir » fait entrer dans l'application du client.
-- **Clients** : création (code d'invitation), formule, suspension et réactivation, coordonnées, factures (émettre, encaisser, annuler, imprimer).
-- **Assistance** : toutes les demandes de tous les clients, réponse en direct.
-- **Réglages** : numéros d'assistance, émetteur des factures, TVA, prix des formules.
+| Rubrique | Contenu | Permission |
+|---|---|---|
+| Supervision | État de chaque client : stations à jour, dernière saisie, comptes à valider, montant dû, demandes | supervision |
+| Statistiques | Nombre de clients et de stations, état de chaque station, activité sur 30 jours, répartition par offre, nouveaux clients | supervision |
+| Clients | Création, offre, essai gratuit, suspension, coordonnées, comptes sans entreprise | clients |
+| Offres | Création, prix, désactivation, suppression ; fonctions incluses dans chaque offre | offres |
+| Comptabilité | Facturé, encaissé, reste à encaisser, revenu mensuel récurrent, impayés par ancienneté, encaissements par mode, journal des factures, export CSV | facturation |
+| Assistance | Demandes de tous les clients, réponse en direct | assistance |
+| Équipe PumpIT | Ajout d'un agent par e-mail, rôle, retrait | agents |
+| Réglages | Assistance, période d'essai, émetteur des factures, TVA | reglages |
+
+**Rôles des agents** : super administrateur (tout), support (supervision, assistance, entrer chez un client), comptable (supervision, facturation), commercial (supervision, clients). Seuls les rôles ayant « entrer chez un client » voient les données d'un client. Un agent n'apparaît jamais dans l'équipe d'un client, même lorsqu'il est entré chez lui.
+
+**Ajouter un agent** : la personne crée son compte sur l'écran de connexion, puis un super administrateur saisit son e-mail dans Équipe PumpIT.
 
 ### Ajouter un client
 
@@ -100,15 +111,20 @@ Espace séparé de l'application des clients, réservé à l'administrateur de l
 3. Cliquez « Ouvrir » sur ce client. Dans Stations et équipe, validez son compte, donnez-lui le rôle administrateur et créez sa première station.
 4. Le client gère ensuite seul son équipe : il retrouve son code dans Réglages > Entreprise.
 
-### Formules
+### Offres et fonctions
 
-| Fonction | Essentiel | Pro | Complet |
-|---|---|---|---|
-| Saisie, stock, commandes, historique, alertes de caisse et de versement | oui | oui | oui |
-| Alertes anti-fraude complètes, prévision de commande | | oui | oui |
-| Point financier, rapprochement, bordereaux, export, journal d'audit | | | oui |
+Les offres et ce qu'elles contiennent se règlent dans Back-office > Offres, sans toucher au code. Saisie, stock, commandes, historique, tableau de bord et alertes de caisse sont dans toutes les offres. Six fonctions sont activables par offre : alertes anti-fraude complètes, prévision de commande, point financier et rapprochement, vérification des bordereaux, export, journal d'audit.
 
-La répartition est dans `src/lib/formules.js` (d'après `docs/PLAN_COMMERCIAL.md`). Elle filtre les menus, les écrans et les boutons : c'est un filtrage d'interface. Les prix se règlent dans le back-office.
+- Une offre à 0 F est une offre gratuite : elle n'est jamais facturée.
+- Une offre désactivée n'est plus proposée aux nouveaux clients ; ceux qui l'ont la gardent. La suppression n'est possible que si aucun client ne l'utilise.
+- Ce filtrage masque les menus, les écrans et les boutons : c'est un filtrage d'interface. Ajouter une fonction à la liste demande un développement.
+
+### Essai gratuit
+
+- La durée par défaut (30 jours) et les fonctions ouvertes pendant l'essai se règlent dans Back-office > Réglages.
+- À la création d'un client, cochez « Commencer par un essai gratuit ». La date de fin se modifie ensuite dans sa fiche (prolonger, raccourcir, retirer).
+- À la fin de l'essai, l'accès est bloqué automatiquement, sauf si le réglage est décoché : le client apparaît alors « Essai terminé » et garde son accès.
+- Le premier paiement encaissé met fin à l'essai. Un client devenu payant n'est plus jamais bloqué automatiquement : un retard est signalé, la suspension reste manuelle.
 
 ### Suspension et factures
 
@@ -126,7 +142,7 @@ La répartition est dans `src/lib/formules.js` (d'après `docs/PLAN_COMMERCIAL.m
 
 ### À savoir
 
-- **Rôles et permissions** : communs à tous les clients. Seul l'administrateur de la plateforme les modifie.
+- **Rôles et permissions des clients** : communs à tous les clients. Seul le super administrateur les modifie.
 - **Comptes non validés** : ils ne lisent plus aucune donnée par l'API (auparavant, certaines tables leur étaient lisibles).
 - **Ancienne application** : ses inscriptions, sans code, sont rattachées au client coché dans Back-office > Clients > « Ancienne application » (le client initial par défaut). Elle affiche les photos par lien public : arrêtez-la avant la v98.
 - **Supprimer un client** (irréversible, par l'éditeur SQL uniquement) : `select public.delete_organisation(2, 'Nom exact du client');`. La fonction indique les dossiers photo à effacer dans Storage.
@@ -134,7 +150,7 @@ La répartition est dans `src/lib/formules.js` (d'après `docs/PLAN_COMMERCIAL.m
 
 ### Ce qui a été vérifié
 
-Les migrations ont été testées sur une base PostgreSQL locale reconstruite à partir des fichiers SQL de ce dépôt (schéma + migrations v2 à v95), avec deux clients : 92 contrôles passent et 18 tentatives interdites sont rejetées (lecture ou écriture chez un autre client, élévation de droits, client suspendu, compte non validé, photos, factures, assistance). Les scripts ont aussi été rejoués, annulés, puis rejoués. Ils n'ont pas été exécutés sur la base de production, et le stockage Supabase y était simulé : la copie de l'étape 1 sert à confirmer.
+Les migrations ont été testées sur une base PostgreSQL locale reconstruite à partir des fichiers SQL de ce dépôt (schéma + migrations v2 à v95), avec deux clients : 117 contrôles passent et 30 tentatives interdites sont rejetées (lecture ou écriture chez un autre client, élévation de droits, client suspendu ou en fin d'essai, compte non validé, photos, factures, assistance, permissions des agents). Les scripts ont aussi été rejoués, annulés, puis rejoués. Ils n'ont pas été exécutés sur la base de production, et le stockage Supabase y était simulé : la copie de l'étape 1 sert à confirmer.
 
 ## Reste à faire
 

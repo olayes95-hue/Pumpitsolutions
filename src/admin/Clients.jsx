@@ -21,13 +21,14 @@ const lendemain = (iso) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDat
 
 // Clients et abonnements : création, formule, suspension, factures, encaissements.
 export default function Clients() {
-  const { organisation, refreshOrganisation } = useAuth()
+  const { organisation, refreshOrganisation, agentCan } = useAuth()
+  const peutFacturer = agentCan('facturation')
   const emetteur = usePlateforme()
   const [orgs, setOrgs] = useState([])
   const [formules, setFormules] = useState([])
   const [orphans, setOrphans] = useState([])
   const [target, setTarget] = useState({})
-  const [nouveau, setNouveau] = useState({ nom: '', formule: 'pro' })
+  const [nouveau, setNouveau] = useState({ nom: '', formule: 'pro', essai: true })
   const [ficheId, setFicheId] = useState(null)
   const [fiche, setFiche] = useState(null)          // copie modifiable du client ouvert dans le tiroir
   const [factures, setFactures] = useState([])
@@ -53,6 +54,7 @@ export default function Clients() {
   useEffect(() => { load() }, [])
 
   async function loadFactures(id) {
+    if (!peutFacturer) return
     const { data } = await supabase.from('factures').select('*').eq('organisation_id', id).order('date_emission', { ascending: false }).order('id', { ascending: false })
     setFactures(data || [])
   }
@@ -73,10 +75,11 @@ export default function Clients() {
     e.preventDefault()
     if (!nouveau.nom.trim()) { fail('Renseignez le nom du client.'); return }
     setBusy(true)
-    const { data, error } = await supabase.rpc('create_organisation', { p_nom: nouveau.nom.trim(), p_formule: nouveau.formule })
+    const { data, error } = await supabase.rpc('create_organisation', { p_nom: nouveau.nom.trim(), p_formule: nouveau.formule, p_essai: nouveau.essai && essaiJours > 0 })
     setBusy(false)
     if (error) return fail(error)
-    setNouveau({ nom: '', formule: 'pro' }); ok(`Client créé. Code d'invitation : ${data?.code_invitation || ''}`); load()
+    setNouveau({ nom: '', formule: nouveau.formule, essai: true })
+    ok(`Client créé. Code d'invitation : ${data?.code_invitation || ''}${data?.essai_jusqu_au ? `. Essai gratuit jusqu'au ${frDate(data.essai_jusqu_au)}` : ''}`); load()
   }
 
   async function majClient(champs, message) {
@@ -123,7 +126,11 @@ export default function Clients() {
     ok("Compte rattaché. L'administrateur du client peut maintenant le valider."); load()
   }
 
-  const optionsFormule = formules.map(f => ({ value: f.key, label: `${f.label} (${fcfa(f.prix_mensuel)} / mois)` }))
+  const libelleOffre = (f) => `${f.label} (${Number(f.prix_mensuel) ? fcfa(f.prix_mensuel) + ' / mois' : 'gratuit'})${f.actif === false ? ', désactivée' : ''}`
+  // Nouveau client : offres actives seulement. Fiche d'un client : aussi son offre actuelle, même désactivée.
+  const optionsFormule = formules.filter(f => f.actif !== false).map(f => ({ value: f.key, label: libelleOffre(f) }))
+  const optionsFiche = formules.filter(f => f.actif !== false || f.key === fiche?.formule).map(f => ({ value: f.key, label: libelleOffre(f) }))
+  const essaiJours = Number(emetteur.essai_jours ?? 30)
   const prix = Number(formules.find(f => f.key === fiche?.formule)?.prix_mensuel || 0)
   const ht = prix * emission.mois
   const tva = Math.round(ht * Number(emetteur.taux_tva || 0) / 100)
@@ -131,7 +138,7 @@ export default function Clients() {
   const cols = [
     { key: 'nom', header: 'Client', render: o => <b style={{ fontWeight: 600 }}>{o.nom}</b> },
     { key: 'formule', header: 'Formule', optional: '1', render: o => formules.find(f => f.key === o.formule)?.label || o.formule },
-    { key: 'etat', header: 'État', render: o => { const e = etatClient(o); return <Badge tone={e.tone}>{e.label}</Badge> } },
+    { key: 'etat', header: 'État', render: o => { const e = etatClient(o, emetteur); return <Badge tone={e.tone}>{e.label}</Badge> } },
     { key: 'abonnement_jusqu_au', header: "Réglé jusqu'au", optional: '1', render: o => o.abonnement_jusqu_au ? frDate(o.abonnement_jusqu_au) : '—' },
     { key: 'code_invitation', header: 'Code', optional: '2', numeric: true },
     { key: 'action', header: '', align: 'right', render: o => <Button size="sm" tone="dark" onClick={() => ouvrirFiche(o)}>Gérer</Button> },
@@ -152,7 +159,7 @@ export default function Clients() {
       {!ficheId && msg && <AlertBanner tone="ok" title="Enregistré" onDismiss={() => setMsg('')}>{msg}</AlertBanner>}
 
       <Panel title="Clients" meta={`${orgs.length}`} flush>
-        {orgs.length ? <DataTable columns={cols} rows={orgs} zebra={false} rowStatus={o => etatClient(o).rang} onRowClick={ouvrirFiche} />
+        {orgs.length ? <DataTable columns={cols} rows={orgs} zebra={false} rowStatus={o => etatClient(o, emetteur).rang} onRowClick={ouvrirFiche} />
           : <PanelEmpty icon="users" label="Aucun client." />}
       </Panel>
 
@@ -164,9 +171,10 @@ export default function Clients() {
           <Field label="Nom du client" required style={{ flex: '1 1 240px', maxWidth: 380 }}>
             <Input value={nouveau.nom} onChange={e => setNouveau({ ...nouveau, nom: e.target.value })} placeholder="ex : Stations Dossou" />
           </Field>
-          <Field label="Formule"><Select value={nouveau.formule} onChange={e => setNouveau({ ...nouveau, formule: e.target.value })} options={optionsFormule} /></Field>
+          <Field label="Offre"><Select value={nouveau.formule} onChange={e => setNouveau({ ...nouveau, formule: e.target.value })} options={optionsFormule} /></Field>
           <Button type="submit" tone="primary" disabled={busy}>Créer le client</Button>
         </form>
+        {essaiJours > 0 && <Checkbox checked={nouveau.essai} onChange={v => setNouveau({ ...nouveau, essai: v })} label={`Commencer par un essai gratuit de ${essaiJours} jours`} style={{ marginTop: 'var(--sp-4)' }} />}
       </Panel>
 
       {orphans.length > 0 && (
@@ -176,8 +184,8 @@ export default function Clients() {
       )}
 
       <Drawer open={!!fiche} title={fiche?.nom} meta={fiche ? `Code d'invitation ${fiche.code_invitation}` : ''} width={560}
-        status={fiche ? (etatClient(fiche).rang || 'ok') : undefined} onClose={() => { setFicheId(null); setFiche(null); setErr(''); setMsg('') }}
-        footer={fiche && fiche.id !== organisation?.id ? <Button tone="outline" icon="external-link" onClick={() => ouvrirClient(fiche.id).catch(fail)}>Ouvrir ce client dans l'application</Button> : undefined}>
+        status={fiche ? (etatClient(fiche, emetteur).rang || 'ok') : undefined} onClose={() => { setFicheId(null); setFiche(null); setErr(''); setMsg('') }}
+        footer={fiche && fiche.id !== organisation?.id && agentCan('ouvrir_client') ? <Button tone="outline" icon="external-link" onClick={() => ouvrirClient(fiche.id).catch(fail)}>Ouvrir ce client dans l'application</Button> : undefined}>
         {fiche && (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {err && <AlertBanner tone="alarm" title="Action impossible" onDismiss={() => setErr('')} style={{ marginBottom: 'var(--sp-4)' }}>{err}</AlertBanner>}
@@ -186,11 +194,11 @@ export default function Clients() {
             <div style={{ ...bloc, borderTop: 0, paddingTop: 0 }}>
               <h3 style={titre}>Abonnement</h3>
               <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
-                <Badge tone={etatClient(fiche).tone}>{etatClient(fiche).label}</Badge>
+                <Badge tone={etatClient(fiche, emetteur).tone}>{etatClient(fiche, emetteur).label}</Badge>
                 <span style={{ color: 'var(--text-muted)' }}>{fiche.abonnement_jusqu_au ? `Réglé jusqu'au ${frDate(fiche.abonnement_jusqu_au)}` : 'Aucun paiement enregistré'}</span>
               </div>
-              <Field label="Formule">
-                <Select value={fiche.formule} options={optionsFormule} style={{ width: '100%' }}
+              <Field label="Offre">
+                <Select value={fiche.formule} options={optionsFiche} style={{ width: '100%' }}
                   onChange={e => majClient({ formule: e.target.value }, 'Formule modifiée. Elle s\'applique à la prochaine connexion du client.')} />
               </Field>
               {fiche.statut === 'suspendu'
@@ -203,6 +211,20 @@ export default function Clients() {
             </div>
 
             <div style={bloc}>
+              <h3 style={titre}>Essai gratuit</h3>
+              <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
+                <Field label="Essai jusqu'au"><Input type="date" value={fiche.essai_jusqu_au || ''} onChange={e => setFiche({ ...fiche, essai_jusqu_au: e.target.value || null })} /></Field>
+                <Button onClick={() => majClient({ essai_jusqu_au: fiche.essai_jusqu_au || null }, fiche.essai_jusqu_au ? `Essai fixé jusqu'au ${frDate(fiche.essai_jusqu_au)}.` : 'Essai retiré.')}>Enregistrer la date</Button>
+                {fiche.essai_jusqu_au && <Button tone="ghost" onClick={() => majClient({ essai_jusqu_au: null }, 'Essai retiré : le client suit maintenant le régime normal.')}>Retirer l'essai</Button>}
+              </div>
+              <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
+                {emetteur.suspendre_fin_essai === false
+                  ? 'À la fin de l\'essai, le client garde son accès et apparaît « Essai terminé ».'
+                  : 'À la fin de l\'essai, l\'accès est bloqué automatiquement.'} Le premier paiement encaissé met fin à l'essai. Repousser la date prolonge l'essai.
+              </p>
+            </div>
+
+            {peutFacturer && <div style={bloc}>
               <h3 style={titre}>Émettre une facture</h3>
               <form onSubmit={emettre} style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 'var(--sp-4)' }}>
                 <Field label="À partir du"><Input type="date" value={emission.debut} onChange={e => setEmission({ ...emission, debut: e.target.value })} required /></Field>
@@ -212,9 +234,9 @@ export default function Clients() {
               <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>
                 {emission.mois} × {fcfa(prix)}{tva ? ` + TVA ${Number(emetteur.taux_tva)} % (${fcfa(tva)})` : ''}
               </span>
-            </div>
+            </div>}
 
-            <div style={bloc}>
+            {peutFacturer && <div style={bloc}>
               <h3 style={titre}>Factures</h3>
               {!factures.length && <span style={{ color: 'var(--text-muted)' }}>Aucune facture.</span>}
               {factures.map(f => {
@@ -246,7 +268,7 @@ export default function Clients() {
                   </div>
                 )
               })}
-            </div>
+            </div>}
 
             <div style={bloc}>
               <h3 style={titre}>Coordonnées (figurent sur les factures)</h3>

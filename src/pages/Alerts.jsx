@@ -37,7 +37,7 @@ export default function AlertsPage() {
     if (!stationId) return
     setLoading(true)
     const { data } = await supabase.from('v_alerts').select('*').eq('station_id', stationId).order('report_date', { ascending: false })
-    setAlerts(filtrerAlertes(data, formule))
+    setAlerts(filtrerAlertes(data, has))
     const { data: d } = await supabase.from('alert_dismissals').select('report_date,type').eq('station_id', stationId)
     setDismissed(new Set((d || []).map(x => `${x.report_date}|${x.type}`)))
     setLoading(false)

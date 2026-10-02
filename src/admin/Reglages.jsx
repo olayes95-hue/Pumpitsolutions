@@ -5,9 +5,12 @@ import { Panel } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
+import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 
-// Réglages de la plateforme : coordonnées d'assistance, émetteur des factures, prix des formules.
+// Réglages de la plateforme : assistance, période d'essai, émetteur des factures.
+// Les prix et le contenu des offres se règlent dans la rubrique Offres.
 export default function Reglages() {
   const [p, setP] = useState(null)
   const [formules, setFormules] = useState([])
@@ -33,16 +36,6 @@ export default function Reglages() {
     const { error } = await supabase.from('plateforme_reglages').update(champs).eq('id', 1)
     if (error) { setErr(error.message); return }
     oublierPlateforme(); setMsg(message); load()
-  }
-  async function enregistrerPrix(e) {
-    e.preventDefault(); setErr(''); setMsg('')
-    for (const f of formules) {
-      const prix = nombre(f.prix_mensuel)
-      if (prix === null || prix < 0) { setErr(`Prix invalide pour la formule ${f.label}.`); return }
-      const { error } = await supabase.from('formules').update({ prix_mensuel: prix }).eq('key', f.key)
-      if (error) { setErr(error.message); return }
-    }
-    setMsg('Prix enregistrés. Ils s\'appliquent aux prochaines factures.'); load()
   }
 
   if (!p) return <div className="center" style={{ minHeight: '40dvh' }}>Chargement…</div>
@@ -83,16 +76,21 @@ export default function Reglages() {
         </form>
       </Panel>
 
-      <Panel title="Prix des formules" meta="par mois">
-        <form onSubmit={enregistrerPrix} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+      <Panel title="Période d'essai gratuit">
+        <form onSubmit={e => { e.preventDefault(); const j = nombre(p.essai_jours); if (j === null || j < 0 || j > 365) { setErr('Durée d\'essai invalide (0 à 365 jours).'); return } enregistrer({ essai_jours: Math.round(j), essai_formule: p.essai_formule || null, suspendre_fin_essai: p.suspendre_fin_essai !== false }, 'Réglages de l\'essai enregistrés.') }}
+          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
           <div style={grille}>
-            {formules.map((f, i) => (
-              <Field key={f.key} label={f.label}>
-                <Input numeric inputMode="numeric" value={f.prix_mensuel} suffix="F" onChange={e => setFormules(formules.map((x, j) => j === i ? { ...x, prix_mensuel: e.target.value } : x))} />
-              </Field>
-            ))}
+            <Field label="Durée de l'essai" hint="0 pour ne pas proposer d'essai."><Input numeric inputMode="numeric" suffix="jours" value={p.essai_jours ?? 30} onChange={set('essai_jours')} /></Field>
+            <Field label="Fonctions pendant l'essai" hint="Ce que le client peut utiliser avant de payer.">
+              <Select value={p.essai_formule || ''} onChange={set('essai_formule')} style={{ width: '100%' }}
+                options={[{ value: '', label: 'Celles de l\'offre choisie' }, ...formules.map(f => ({ value: f.key, label: `Celles de l'offre ${f.label}` }))]} />
+            </Field>
           </div>
-          <Button type="submit" tone="dark" style={{ alignSelf: 'flex-start' }}>Enregistrer les prix</Button>
+          <Checkbox checked={p.suspendre_fin_essai !== false} onChange={v => setP({ ...p, suspendre_fin_essai: v })} label="Bloquer l'accès automatiquement à la fin de l'essai" />
+          <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
+            Sans blocage automatique, le client garde son accès et apparaît « Essai terminé » dans la supervision. La durée s'applique aux prochains clients créés ; la date d'un essai en cours se modifie dans la fiche du client.
+          </p>
+          <Button type="submit" tone="dark" style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>
         </form>
       </Panel>
     </div>

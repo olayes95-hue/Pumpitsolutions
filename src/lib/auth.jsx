@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { inclut } from './formules'
+import { fonctionsDe, etatAbonnement } from './formules'
+import { today } from './format'
 
 const AuthCtx = createContext(null)
 export const useAuth = () => useContext(AuthCtx)
@@ -16,6 +17,9 @@ export function AuthProvider({ children }) {
   const [organisation, setOrganisation] = useState(null)
   const [organisationReady, setOrganisationReady] = useState(false)
   const [orgVersion, setOrgVersion] = useState(0)
+  const [formules, setFormules] = useState([])
+  const [reglagesPlateforme, setReglagesPlateforme] = useState(null)
+  const [permsPlateforme, setPermsPlateforme] = useState([])
   const [loading, setLoading] = useState(true)
   // Distinct de `loading` (qui ne couvre que le tout premier chargement de la session) :
   // à chaque connexion/changement de session, onAuthStateChange met `session` à jour
@@ -85,9 +89,28 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!profile?.organisation_id) { setOrganisation(null); setOrganisationReady(true); return }
     setOrganisationReady(false)
-    supabase.from('organisations').select('*').eq('id', profile.organisation_id).maybeSingle()
-      .then(({ data }) => { setOrganisation(data || null); setOrganisationReady(true) })
+    // L'offre et les réglages d'essai sont chargés en même temps : sans eux, on ne sait pas
+    // quelles fonctions afficher ni si l'accès est ouvert.
+    Promise.all([
+      supabase.from('organisations').select('*').eq('id', profile.organisation_id).maybeSingle(),
+      supabase.from('formules').select('*'),
+      supabase.from('plateforme_reglages').select('essai_formule, suspendre_fin_essai').eq('id', 1).maybeSingle(),
+    ]).then(([o, f, r]) => {
+      setOrganisation(o.data || null); setFormules(f.data || []); setReglagesPlateforme(r.data || null)
+      setOrganisationReady(true)
+    })
   }, [profile?.organisation_id, orgVersion])
+
+  // Agent PumpIT : permissions sur la plateforme (back-office). Avant la v100, seul
+  // existait l'administrateur de la plateforme, qui a alors tous les droits.
+  useEffect(() => {
+    if (!profile?.id) { setPermsPlateforme([]); return }
+    const TOUT = ['supervision', 'clients', 'offres', 'facturation', 'assistance', 'ouvrir_client', 'reglages', 'agents']
+    supabase.rpc('mes_permissions_plateforme').then(({ data, error }) => {
+      if (error) setPermsPlateforme(profile.is_platform_admin ? TOUT : [])
+      else setPermsPlateforme(Array.isArray(data) ? data : [])
+    })
+  }, [profile?.id, profile?.plateforme_role, profile?.is_platform_admin])
 
   // Seuil de déconnexion auto, réglable par l'admin (Stations & équipe) — utile sur les
   // téléphones partagés en station, pour ne pas rester connecté indéfiniment.
@@ -113,6 +136,13 @@ export function AuthProvider({ children }) {
     return () => clearInterval(id)
   }, [session, deconnexionHeures])
 
+  // Abonnement : pendant l'essai, le client a les fonctions de l'offre d'essai (si elle est
+  // réglée dans le back-office), sinon celles de son offre.
+  const abonnement = etatAbonnement(organisation, reglagesPlateforme, today())
+  const cleOffre = abonnement.enEssai && reglagesPlateforme?.essai_formule ? reglagesPlateforme.essai_formule : organisation?.formule
+  const fonctions = fonctionsDe(formules, cleOffre)
+  const estAgent = permsPlateforme.length > 0 || !!profile?.plateforme_role || !!profile?.is_platform_admin
+
   const value = {
     session,
     profile,
@@ -126,13 +156,19 @@ export function AuthProvider({ children }) {
     // Multi-clients : organisation courante et statut d'administrateur de la plateforme
     // (celui qui gère tous les clients). Voir supabase/migration_v96_multiclient.sql.
     organisation,
-    isPlatformAdmin: !!profile?.is_platform_admin,
-    // Abonnement : formule du client, fonctions qu'elle inclut, suspension.
-    // Un client suspendu ne reçoit plus aucune donnée de la base (voir current_org_id()) ;
-    // l'administrateur de la plateforme n'est jamais bloqué.
-    formule: organisation?.formule,
-    has: (fonction) => inclut(organisation?.formule, fonction),
-    suspendu: organisation?.statut === 'suspendu' && !profile?.is_platform_admin,
+    // Super administrateur de la plateforme (gère aussi les rôles des clients).
+    isPlatformAdmin: profile?.plateforme_role ? profile.plateforme_role === 'super_admin' : !!profile?.is_platform_admin,
+    // Agent PumpIT : toute personne ayant un rôle dans le back-office, et ses permissions.
+    isAgent: estAgent,
+    agentCan: (permission) => permsPlateforme.includes(permission),
+    // Abonnement : offre du client, fonctions incluses, essai, blocage.
+    // Un client bloqué (suspendu ou essai terminé) ne reçoit plus aucune donnée de la base
+    // (voir current_org_id()) ; un agent PumpIT n'est jamais bloqué.
+    formule: cleOffre,
+    offre: formules.find(f => f.key === cleOffre) || null,
+    has: (fonction) => !fonctions || fonctions.includes(fonction),
+    abonnement,
+    suspendu: abonnement.bloque && !estAgent,
     // Tant que l'organisation n'est pas connue, on ne sait ni la formule ni l'état de
     // l'abonnement : l'application attend avant d'afficher quoi que ce soit.
     organisationReady,

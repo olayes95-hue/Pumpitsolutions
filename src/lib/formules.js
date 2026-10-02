@@ -1,53 +1,49 @@
-// Formules d'abonnement PumpIT (docs/PLAN_COMMERCIAL.md, §5).
-// Chaque formule contient la précédente. Les prix sont dans la table `formules`.
+// Offres PumpIT et fonctions incluses.
 //
-//   Essentiel : saisie quotidienne, stock et autonomie, commandes et réceptions,
-//               alertes de caisse et de versement, historique.
-//   Pro       : + alertes anti-fraude complètes (coulage, écart compteur…),
-//               + prévision de commande.
-//   Complet   : + point financier et rapprochement bancaire, vérification des
-//               bordereaux, export et journal d'audit.
+// Depuis la v100, la liste des fonctions de chaque offre est réglée dans le back-office
+// (table `formules`, colonne `fonctions`) : rien n'est figé ici. Ce fichier ne garde que
+//   - la répartition d'origine, utilisée tant que la base n'a pas la v100 ;
+//   - la liste des alertes rattachées à la fonction « alertes_completes ».
 //
 // Ce filtrage est fait dans l'interface (menus, écrans, boutons). La séparation des
 // DONNÉES entre clients, elle, est faite par la base.
 
-export const FORMULES = ['essentiel', 'pro', 'complet']
-const RANG = { essentiel: 1, pro: 2, complet: 3 }
-
-// Fonction -> formule minimale.
-export const FONCTIONS = {
-  alertes_completes: 'pro',
-  prevision: 'pro',
-  finance: 'complet',
-  bordereaux: 'complet',
-  export: 'complet',
-  audit: 'complet',
+const ORIGINE = {
+  essentiel: [],
+  pro: ['alertes_completes', 'prevision'],
+  complet: ['alertes_completes', 'prevision', 'finance', 'bordereaux', 'export', 'audit'],
 }
 
-export const LIBELLE_FONCTION = {
-  alertes_completes: 'Alertes anti-fraude complètes',
-  prevision: 'Prévision de commande',
-  finance: 'Point financier et rapprochement bancaire',
-  bordereaux: 'Vérification des bordereaux',
-  export: 'Export des données',
-  audit: "Journal d'audit",
+// Fonctions de l'offre `cle`. `formules` = lignes de la table (peut être vide).
+// Renvoie null quand l'offre est inconnue : tout reste alors ouvert, comme avant.
+export function fonctionsDe(formules, cle) {
+  const ligne = (formules || []).find(f => f.key === cle)
+  if (ligne && Array.isArray(ligne.fonctions)) return ligne.fonctions
+  return ORIGINE[cle] || null
 }
 
-// Formule inconnue (base pas encore migrée) : tout reste ouvert, comme avant.
-export function inclut(formule, fonction) {
-  const mini = FONCTIONS[fonction]
-  if (!mini || !RANG[formule]) return true
-  return RANG[formule] >= RANG[mini]
+// État de l'essai et de l'accès d'un client. Même règle que organisation_accessible() côté base.
+export function etatAbonnement(org, reglages, aujourdhui) {
+  if (!org) return { enEssai: false, essaiTermine: false, bloque: false, motif: null, joursRestants: null }
+  const essai = org.essai_jusqu_au || null
+  const enEssai = !!essai && essai >= aujourdhui
+  const regle = !!org.abonnement_jusqu_au && org.abonnement_jusqu_au >= aujourdhui
+  const essaiTermine = !!essai && !enEssai && !regle
+  const bloqueEssai = essaiTermine && reglages?.suspendre_fin_essai !== false
+  const suspendu = org.statut === 'suspendu'
+  const joursRestants = enEssai ? Math.round((new Date(essai) - new Date(aujourdhui)) / 86400000) : null
+  return { enEssai, essaiTermine, bloque: suspendu || bloqueEssai, motif: suspendu ? 'suspendu' : bloqueEssai ? 'essai' : null, joursRestants }
 }
 
-// Alertes réservées à la formule Pro et au-delà. Les autres (versement manquant ou
-// incomplet, écart de caisse, stock bas, point manquant…) sont dans toutes les formules.
-const ALERTES_PRO = new Set([
+// Alertes rattachées à la fonction « alertes_completes ». Les autres (versement manquant ou
+// incomplet, écart de caisse, stock bas, point manquant…) sont dans toutes les offres.
+const ALERTES_COMPLETES = new Set([
   'ECART_COMPTEUR', 'ECART_STOCK', 'PERTE_LIVRAISON', 'BONS_INEXPLIQUES',
   'ECART_INVENTAIRE', 'DONNEES_INCOHERENTES', 'DEPENSE_NON_JUSTIFIEE',
 ])
 
-export function filtrerAlertes(alertes, formule) {
-  if (inclut(formule, 'alertes_completes')) return alertes || []
-  return (alertes || []).filter(a => !ALERTES_PRO.has(a.type))
+// `has` = la fonction has() fournie par useAuth().
+export function filtrerAlertes(alertes, has) {
+  if (has('alertes_completes')) return alertes || []
+  return (alertes || []).filter(a => !ALERTES_COMPLETES.has(a.type))
 }

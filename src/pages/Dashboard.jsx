@@ -156,7 +156,7 @@ export default function Dashboard() {
       // v_alerts n'a aucune notion de "traité" (vue calculée) — sans ce filtre, une alerte
       // marquée traitée sur la page Alertes continuait d'apparaître ici indéfiniment.
       const dismissedKeys = new Set((dis.data || []).map(x => x.report_date + '|' + x.type))
-      const activeAlerts = filtrerAlertes(al.data, formule).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
+      const activeAlerts = filtrerAlertes(al.data, has).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
       setAlerts(activeAlerts.sort((a, b) => (a.gravite === 'haute' ? -1 : 1) - (b.gravite === 'haute' ? -1 : 1)))
     })
   }, [stationId])

@@ -1,5 +1,5 @@
 -- ============================================================
---  Retour arrière du multi-clients (v96, v97, v98)
+--  Retour arrière du multi-clients (v96 à v100)
 -- ============================================================
 --  Revenir à une base mono-client n'a de sens qu'avec UN SEUL client :
 --  avec plusieurs, les données se mélangeraient. Le script refuse donc
@@ -108,5 +108,11 @@ end $$;
 -- v96 puis v97 se rejouent proprement.
 drop function if exists public.can_read_photo(text);
 drop function if exists public.my_organisation_id() cascade;
+-- Fonctions de la v100 : leur absence permet de rejouer v96, v97, v99 puis v100.
+drop function if exists public.agent_can(text) cascade;
+drop function if exists public.is_agent() cascade;
+drop function if exists public.organisation_accessible(public.organisations) cascade;
+drop function if exists public.create_organisation(text, text, boolean);
+drop function if exists public.bo_supervision();
 
 commit;

@@ -11,6 +11,8 @@ import { Tag } from './ds/pumpit/components/core/Tag.jsx'
 import { Icon } from './ds/pumpit/components/core/Icon.jsx'
 import { Viewport } from './ds/pumpit/components/core/Viewport.jsx'
 import { Button } from './ds/pumpit/components/core/Button.jsx'
+import { AlertBanner } from './ds/pumpit/components/feedback/AlertBanner.jsx'
+import { frDate } from './lib/format'
 
 // Chargées à la demande : réduit fortement le bundle initial (surtout pour gérant et vendeuse sur mobile).
 const Submit = lazy(() => import('./pages/Submit.jsx'))
@@ -97,7 +99,7 @@ function StationPicker() {
 }
 
 function Shell({ children }) {
-  const { profile, roleLabel, organisation, isPlatformAdmin, signOut } = useAuth()
+  const { profile, roleLabel, organisation, isAgent, isAdmin, abonnement, signOut } = useAuth()
   const nav = useNavigate()
   const [reponses, setReponses] = useState(0)
   const { pathname } = useLocation()
@@ -137,7 +139,7 @@ function Shell({ children }) {
                 ))}
               </div>
             ))}
-            {isPlatformAdmin && (
+            {isAgent && (
               <div>
                 <div className="pi-side-group">Plateforme</div>
                 <Link to="/admin"><Icon name="activity" size={18} />Back-office</Link>
@@ -158,7 +160,7 @@ function Shell({ children }) {
           <div className="pi-mobile-brand">
             <img src="/brand/pumpit-logo-inverse.png" alt="PumpIT" />
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              {isPlatformAdmin && <Link to="/admin" className="pi-ghost-dark" title="Back-office" aria-label="Back-office"><Icon name="activity" size={18} /></Link>}
+              {isAgent && <Link to="/admin" className="pi-ghost-dark" title="Back-office" aria-label="Back-office"><Icon name="activity" size={18} /></Link>}
               <span className="pi-avatar" aria-hidden="true" style={{ width: 30, height: 30, fontSize: 13 }}>{initial}</span>
               <button type="button" className="pi-ghost-dark" title="Se déconnecter" aria-label="Se déconnecter" onClick={logout}><Icon name="log-out" size={18} /></button>
             </span>
@@ -178,7 +180,13 @@ function Shell({ children }) {
             </nav>
           )}
 
-          <main className="content"><NotifBanner /><ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary></main>
+          <main className="content">
+            {abonnement?.enEssai && isAdmin && !isAgent && (
+              <AlertBanner tone="info" title={`Essai gratuit : ${abonnement.joursRestants === 0 ? 'dernier jour' : `il reste ${abonnement.joursRestants} jour${abonnement.joursRestants > 1 ? 's' : ''}`}`} style={{ marginBottom: 'var(--sp-4)' }}>
+                Votre essai se termine le {frDate(organisation.essai_jusqu_au)}. Pour continuer ensuite, contactez PumpIT depuis la page Assistance.
+              </AlertBanner>
+            )}
+            <NotifBanner /><ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary></main>
         </div>
 
         <nav className="pi-bottom" aria-label="Espaces">
@@ -218,13 +226,16 @@ function PendingApproval() {
 // clairement plutôt que d'afficher une application vide. L'administrateur du client garde
 // l'accès à ses factures.
 function Suspended() {
-  const { organisation, isAdmin, signOut } = useAuth()
+  const { organisation, isAdmin, abonnement, signOut } = useAuth()
+  const finEssai = abonnement?.motif === 'essai'
   return (
     <div className="center" style={{ flexDirection: 'column', gap: 'var(--sp-5)', textAlign: 'center', padding: 'var(--sp-6)' }}>
       <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 40 }} />
-      <h2 style={{ fontSize: 24 }}>Accès suspendu</h2>
+      <h2 style={{ fontSize: 24 }}>{finEssai ? 'Essai terminé' : 'Accès suspendu'}</h2>
       <p style={{ font: '400 15px/1.55 var(--font-ui)', color: 'var(--text-secondary)', maxWidth: 460, margin: 0 }}>
-        L'abonnement de {organisation?.nom || 'votre entreprise'} est suspendu. Vos données sont conservées et l'accès revient dès le règlement.
+        {finEssai
+          ? `L'essai gratuit de ${organisation?.nom || 'votre entreprise'} s'est terminé le ${frDate(organisation?.essai_jusqu_au)}. Vos données sont conservées et l'accès revient dès la souscription.`
+          : `L'abonnement de ${organisation?.nom || 'votre entreprise'} est suspendu. Vos données sont conservées et l'accès revient dès le règlement.`}
         {isAdmin ? ' Vos factures sont ci-dessous.' : ' Contactez votre administrateur.'}
       </p>
       <div style={{ width: '100%', maxWidth: 720, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
@@ -288,7 +299,7 @@ function AppRoutes() {
 }
 
 export default function App() {
-  const { session, loading, profileLoading, profile, suspendu, organisationReady, isPlatformAdmin } = useAuth()
+  const { session, loading, profileLoading, profile, suspendu, organisationReady, isAgent } = useAuth()
   const { pathname } = useLocation()
   if (loading) return <Loading />
   if (!session) return <Login />
@@ -299,11 +310,13 @@ export default function App() {
   if (!profile?.approved) return <PendingApproval />
   if (!organisationReady) return <Loading />
   if (suspendu) return <Suspended />
-  // Back-office : espace séparé de l'application des clients, réservé à l'administrateur
-  // de la plateforme. Les données, elles, sont protégées par la base quel que soit l'écran.
+  // Back-office : espace séparé de l'application des clients, réservé aux agents
+  // PumpIT. Les données, elles, sont protégées par la base quel que soit l'écran.
   if (pathname.startsWith('/admin')) {
-    return isPlatformAdmin ? <Suspense fallback={<Loading />}><AdminApp /></Suspense> : <Navigate to="/" />
+    return isAgent ? <Suspense fallback={<Loading />}><AdminApp /></Suspense> : <Navigate to="/" />
   }
+  // Un agent PumpIT qui n'a « ouvert » aucun client n'a rien à voir dans l'application : back-office.
+  if (isAgent && !profile.organisation_id) return <Navigate to="/admin" />
   return (
     <StationProvider>
       <AppRoutes />

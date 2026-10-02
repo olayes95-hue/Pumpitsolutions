@@ -32,6 +32,14 @@
 
 begin;
 
+-- Garde-fou : une fois la v100 appliquée, ce script ne doit plus être rejoué
+-- (il écraserait des fonctions et des règles que la v100 a remplacées).
+do $$ begin
+  if to_regprocedure('public.agent_can(text)') is not null then
+    raise exception 'La v100 est déjà appliquée : ne rejouez pas ce script. Seule la v100 se rejoue.';
+  end if;
+end $$;
+
 -- ------------------------------------------------------------
 -- 1. Organisations
 -- ------------------------------------------------------------
@@ -110,7 +118,8 @@ declare
   t record;
   exclues text[] := array['organisations','profiles','roles','permissions','role_permissions',
                           'formules','plateforme_reglages','factures',      -- v97 : gérées par leurs propres règles
-                          'assistance_demandes','assistance_messages'];  -- v99 : idem (la plateforme lit tous les clients)
+                          'assistance_demandes','assistance_messages', -- v99 : idem (la plateforme lit tous les clients)
+                          'plateforme_roles','fonctions_catalogue'];     -- v100 : tables de la plateforme
   nullable text[] := array['audit_log'];   -- lignes écrites par trigger, parfois sans station ni utilisateur
 begin
   -- `stations` en premier : le trigger des autres tables lit stations.organisation_id.
@@ -455,7 +464,7 @@ begin
   select string_agg(c.relname, ', ') into manquantes
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind = 'r'
-    and c.relname not in ('organisations','roles','permissions','role_permissions','formules','plateforme_reglages','factures','assistance_demandes','assistance_messages')
+    and c.relname not in ('organisations','roles','permissions','role_permissions','formules','plateforme_reglages','factures','assistance_demandes','assistance_messages','plateforme_roles','fonctions_catalogue')
     and not exists (select 1 from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname and p.policyname = 'tenant_isolation');
   if manquantes is not null then
     raise exception 'Tables sans règle tenant_isolation : %', manquantes;
