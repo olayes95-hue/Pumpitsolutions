@@ -64,6 +64,19 @@ summary{cursor:pointer}
 .pi-bottom{display:none}
 .pi-mobile-brand{display:none}
 
+/* Sur ordinateur, le bandeau latéral doit rester entièrement visible pendant que SEULE la
+   zone de contenu défile — sans ça, .pi-side (position:sticky) se fait "couper" en bas d'une
+   page longue, puisque son conteneur .pi-app grandissait avec le contenu (min-height) et que
+   c'était la page entière qui défilait. On fige .pi-app à la hauteur de l'écran et on fait
+   défiler .content à l'intérieur de .pi-main, pour que le bandeau n'ait jamais besoin de
+   "céder" de la place. Sans effet sur téléphone (le bandeau n'existe pas, cf. plus haut). */
+@media (min-width:900px){
+  html,body{height:100%}
+  .pi-app{height:100dvh;overflow:hidden}
+  .pi-main{height:100%;overflow:hidden}
+  .content{flex:1;min-height:0;overflow-y:auto}
+}
+
 @media (max-width:899px){
   .pi-side{display:none}
   .pi-mobile-brand{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);padding:var(--sp-3) var(--gutter-screen);

@@ -8,6 +8,7 @@ import { fcfa, frDate, today, lastDayOfMonth } from '../lib/format'
 import { ALERT_TONES } from '../lib/tones'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
+import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Icon } from '../ds/pumpit/components/core/Icon.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
@@ -55,24 +56,21 @@ export default function Journal() {
   const [pompeInactiveApres, setPompeInactiveApres] = useState(5)
   const [stock, setStock] = useState(null)
   const [loading, setLoading] = useState(true)
+  // Mois affiché pour "Manque à verser" — sélectionnable, pas figé sur le mois en cours
+  // (demande explicite : pouvoir consulter un mois passé sans attendre le Tableau de bord).
+  const [moisManque, setMoisManque] = useState(today().slice(0, 7))
 
   useEffect(() => { if (!stationId) return; (async () => {
     setLoading(true)
     const day = today()
-    const monthStart = day.slice(0, 7) + '-01'
-    // Bug réel repéré : '-31' codé en dur est une date invalide en septembre (30 jours) — la
-    // requête report_date<=... échouait silencieusement (data jamais vérifié) et affichait 0.
-    const monthEnd = lastDayOfMonth(day.slice(0, 7))
     // Alertes : fenêtre glissante de 60 jours, PAS le mois calendaire — un manque à verser ou un
     // jour manquant du mois dernier reste dû/à faire même après le 1er du mois suivant ; le
     // gérant ne doit pas le perdre de vue simplement parce que le calendrier a tourné (constaté
     // en prod : un manque de 15 500 F du mois précédent avait disparu de cette page).
     const cutoff60 = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10)
-    const [sub, fc, recon, exp, pert, al, dis, po, st, pr, ls] = await Promise.all([
+    const [sub, fc, pert, al, dis, po, st, pr, ls] = await Promise.all([
       supabase.from('submissions').select('moment').eq('station_id', stationId).eq('report_date', day),
       supabase.from('v_stock_forecast').select('*').eq('station_id', stationId).maybeSingle(),
-      supabase.from('v_pole_recon_jour').select('*').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
-      supabase.from('expenses').select('categorie,montant,non_cash').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
       supabase.from('v_pertes_mensuelles').select('*').eq('station_id', stationId).eq('mois', day.slice(0, 7)).maybeSingle(),
       supabase.from('v_alerts').select('*').eq('station_id', stationId).gte('report_date', cutoff60).lte('report_date', day),
       supabase.from('alert_dismissals').select('report_date,type').eq('station_id', stationId),
@@ -84,7 +82,29 @@ export default function Journal() {
     setMoments(new Set((sub.data || []).map(x => x.moment)))
     setForecast(fc.data || null)
     setStock(ls.data || null)
+    setPertes(pert.data || null)
+    // v_alerts n'a aucune notion de "traité" (vue calculée) — sans ce filtre, une alerte
+    // marquée traitée sur la page Alertes continuait d'apparaître ici indéfiniment.
+    const dismissedKeys = new Set((dis.data || []).map(x => x.report_date + '|' + x.type))
+    const activeAlerts = filtrerAlertes(al.data, formule).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
+    setAlerts(activeAlerts.sort((a, b) => (a.gravite === 'haute' ? -1 : 1) - (b.gravite === 'haute' ? -1 : 1)))
+    setPendingCount(po.count || 0)
+    setPompeInactiveApres(N(st.data?.pompe_inactive_apres) || 5)
+    setPumpRows(pr.data || [])
+    setLoading(false)
+  })() }, [stationId])
 
+  // "Manque à verser" : chargé séparément, dépend du mois SÉLECTIONNÉ (moisManque), pas de
+  // "aujourd'hui" — permet de consulter un mois passé sans changer de page.
+  useEffect(() => { if (!stationId) return; (async () => {
+    const monthStart = moisManque + '-01'
+    // Bug réel repéré : '-31' codé en dur est une date invalide en septembre (30 jours) — la
+    // requête report_date<=... échouait silencieusement (data jamais vérifié) et affichait 0.
+    const monthEnd = lastDayOfMonth(moisManque)
+    const [recon, exp] = await Promise.all([
+      supabase.from('v_pole_recon_jour').select('*').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
+      supabase.from('expenses').select('categorie,montant,non_cash').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
+    ])
     // Même décomposition que « Cash non tracé » du Tableau de bord admin (recettes − versé,
     // éclatée par pôle), MAIS attribuée période par période (via v_pole_recon_jour) et non plus
     // par simple découpage calendaire : un versement à cheval sur deux mois comptait son montant
@@ -118,18 +138,7 @@ export default function Journal() {
       superette: manqueByPole.superette - depSuperette,
     })
     setDepGeneral(depGen)
-
-    setPertes(pert.data || null)
-    // v_alerts n'a aucune notion de "traité" (vue calculée) — sans ce filtre, une alerte
-    // marquée traitée sur la page Alertes continuait d'apparaître ici indéfiniment.
-    const dismissedKeys = new Set((dis.data || []).map(x => x.report_date + '|' + x.type))
-    const activeAlerts = filtrerAlertes(al.data, formule).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
-    setAlerts(activeAlerts.sort((a, b) => (a.gravite === 'haute' ? -1 : 1) - (b.gravite === 'haute' ? -1 : 1)))
-    setPendingCount(po.count || 0)
-    setPompeInactiveApres(N(st.data?.pompe_inactive_apres) || 5)
-    setPumpRows(pr.data || [])
-    setLoading(false)
-  })() }, [stationId])
+  })() }, [stationId, moisManque])
 
   if (loading) return <Panel><p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Chargement…</p></Panel>
 
@@ -199,7 +208,8 @@ export default function Journal() {
         </div>
       </div>
 
-      <Panel title="Manque à verser par pôle" meta="ce mois">
+      <Panel title="Manque à verser par pôle"
+        actions={<Input type="month" size="sm" value={moisManque} max={today().slice(0, 7)} onChange={e => e.target.value && setMoisManque(e.target.value)} style={{ width: 160 }} />}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
           <PoleLine label="Carburant" value={manque.carburant} />
           {depGeneral > 0 && <p style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 0 var(--sp-4)' }}>dont {fcfa(depGeneral)} de charges générales (SBEE, autre) déjà déduites</p>}
