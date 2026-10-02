@@ -20,7 +20,7 @@ const SINGLE_STATION_ROLES = ['gerant', 'pompiste', 'vendeuse', 'admin']
 const groupBy = (rows, key) => rows.reduce((m, r) => { (m[r[key] || '—'] = m[r[key] || '—'] || []).push(r); return m }, {})
 
 export default function Stations() {
-  const { isAdmin, can, session } = useAuth()
+  const { isAdmin, can, session, isPlatformAdmin } = useAuth()
   const [stations, setStations] = useState([])
   const [users, setUsers] = useState([])
   const [settings, setSettings] = useState(null)
@@ -37,7 +37,8 @@ export default function Stations() {
   const TABS = [
     (isAdmin || can('manage_stations_config')) && { value: 'stations', label: 'Stations' },
     (isAdmin || can('manage_team')) && { value: 'equipe', label: 'Équipe' },
-    isAdmin && { value: 'roles', label: 'Rôles' },
+    // Rôles et permissions sont communs à tous les clients : seul l'administrateur de la plateforme les modifie.
+    isPlatformAdmin && { value: 'roles', label: 'Rôles' },
     isAdmin && { value: 'parametres', label: 'Paramètres' },
   ].filter(Boolean)
   const [tab, setTab] = useState(() => TABS[0]?.value || 'stations')

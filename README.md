@@ -59,9 +59,47 @@ Pour essayer sans risque, créez un second projet Supabase avec une copie de la 
 - Couleurs d'activité (`--act-*`) dans cet ordre : carburants, lubrifiants, gaz, supérette, lavage.
 - Icônes Lucide uniquement, à déclarer dans `src/ds/pumpit/components/core/Icon.jsx`.
 
+## Multi-clients
+
+Une seule base sert plusieurs exploitants. Chaque client est une « organisation » : ses stations, saisies, produits, fournisseurs, réglages et comptes sont invisibles des autres. Le cloisonnement est fait par la base (règles RLS), pas par l'application.
+
+### Mise en place (une fois)
+
+1. **Sauvegardez la base**, puis essayez d'abord sur une copie (second projet Supabase).
+2. Dans Supabase > SQL Editor, exécutez `supabase/migration_v96_multiclient.sql`. Le script est transactionnel : en cas d'erreur, rien n'est modifié.
+3. Toujours dans l'éditeur SQL, nommez-vous administrateur de la plateforme et renommez le client initial :
+   ```sql
+   update public.profiles set is_platform_admin = true
+   where id = (select id from auth.users where email = 'vous@exemple.com');
+   update public.organisations set nom = 'Nom de votre société' where id = 1;
+   ```
+4. Redéployez la fonction OCR, corrigée pour vérifier les droits de l'appelant : `supabase functions deploy ocr-bordereau`.
+5. Déployez cette application.
+
+Ordre à respecter : le SQL d'abord, l'application ensuite. Toutes les données existantes sont rattachées au client n° 1.
+
+### Ajouter un client
+
+1. Réglages > Clients > « Créer le client ». Un code d'invitation est généré.
+2. Le futur administrateur du client crée son compte avec ce code.
+3. Dans Clients, cliquez « Ouvrir » sur ce client. Dans Stations et équipe, validez son compte, donnez-lui le rôle administrateur et créez sa première station.
+4. Revenez à votre client avec « Ouvrir ». Le client gère ensuite seul son équipe avec son code.
+
+### À savoir
+
+- **Rôles et permissions** : communs à tous les clients. Seul l'administrateur de la plateforme les modifie.
+- **Réglages** (prix, marges, seuils) : propres à chaque client, copiés à la création.
+- **Photos** : le bucket `bordereaux` reste public par lien direct. La liste des fichiers, elle, est cloisonnée.
+- **Ancienne application** : elle continue de fonctionner, mais son écran d'inscription n'a pas de champ code. Les comptes créés par là apparaissent dans Clients > « Comptes sans entreprise ».
+- **Retour arrière** : `supabase/rollback_v96_multiclient.sql`, utilisable tant qu'il n'y a qu'un seul client.
+- **Non couvert** : formules d'abonnement, facturation, suspension d'un client.
+
+### Ce qui a été vérifié
+
+La migration a été testée sur une base PostgreSQL locale reconstruite à partir des fichiers SQL de ce dépôt (schéma + migrations v2 à v95), avec deux clients : 43 contrôles passent (un client ne voit ni ne modifie rien de l'autre, à travers les tables comme les vues) et 6 tentatives d'intrusion sont rejetées. Le script a aussi été rejoué deux fois, annulé, puis rejoué. Il n'a pas été exécuté sur la base de production : la copie de l'étape 1 sert à cela.
+
 ## Reste à faire
 
-- **Multi-clients** : la base n'a pas de niveau « client » au-dessus des stations. À traiter avant de vendre PumpIT à plusieurs exploitants.
 - **Activité Lavage** : prévue par la charte (couleur déjà définie), absente de la base.
 - **Bucket `bordereaux` public** : passer aux URL signées (déjà fait dans `History.jsx`).
 - **Un seul bouton vert par écran** : appliqué aux actions de ligne et aux filtres. Les pages Commandes et Stations gardent plusieurs boutons verts dans des formulaires distincts, à arbitrer écran par écran.

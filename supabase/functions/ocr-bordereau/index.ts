@@ -32,6 +32,16 @@ Deno.serve(async (req) => {
     const { deposit_id } = await req.json()
     if (!deposit_id) return json({ error: "deposit_id requis" }, 400)
 
+    // Contrôle d'accès : `sb` utilise la clé service_role et contourne le RLS.
+    // On vérifie donc d'abord, avec le jeton de l'appelant, qu'il a le droit de voir
+    // ce versement (même station, même organisation). Sinon n'importe quel compte
+    // connecté pourrait lancer l'analyse sur le versement d'un autre client.
+    const asCaller = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    })
+    const { data: visible } = await asCaller.from("deposits").select("id").eq("id", deposit_id).maybeSingle()
+    if (!visible) return json({ error: "Versement introuvable ou accès refusé." }, 403)
+
     const { data: dep } = await sb.from("deposits").select("*").eq("id", deposit_id).single()
     if (!dep?.photo_path) return json({ error: "Ce versement n'a pas de photo." }, 400)
 

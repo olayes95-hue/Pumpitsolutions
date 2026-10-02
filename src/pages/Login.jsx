@@ -12,6 +12,7 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [code, setCode] = useState('')
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -23,7 +24,7 @@ export default function Login() {
         const { error } = await signIn(email, password)
         if (error) setErr(traduire(error.message))
       } else {
-        const { error } = await signUp(email, password, name)
+        const { error } = await signUp(email, password, name, code)
         if (error) setErr(traduire(error.message))
         else setMsg('Compte créé. Confirmez votre e-mail si un message vous est envoyé, puis connectez-vous.')
       }
@@ -59,6 +60,11 @@ export default function Login() {
               {mode === 'signup' && (
                 <Field label="Nom complet" required>
                   <Input size="lg" autoComplete="name" value={name} onChange={e => setName(e.target.value)} required />
+                </Field>
+              )}
+              {mode === 'signup' && (
+                <Field label="Code entreprise" required hint="Code de 8 caractères remis par votre administrateur.">
+                  <Input size="lg" autoComplete="off" autoCapitalize="characters" value={code} onChange={e => setCode(e.target.value.toUpperCase())} required minLength={4} maxLength={16} />
                 </Field>
               )}
               <Field label="E-mail" required>

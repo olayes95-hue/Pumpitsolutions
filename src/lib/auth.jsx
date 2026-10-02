@@ -12,6 +12,7 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [permissions, setPermissions] = useState(new Set())
   const [roleLabel, setRoleLabel] = useState('')
+  const [organisation, setOrganisation] = useState(null)
   const [loading, setLoading] = useState(true)
   // Distinct de `loading` (qui ne couvre que le tout premier chargement de la session) :
   // à chaque connexion/changement de session, onAuthStateChange met `session` à jour
@@ -68,12 +69,20 @@ export function AuthProvider({ children }) {
       .then(({ data }) => setRoleLabel(data?.label || profile.role))
   }, [profile?.role])
 
+  // Organisation (client) du compte. Le cloisonnement est fait par la base (RLS) :
+  // cette lecture ne sert qu'à l'affichage (nom du client, code d'invitation).
+  useEffect(() => {
+    if (!profile?.organisation_id) { setOrganisation(null); return }
+    supabase.from('organisations').select('*').eq('id', profile.organisation_id).maybeSingle()
+      .then(({ data }) => setOrganisation(data || null))
+  }, [profile?.organisation_id])
+
   // Seuil de déconnexion auto, réglable par l'admin (Stations & équipe) — utile sur les
   // téléphones partagés en station, pour ne pas rester connecté indéfiniment.
   useEffect(() => {
     supabase.from('settings').select('deconnexion_auto_heures').eq('id', 1).maybeSingle()
       .then(({ data }) => { if (data?.deconnexion_auto_heures) setDeconnexionHeures(Number(data.deconnexion_auto_heures)) })
-  }, [])
+  }, [profile?.organisation_id])
 
   // Déconnexion auto après N heures depuis la connexion — vérifiée périodiquement, pas
   // seulement au chargement, sinon un onglet resté ouvert des jours ne serait jamais déconnecté.
@@ -102,12 +111,19 @@ export function AuthProvider({ children }) {
     isAdmin: profile?.role === 'admin',
     isPompiste: profile?.role === 'pompiste',
     isVendeuse: profile?.role === 'vendeuse',
+    // Multi-clients : organisation courante et statut d'administrateur de la plateforme
+    // (celui qui gère tous les clients). Voir supabase/migration_v96_multiclient.sql.
+    organisation,
+    isPlatformAdmin: !!profile?.is_platform_admin,
+    refreshProfile: () => loadProfile(session?.user?.id),
     // Raccourci en dur, indépendant de la matrice — ne peut jamais être cassé par une
     // mauvaise manipulation dans l'écran Rôles (voir garde-fous du RBAC).
     can: (key) => profile?.role === 'admin' || permissions.has(key),
     signIn: (email, password) => supabase.auth.signInWithPassword({ email, password }),
-    signUp: (email, password, full_name) =>
-      supabase.auth.signUp({ email, password, options: { data: { full_name } } }),
+    // org_code : code d'invitation du client, lu par le trigger handle_new_user pour
+    // rattacher le nouveau compte à son organisation.
+    signUp: (email, password, full_name, org_code) =>
+      supabase.auth.signUp({ email, password, options: { data: { full_name, org_code: (org_code || '').trim().toUpperCase() } } }),
     signOut: () => supabase.auth.signOut(),
   }
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>

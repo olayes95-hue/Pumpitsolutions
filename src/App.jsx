@@ -28,20 +28,24 @@ const Products = lazy(() => import('./pages/Products.jsx'))
 const Stock = lazy(() => import('./pages/Stock.jsx'))
 const Aide = lazy(() => import('./pages/Aide.jsx'))
 const Journal = lazy(() => import('./pages/Journal.jsx'))
+const Entreprise = lazy(() => import('./pages/Entreprise.jsx'))
 
 // Rôles historiques (gérant, pompiste, vendeuse, admin) : accès opérationnel d'office.
 // Tout autre rôle (directeur, comptable, rôle créé depuis l'écran Rôles) ne l'obtient
 // que par la permission manage_orders.
 function useAccess() {
-  const { profile, isAdmin, isPompiste, isVendeuse, can } = useAuth()
+  const { profile, isAdmin, isPompiste, isVendeuse, isPlatformAdmin, can } = useAuth()
   const op = isAdmin || profile?.role === 'gerant' || isPompiste || isVendeuse || can('manage_orders')
-  return { op, can, isVendeuse }
+  // Page Entreprise : code d'invitation pour l'administrateur d'un client, gestion des
+  // clients pour l'administrateur de la plateforme.
+  const org = isAdmin || isPlatformAdmin
+  return { op, can, isVendeuse, org, isPlatformAdmin }
 }
 
 // Les cinq espaces de l'application. Chaque entrée n'apparaît que si le profil y a droit ;
 // un espace sans entrée disparaît de la navigation.
 function useSpaces() {
-  const { op, can, isVendeuse } = useAccess()
+  const { op, can, isVendeuse, org, isPlatformAdmin } = useAccess()
   const spaces = [
     { key: 'jour', label: "Aujourd'hui", icon: 'sun', items: [
       op && { to: '/saisie', icon: 'file-pen-line', label: isVendeuse ? 'Saisie supérette' : 'Saisie du jour' },
@@ -66,6 +70,7 @@ function useSpaces() {
     ] },
     { key: 'reglages', label: 'Réglages', icon: 'settings', items: [
       (can('manage_stations_config') || can('manage_team')) && { to: '/stations', icon: 'building-2', label: 'Stations et équipe' },
+      org && { to: '/entreprise', icon: 'landmark', label: isPlatformAdmin ? 'Clients' : 'Entreprise' },
       can('view_audit_log') && { to: '/audit', icon: 'search', label: "Journal d'audit" },
       { to: '/aide', icon: 'circle-question-mark', label: 'Aide' },
     ] },
@@ -84,7 +89,7 @@ function StationPicker() {
 }
 
 function Shell({ children }) {
-  const { profile, roleLabel, signOut } = useAuth()
+  const { profile, roleLabel, organisation, signOut } = useAuth()
   const nav = useNavigate()
   const { pathname } = useLocation()
   const spaces = useSpaces()
@@ -112,7 +117,7 @@ function Shell({ children }) {
             <span className="pi-avatar" aria-hidden="true">{initial}</span>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="n">{profile?.full_name || 'Mon compte'}</div>
-              <div className="r">{roleLabel}</div>
+              <div className="r">{[roleLabel, organisation?.nom].filter(Boolean).join(' · ')}</div>
             </div>
             <button type="button" className="pi-ghost-dark" title="Se déconnecter" aria-label="Se déconnecter" onClick={logout}><Icon name="log-out" size={18} /></button>
           </div>
@@ -161,13 +166,15 @@ function Shell({ children }) {
 // Compte créé mais pas encore validé par un administrateur, ou validé sans station attribuée.
 // Bloque tout accès opérationnel : mieux vaut un message clair qu'une application vide.
 function PendingApproval() {
-  const { session, signOut } = useAuth()
+  const { session, profile, signOut } = useAuth()
   return (
     <div className="center" style={{ flexDirection: 'column', gap: 'var(--sp-5)', textAlign: 'center', padding: 'var(--sp-6)' }}>
       <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 40 }} />
       <h2 style={{ fontSize: 24 }}>Compte en attente de validation</h2>
       <p style={{ font: '400 15px/1.55 var(--font-ui)', color: 'var(--text-secondary)', maxWidth: 440, margin: 0 }}>
-        Votre compte{session?.user?.email ? ` (${session.user.email})` : ''} est créé. Un administrateur doit le valider et vous attribuer une station. Prévenez-le, puis reconnectez-vous.
+        {profile?.organisation_id === null
+          ? <>Votre compte{session?.user?.email ? ` (${session.user.email})` : ''} est créé, mais le code entreprise saisi n'a pas été reconnu. Communiquez votre e-mail à votre administrateur pour qu'il fasse rattacher le compte.</>
+          : <>Votre compte{session?.user?.email ? ` (${session.user.email})` : ''} est créé. Un administrateur doit le valider et vous attribuer une station. Prévenez-le, puis reconnectez-vous.</>}
       </p>
       <Button tone="outline" onClick={signOut}>Se déconnecter</Button>
     </div>
@@ -179,7 +186,7 @@ function Loading() {
 }
 
 function AppRoutes() {
-  const { op, can, isVendeuse } = useAccess()
+  const { op, can, isVendeuse, org } = useAccess()
   // Première page accessible, dans l'ordre Aujourd'hui > Stock > Pilotage > Finance :
   // sert de destination à toute route interdite au profil courant.
   function home() {
@@ -211,6 +218,7 @@ function AppRoutes() {
           <Route path="/rapprochement" element={guard(can('view_bank_recon'), <BankRecon />)} />
           <Route path="/verif-photos" element={guard(can('view_ocr_check'), <OcrCheck />)} />
           <Route path="/stations" element={guard(can('manage_stations_config') || can('manage_team'), <Stations />)} />
+          <Route path="/entreprise" element={guard(org, <Entreprise />)} />
           <Route path="/audit" element={guard(can('view_audit_log'), <AuditLog />)} />
           <Route path="/aide" element={<Aide />} />
           <Route path="*" element={<Navigate to={home()} />} />
