@@ -14,6 +14,8 @@ import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { Textarea } from '../ds/pumpit/components/forms/Textarea.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
+import { Drawer, DrawerRow } from '../ds/pumpit/components/feedback/Drawer.jsx'
+import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
@@ -48,6 +50,10 @@ export default function Inspections() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
   const [fYear, setFYear] = useState('all')
+  // Le formulaire reste caché par défaut : on arrive directement sur l'historique, le
+  // formulaire ne s'ouvre qu'à la demande (bouton "+ Enregistrer un nouveau contrôle").
+  const [formOpen, setFormOpen] = useState(false)
+  const [detailId, setDetailId] = useState(null)
 
   const nombreMachines = Math.min(MAX_MACHINES, Math.max(1, Number(current?.nombre_machines) || 4))
   const pompesDisponibles = machineNums(nombreMachines).flatMap(n => [
@@ -115,6 +121,7 @@ export default function Inspections() {
         fiche_photo_path, created_by: session.user.id })
       if (error) throw error
       setF(blank()); setOrganismeAutre(''); setPompesSel({}); setFichePhotoPath(null)
+      setFormOpen(false)
       setMsg('Contrôle enregistré'); setTimeout(() => setMsg(''), 2500); load()
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
@@ -153,7 +160,15 @@ export default function Inspections() {
         </div>
       )}
 
-      <Panel title="Enregistrer un contrôle / une intervention">
+      {/* Par défaut, seul l'historique est affiché — le formulaire ne s'ouvre qu'à la demande. */}
+      {!formOpen && (
+        <Button tone="primary" style={{ alignSelf: 'flex-start' }} onClick={() => setFormOpen(true)}>
+          + Enregistrer un nouveau contrôle
+        </Button>
+      )}
+
+      {formOpen && (
+      <Panel title="Enregistrer un contrôle / une intervention" actions={<Button tone="outline" onClick={() => setFormOpen(false)}>Annuler</Button>}>
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
           Contrôle inopiné (ANM, Bénin Pétro…) ou intervention d'un agent dépanneur — prélèvement, retour en cuve, motif, pièces, observations, photo de la fiche.
         </p>
@@ -262,66 +277,77 @@ export default function Inspections() {
           </Button>
         </form>
       </Panel>
+      )}
 
-      <Panel title="Historique des contrôles" meta={`${shownList.length}`}
+      <Panel title="Historique des contrôles" meta={`${shownList.length}`} flush
         actions={years.length > 1 && <Select size="sm" value={fYear} onChange={e => setFYear(e.target.value)}
           options={[{ value: 'all', label: 'Toutes années' }, ...years.map(y => ({ value: y, label: y }))]} />}>
         {!shownList.length
           ? <PanelEmpty icon="shield-check" label="Aucun contrôle enregistré" />
-          : <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
-              {shownList.map(c => (
-                <div key={c.id} style={{ padding: 'var(--sp-5)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <b style={{ font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>{frDate(c.date_controle)} — {c.organisme}</b>
-                    <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-                      {c.conforme != null && <Badge tone={c.conforme ? 'ok' : 'alarm'}>{c.conforme ? 'Conforme' : 'Non conforme'}</Badge>}
-                      {c.a_adresser_direction && <Badge tone={c.traite ? 'ok' : 'warn'}>{c.traite ? 'Traité' : 'Action requise'}</Badge>}
-                    </div>
-                  </div>
-                  {c.motif && <div style={{ font: '400 15px/1.4 var(--font-ui)', color: 'var(--text-primary)', marginTop: 'var(--sp-2)' }}>{c.motif}</div>}
-                  {(c.agent_nom || c.heure_arrivee) && (
-                    <div style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 'var(--sp-2)' }}>
-                      {c.agent_nom && <>Agent : {c.agent_nom}{c.agent_contact ? ` (${c.agent_contact})` : ''} · </>}
-                      {c.heure_arrivee && <>arrivée {c.heure_arrivee.slice(0, 5)}</>}{c.heure_depart && <> — départ {c.heure_depart.slice(0, 5)}</>}
-                    </div>
-                  )}
-                  {Array.isArray(c.pompes_detail) && c.pompes_detail.length > 0 ? (
-                    <div style={{ marginTop: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-                      {c.pompes_detail.map((p, i) => (
-                        <div key={i} style={{ font: '400 14px/1.5 var(--font-ui)', color: 'var(--text-body)' }}>
-                          <b>{p.pompe}</b> — prélevé {N(p.prelevement_litres)} L · retour cuve {N(p.retour_cuve_litres)} L
-                          {p.index_avant != null && p.index_apres != null && ` · index ${p.index_avant} → ${p.index_apres}`}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ font: '400 15px/1.5 var(--font-ui)', color: 'var(--text-body)', marginTop: 'var(--sp-3)' }}>
-                      {c.pompes && <>Pompes : {c.pompes}<br /></>}
-                      Prélevé : {N(c.prelevement_litres)} L · Retour cuve : {N(c.retour_cuve_litres)} L
-                    </div>
-                  )}
-                  {c.pieces_a_remplacer && <div style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--state-warn)', marginTop: 'var(--sp-2)' }}>Pièces à remplacer : {c.pieces_a_remplacer}</div>}
-                  {c.observations && <div style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-body)', marginTop: 'var(--sp-2)' }}>Obs. : {c.observations}</div>}
-                  {c.actions_direction && (
-                    <div style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-body)', marginTop: 'var(--sp-2)', padding: 'var(--sp-3)', background: 'var(--surface-panel)', borderRadius: 'var(--radius-1)' }}>
-                      <b>Actions à prendre :</b> {c.actions_direction}
-                    </div>
-                  )}
-                  {c.fiche_photo_path && (
-                    <PhotoImage path={c.fiche_photo_path} alt="Fiche d'intervention" size={96} style={{ marginTop: 'var(--sp-4)' }} />
-                  )}
-                  <div style={{ marginTop: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-2)' }}>
-                    {isAdmin && c.a_adresser_direction && !c.traite && (
-                      <Button size="sm" tone="dark" onClick={() => marquerTraite(c.id)}>Marquer comme traité</Button>
-                    )}
-                    {(isAdmin || c.created_by === session.user.id) && (
-                      <Button size="sm" tone="danger" onClick={() => del(c.id)}>Supprimer</Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>}
+          : <DataTable
+              columns={[
+                { key: 'date', header: 'Date', render: c => frDate(c.date_controle) },
+                { key: 'organisme', header: 'Organisme' },
+                { key: 'motif', header: 'Motif', render: c => c.motif || '—' },
+                { key: 'conforme', header: 'Conforme', render: c => c.conforme == null ? '—' : <Badge tone={c.conforme ? 'ok' : 'alarm'}>{c.conforme ? 'Oui' : 'Non'}</Badge> },
+                // Visible d'un coup d'œil pour la direction/l'admin, sans ouvrir chaque ligne —
+                // c'est précisément ce qu'une liste de cartes ne permettait pas de voir globalement.
+                { key: 'action', header: 'Action', render: c => c.a_adresser_direction ? <Badge tone={c.traite ? 'ok' : 'warn'}>{c.traite ? 'Traité' : 'Action requise'}</Badge> : '—' },
+                { key: 'photo', header: 'Photo', render: c => c.fiche_photo_path ? <PhotoImage path={c.fiche_photo_path} alt="" size={32} /> : '—' },
+              ]}
+              rows={shownList}
+              onRowClick={c => setDetailId(c.id)}
+            />}
       </Panel>
+
+      {/* Détail d'un contrôle : lecture seule pour le gérant — ni modification ni suppression
+          possibles depuis ce tiroir pour ce rôle, seulement pour l'administrateur. */}
+      <Drawer open={!!detailId} onClose={() => setDetailId(null)}
+        title={detailId && list.find(c => c.id === detailId) ? `${frDate(list.find(c => c.id === detailId).date_controle)} — ${list.find(c => c.id === detailId).organisme}` : ''}
+        footer={(() => {
+          const c = list.find(x => x.id === detailId)
+          if (!c || !isAdmin) return null
+          return <>
+            {c.a_adresser_direction && !c.traite && <Button tone="dark" onClick={() => marquerTraite(c.id)}>Marquer comme traité</Button>}
+            <Button tone="danger" onClick={() => { del(c.id); setDetailId(null) }}>Supprimer</Button>
+          </>
+        })()}>
+        {(() => {
+          const c = list.find(x => x.id === detailId)
+          if (!c) return null
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+              {c.conforme != null && <DrawerRow label="Conforme" value={c.conforme ? 'Oui' : 'Non'} status={c.conforme ? 'ok' : 'alarm'} />}
+              {c.a_adresser_direction && <DrawerRow label="Action direction" value={c.traite ? 'Traité' : 'Action requise'} status={c.traite ? 'ok' : 'warn'} />}
+              {c.motif && <DrawerRow label="Motif" value={c.motif} mono={false} />}
+              {c.agent_nom && <DrawerRow label="Agent" value={`${c.agent_nom}${c.agent_contact ? ` (${c.agent_contact})` : ''}`} mono={false} />}
+              {(c.heure_arrivee || c.heure_depart) && (
+                <DrawerRow label="Horaires" mono={false} value={`${c.heure_arrivee ? 'arrivée ' + c.heure_arrivee.slice(0, 5) : ''}${c.heure_depart ? ' — départ ' + c.heure_depart.slice(0, 5) : ''}`} />
+              )}
+              {Array.isArray(c.pompes_detail) && c.pompes_detail.length > 0 ? (
+                <div style={{ marginTop: 'var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+                  {c.pompes_detail.map((p, i) => (
+                    <div key={i} style={{ font: '400 14px/1.5 var(--font-ui)', color: 'var(--text-body)' }}>
+                      <b>{p.pompe}</b> — prélevé {N(p.prelevement_litres)} L · retour cuve {N(p.retour_cuve_litres)} L
+                      {p.index_avant != null && p.index_apres != null && ` · index ${p.index_avant} → ${p.index_apres}`}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <DrawerRow label="Prélevé / retour cuve" mono={false} value={`${N(c.prelevement_litres)} L / ${N(c.retour_cuve_litres)} L${c.pompes ? ' — ' + c.pompes : ''}`} />
+              )}
+              {c.pieces_a_remplacer && <DrawerRow label="Pièces à remplacer" value={c.pieces_a_remplacer} mono={false} status="warn" />}
+              {c.observations && <DrawerRow label="Observations" value={c.observations} mono={false} />}
+              {c.actions_direction && <DrawerRow label="Actions à prendre" value={c.actions_direction} mono={false} />}
+              {c.fiche_photo_path && (
+                <div style={{ marginTop: 'var(--sp-4)' }}>
+                  <PhotoImage path={c.fiche_photo_path} alt="Fiche d'intervention" size={220} />
+                </div>
+              )}
+            </div>
+          )
+        })()}
+      </Drawer>
     </div>
   )
 }
