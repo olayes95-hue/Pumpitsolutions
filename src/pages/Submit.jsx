@@ -116,6 +116,7 @@ export default function Submit() {
   const orderReceptionRef = useRef(null)
 
   function fail(message, target = 'top', ref) {
+    setBusy(false)
     setErr(message); setErrTarget(target)
     if (target === 'expenses') setOpenDepenses(true)
     if (target === 'deposits') setOpenVersements(true)
@@ -388,6 +389,14 @@ export default function Submit() {
   }
 
   async function save() {
+    // Garde-fou anti-double-clic : posé AVANT toute vérification (certaines font de vraies
+    // requêtes réseau, ex. la détection de versement en double) — sans ça, le bouton restait
+    // cliquable pendant cette fenêtre, et un double-tap sur téléphone lent pouvait lancer deux
+    // exécutions en parallèle. Repéré comme cause probable de doublons dans les mouvements de
+    // stock (ex. la sortie supérette du soir, écrite deux fois). fail() remet busy à false sur
+    // chaque sortie anticipée ; le succès passe par le finally plus bas.
+    if (busy) return
+    setBusy(true); setErr(''); setErrTarget('top'); setMsg('')
     if (!stationId) { fail('Aucune station sélectionnée.'); return }
     if (locked) { fail(lockedMsg); return }
     // 16h obligatoire : tous les relevés de la station doivent être remplis pour l'envoi de 16h
@@ -462,7 +471,6 @@ export default function Submit() {
         return
       }
     }
-    setBusy(true); setErr(''); setErrTarget('top'); setMsg('')
     const sid = stationId
     try {
       const payload = { report_date: date, station_id: sid, created_by: session.user.id, lubrifiant_stock: Object.keys(lub).length ? lub : null, lubrifiant_vendu: Object.keys(lubVendu).length ? lubVendu : null }
