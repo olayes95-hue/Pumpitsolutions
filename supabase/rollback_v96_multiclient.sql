@@ -1,5 +1,5 @@
 -- ============================================================
---  Retour arrière du multi-clients (v96 à v101)
+--  Retour arrière du multi-clients (v96, v97, v99, v102, v103)
 -- ============================================================
 --  Revenir à une base mono-client n'a de sens qu'avec UN SEUL client :
 --  avec plusieurs, les données se mélangeraient. Le script refuse donc
@@ -48,8 +48,8 @@ begin
   end loop;
 end $$;
 drop trigger if exists trg_prevent_org_change on public.profiles;
--- v101 : l'offre par station n'a plus de sens sans clients. La colonne est gardée mais libérée,
--- pour que la v100 puis la v101 se rejouent.
+-- v103 : l'offre par station n'a plus de sens sans clients. La colonne est gardée mais libérée,
+-- pour que la v102 puis la v103 se rejouent.
 drop trigger if exists trg_station_offre on public.stations;
 alter table public.stations drop column if exists formule;
 
@@ -112,7 +112,7 @@ end $$;
 -- v96 puis v97 se rejouent proprement.
 drop function if exists public.can_read_photo(text);
 drop function if exists public.my_organisation_id() cascade;
--- Fonctions de la v100 : leur absence permet de rejouer v96, v97, v99 puis v100.
+-- Fonctions de la v102 : leur absence permet de rejouer v96, v97, v99 puis v102.
 drop function if exists public.agent_can(text) cascade;
 drop function if exists public.is_agent() cascade;
 drop function if exists public.organisation_accessible(public.organisations) cascade;

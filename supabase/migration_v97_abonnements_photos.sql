@@ -17,11 +17,11 @@
 
 begin;
 
--- Garde-fou : une fois la v100 appliquée, ce script ne doit plus être rejoué
--- (il écraserait des fonctions et des règles que la v100 a remplacées).
+-- Garde-fou : une fois la v102 appliquée, ce script ne doit plus être rejoué
+-- (il écraserait des fonctions et des règles que la v102 a remplacées).
 do $$ begin
   if to_regprocedure('public.agent_can(text)') is not null then
-    raise exception 'La v100 est déjà appliquée : ne rejouez pas ce script. Seule la v100 se rejoue.';
+    raise exception 'La v102 est déjà appliquée : ne rejouez pas ce script. Seule la v102 se rejoue.';
   end if;
 end $$;
 
