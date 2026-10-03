@@ -24,7 +24,10 @@ export function StationProvider({ children }) {
     if (!profile || isAdmin || SINGLE_STATION_ROLES.includes(profile.role)) { setMyStationIds([]); return }
     supabase.from('profile_stations').select('station_id').eq('profile_id', profile.id)
       .then(({ data }) => setMyStationIds((data || []).map(r => r.station_id)))
-  }, [profile, isAdmin])
+    // Dépend des VALEURS utilisées (id, role), pas de l'objet `profile` entier : celui-ci change
+    // de référence à chaque rafraîchissement silencieux du jeton (voir auth.jsx), ce qui recréait
+    // inutilement ce tableau (et, en cascade, la liste des stations) sans aucun changement réel.
+  }, [profile?.id, profile?.role, isAdmin])
 
   const stations = useMemo(() => {
     if (isAdmin) return allStations

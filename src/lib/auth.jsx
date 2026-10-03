@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
 import { fonctionsDe, etatAbonnement } from './formules'
 import { today } from './format'
@@ -28,6 +28,10 @@ export function AuthProvider({ children }) {
   // pour un compte déjà validé, le temps que le vrai profil arrive.
   const [profileLoading, setProfileLoading] = useState(true)
   const [deconnexionHeures, setDeconnexionHeures] = useState(DECONNEXION_DEFAUT_HEURES)
+  // Dernier user.id connu — comparé à chaque événement d'auth pour décider si c'est "silencieux"
+  // (voir onAuthStateChange plus bas). Une ref, pas un state : lu depuis un callback abonné une
+  // seule fois au montage, il faut la valeur la PLUS RÉCENTE, pas celle figée à l'abonnement.
+  const lastUserIdRef = useRef(null)
 
   async function loadProfile(userId, { silent = false } = {}) {
     if (!userId) { setProfile(null); setPermissions(new Set()); setProfileLoading(false); return }
@@ -64,17 +68,23 @@ export function AuthProvider({ children }) {
     const timeout = setTimeout(() => { if (!settled) setLoading(false) }, 6000)
     supabase.auth.getSession().then(async ({ data }) => {
       settled = true; clearTimeout(timeout)
+      lastUserIdRef.current = data.session?.user?.id || null
       setSession(data.session)
       await loadProfile(data.session?.user?.id)
       setLoading(false)
     })
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
-      // TOKEN_REFRESHED/USER_UPDATED se déclenchent aussi au retour sur l'onglet (reprise du
-      // rafraîchissement automatique du jeton par le SDK après une mise en arrière-plan) —
-      // ce n'est pas une vraie connexion/déconnexion, donc silencieux (voir loadProfile).
-      const silent = event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED'
+      // Silencieux dès que c'est TOUJOURS la même personne connectée qu'avant — peu importe le
+      // nom exact de l'événement (TOKEN_REFRESHED, ou même SIGNED_IN si le SDK resynchronise la
+      // session depuis le stockage au retour sur l'onglet après une mise en arrière-plan) : ce
+      // n'est pas une vraie reconnexion, donc ça ne doit jamais faire repartir App.jsx de zéro
+      // (qui réinitialiserait au passage la station sélectionnée, le brouillon en cours, etc.).
+      // Seul un changement RÉEL d'identité (ou une déconnexion) justifie l'écran "Chargement…".
+      const newUserId = s?.user?.id || null
+      const silent = !!newUserId && newUserId === lastUserIdRef.current
+      lastUserIdRef.current = newUserId
       setSession(s)
-      await loadProfile(s?.user?.id, { silent })
+      await loadProfile(newUserId, { silent })
       if (event === 'SIGNED_IN') localStorage.setItem(SIGNIN_KEY, String(Date.now()))
       if (event === 'SIGNED_OUT') localStorage.removeItem(SIGNIN_KEY)
     })
