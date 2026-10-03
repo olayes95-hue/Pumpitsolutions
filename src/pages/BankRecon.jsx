@@ -39,6 +39,8 @@ export default function BankRecon() {
   const [importCols, setImportCols] = useState(null)
   const [importNeedsMapping, setImportNeedsMapping] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [showManual, setShowManual] = useState(false)
   // Filtre période — plusieurs mois/années possibles, comme Commandes (voir MultiSelectPopover).
   const [years, setYears] = useState([])
   const [months, setMonths] = useState([])
@@ -98,6 +100,11 @@ export default function BankRecon() {
     try { text = await readCsvFile(file) } catch { setErr('Impossible de lire ce fichier.'); return }
     const { headers, rows } = parseCsv(text)
     if (!headers.length || !rows.length) { setErr('Fichier vide ou illisible — vérifiez que c\'est bien un export CSV.'); return }
+    // Re-charge les catégories juste avant de classer : si elles ont été modifiées (mots-clés,
+    // nouvelle catégorie) depuis l'ouverture de cette page, sans ça l'import utiliserait encore
+    // les anciennes, chargées une seule fois au montage.
+    const { data: freshCats } = await supabase.from('bank_line_categories').select('*').eq('actif', true).order('ordre')
+    if (freshCats) setCategories(freshCats)
     const cols = detectColumns(headers)
     setImportHeaders(headers); setImportRows(rows); setImportCols(cols); setImportNeedsMapping(true)
   }
@@ -218,6 +225,12 @@ export default function BankRecon() {
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
       {err && <AlertBanner tone="alarm" title="Erreur">{err}</AlertBanner>}
 
+      <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+        <Button tone={showImport ? 'dark' : 'neutral'} icon="upload" onClick={() => { setShowImport(v => !v); setShowManual(false) }}>Importer un relevé (CSV)</Button>
+        <Button tone={showManual ? 'dark' : 'neutral'} icon="plus" onClick={() => { setShowManual(v => !v); setShowImport(false) }}>Saisir une ligne manuellement</Button>
+      </div>
+
+      {showImport && (
       <Panel title="Importer un relevé (CSV)">
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
           Exportez le relevé depuis le site de votre banque (CSV ou Excel exporté en CSV), pour la période voulue, puis importez-le ici. Crédits et débits sont importés et classés automatiquement (catégories réglables dans Stations & équipe → Paramètres).
@@ -265,7 +278,9 @@ export default function BankRecon() {
           )
         })()}
       </Panel>
+      )}
 
+      {showManual && (
       <Panel title="Saisir une ligne manuellement">
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
           Pour une correction ponctuelle, ou si l'import CSV ci-dessus n'est pas possible.
@@ -289,6 +304,7 @@ export default function BankRecon() {
           <Button type="submit" tone="primary">Ajouter la ligne</Button>
         </form>
       </Panel>
+      )}
 
       <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
         <MultiSelectPopover label="Années" allLabel="Toutes années" options={availableYears.map(y => [y, y])}
