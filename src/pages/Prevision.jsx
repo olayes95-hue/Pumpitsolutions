@@ -20,7 +20,7 @@ export default function Prevision() {
   const { activite } = useOffre()
   const [tab, setTab] = useState('carburant')
   const [reorderCarburant, setReorderCarburant] = useState([])
-  const [enCoursRestant, setEnCoursRestant] = useState({ essence: 0, gasoil: 0 })
+  const [enCoursRestant, setEnCoursRestant] = useState({})   // {"categorie|produit": litres/unités déjà en commande, pas encore reçus}
   const [paPrix, setPaPrix] = useState({ essence_pa: 0, gasoil_pa: 0 })
   const [soldeBancaire, setSoldeBancaire] = useState(0)
   const [bonsRestant, setBonsRestant] = useState(0)
@@ -38,10 +38,10 @@ export default function Prevision() {
     ;(async () => {
       const [ro, fo, orc, st, cb, ls, rp] = await Promise.all([
         supabase.from('v_reorder').select('*').eq('station_id', stationId),
-        // Commandes carburant en cours (ni reçues ni refusées) — pour ne pas suggérer de
-        // recommander ce qui est déjà en route (voir enCoursRestant plus bas).
-        supabase.from('fuel_orders').select('id,produit').eq('station_id', stationId).in('statut', ['proposee', 'validee', 'lancee', 'partielle']),
-        supabase.from('v_order_reception').select('order_id,produit,reste').eq('station_id', stationId),
+        // Commandes en cours, toutes catégories (ni reçues ni refusées) — pour ne pas suggérer
+        // de recommander ce qui est déjà en route (voir enCoursRestant plus bas).
+        supabase.from('fuel_orders').select('id').eq('station_id', stationId).in('statut', ['proposee', 'validee', 'lancee', 'partielle']),
+        supabase.from('v_order_reception').select('order_id,categorie,produit,reste').eq('station_id', stationId),
         supabase.from('settings').select('essence_pa,gasoil_pa').eq('id', 1).maybeSingle(),
         // Financement disponible pour commander : bons restants + solde bancaire suivi
         // (Point financier → Compte bancaire).
@@ -51,8 +51,11 @@ export default function Prevision() {
       ])
       setReorderCarburant(ro.data || [])
       const idsEnCours = new Set((fo.data || []).map(o => o.id))
-      const ec = { essence: 0, gasoil: 0 }
-      for (const r of (orc.data || [])) if (idsEnCours.has(r.order_id)) ec[r.produit] = (ec[r.produit] || 0) + N(r.reste)
+      const ec = {}
+      for (const r of (orc.data || [])) if (idsEnCours.has(r.order_id)) {
+        const k = `${r.categorie}|${r.produit}`
+        ec[k] = (ec[k] || 0) + N(r.reste)
+      }
       setEnCoursRestant(ec)
       setPaPrix(st.data || { essence_pa: 0, gasoil_pa: 0 })
       setSoldeBancaire(N(cb.data?.solde_actuel))
@@ -67,7 +70,7 @@ export default function Prevision() {
   const qteMinMax = (r) => {
     if (r.stock == null) return null
     const capacite = r.produit === 'essence' ? capaciteEssence : capaciteGasoil
-    const dejaEnCours = N(enCoursRestant[r.produit])
+    const dejaEnCours = N(enCoursRestant[`carburant|${r.produit}`])
     const stockALivraison = Math.max(0, N(r.stock) - N(r.conso_jour) * N(r.lead)) + dejaEnCours
     const min = Math.max(0, Math.ceil((N(r.seuil_commande_litres) - stockALivraison) / 1000) * 1000)
     const max = Math.max(0, Math.floor((capacite - N(r.stock) - dejaEnCours) / 1000) * 1000)
@@ -79,7 +82,17 @@ export default function Prevision() {
     return urgent && !!q && q.min > 0
   }
   const paCarburant = (produit) => produit === 'gasoil' ? N(paPrix.gasoil_pa) : N(paPrix.essence_pa)
-  const coutBesoinTotal = reorderCarburant.filter(besoin).reduce((s, r) => s + (qteMinMax(r)?.min || 0) * paCarburant(r.produit), 0)
+
+  // ===== Gaz / lubrifiant : même principe que carburant — net de ce qui est déjà en commande,
+  // "complément" plutôt que masqué quand une commande en cours ne suffit pas. Pas de "max" ici
+  // (pas de capacité de stockage suivie pour les bouteilles/bidons, contrairement à la cuve).
+  const qteNetteProduit = (r) => Math.max(0, Math.round(N(r.quantite_a_commander) - N(enCoursRestant[`${r.categorie}|${r.produit}`])))
+  const besoinProduit = (r) => qteNetteProduit(r) > 0
+
+  // Financement partagé (bons + solde bancaire) entre TOUS les pôles — carburant, gaz, lubrifiant.
+  const coutBesoinCarburant = reorderCarburant.filter(besoin).reduce((s, r) => s + (qteMinMax(r)?.min || 0) * paCarburant(r.produit), 0)
+  const coutBesoinProduit = reorderProduit.filter(besoinProduit).reduce((s, r) => s + qteNetteProduit(r) * N(r.prix_achat), 0)
+  const coutBesoinTotal = coutBesoinCarburant + coutBesoinProduit
   const financementDisponible = bonsRestant + soldeBancaire
   const manqueFinancement = Math.max(0, Math.round(coutBesoinTotal - financementDisponible))
 
@@ -107,24 +120,32 @@ export default function Prevision() {
     } },
   ]
 
-  // ===== Gaz / lubrifiant : v_reorder_produit (déjà avec sa propre quantité à commander) =====
+  // ===== Gaz / lubrifiant : v_reorder_produit, quantité nette de ce qui est déjà en commande =====
   const produitColumns = [
     { key: 'produit', header: 'Produit' },
     { key: 'stock_theorique_actuel', header: 'Stock', numeric: true, align: 'right', render: r => N(r.stock_theorique_actuel) },
     { key: 'conso_moy_jour', header: 'Conso/jour', numeric: true, align: 'right', muted: true, render: r => (Number(r.conso_moy_jour) || 0).toFixed(1) },
     { key: 'stock_cible', header: 'Cible', numeric: true, align: 'right', muted: true, render: r => N(r.stock_cible) },
     { key: 'quantite_a_commander', header: 'À commander', numeric: true, align: 'right', render: r => {
-      if (r.commande_en_cours) return <Badge tone="info">Déjà en cours</Badge>
-      if (N(r.quantite_a_commander) <= 0) return <span style={{ color: 'var(--state-ok)' }}>—</span>
-      return <span style={{ fontWeight: 600, color: 'var(--state-alarm)' }}>{N(r.quantite_a_commander)} {r.conditionnement_qte ? '(' + N(r.cartons_a_commander) + ' ' + (r.conditionnement_nom || 'carton') + '(s))' : ''}</span>
+      const q = qteNetteProduit(r)
+      if (q <= 0) return r.commande_en_cours ? <Badge tone="info" title="Une commande en cours couvre le besoin">Couvert par la commande en cours</Badge> : <span style={{ color: 'var(--state-ok)' }}>—</span>
+      const cartons = N(r.conditionnement_qte) > 0 ? Math.ceil(q / N(r.conditionnement_qte)) : null
+      return <span style={{ fontWeight: 600, color: 'var(--state-alarm)' }}>{q} {cartons != null ? `(${cartons} ${r.conditionnement_nom || 'carton'}(s)) ` : ''}{r.commande_en_cours ? '— complément' : ''}</span>
     } },
-    { key: 'cout_estimatif', header: 'Coût estimé', numeric: true, align: 'right', muted: true, render: r => r.quantite_a_commander > 0 && !r.commande_en_cours ? fcfa(r.cout_estimatif) : '—' },
+    { key: 'cout_estimatif', header: 'Coût estimé', numeric: true, align: 'right', muted: true, render: r => { const q = qteNetteProduit(r); return q > 0 ? fcfa(q * N(r.prix_achat)) : '—' } },
   ]
 
   if (!TABS.length) return <PanelEmpty icon="truck" label="Aucune activité avec prévision de commande sur cette station." />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
+      {manqueFinancement > 0 && (
+        <AlertBanner tone="warn" title="Alerte prévisionnelle — financement insuffisant">
+          Pour commander ce qu'il faut maintenant, tous pôles confondus (≈ {Math.round(coutBesoinTotal).toLocaleString('fr-FR')} F), les bons restants et le solde bancaire suivi ne couvrent que {Math.round(financementDisponible).toLocaleString('fr-FR')} F.
+          Il manque <b>{manqueFinancement.toLocaleString('fr-FR')} F</b> — pensez à verser ce montant en banque avant de passer commande.
+        </AlertBanner>
+      )}
+
       <Tabs items={TABS} value={tab} onChange={setTab} />
 
       {tab === 'carburant' && (
@@ -132,14 +153,6 @@ export default function Prevision() {
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
             Quand commander pour ne jamais tomber en rupture (rupture = ventes perdues), et combien de litres : un <b>minimum</b> (pour revenir au seuil de sécurité une fois cette livraison arrivée) et un <b>maximum</b> (ce que la cuve peut recevoir sans déborder) — en tenant compte de ce qui est déjà en commande, et arrondi au millier (les commandes se passent par multiples de 1000 L). Calcul de la date : autonomie − délai de livraison − marge de sécurité. Le <b>délai</b> est calculé automatiquement sur l'historique des commandes (lancement → réception).
           </p>
-          {manqueFinancement > 0 && (
-            <div style={{ margin: '0 var(--gutter-panel) var(--sp-4)' }}>
-              <AlertBanner tone="warn" title="Alerte prévisionnelle — financement insuffisant">
-                Pour commander ce qu'il faut maintenant (≈ {Math.round(coutBesoinTotal).toLocaleString('fr-FR')} F), les bons restants et le solde bancaire suivi ne couvrent que {Math.round(financementDisponible).toLocaleString('fr-FR')} F.
-                Il manque <b>{manqueFinancement.toLocaleString('fr-FR')} F</b> — pensez à verser ce montant en banque avant de passer la commande.
-              </AlertBanner>
-            </div>
-          )}
           <div style={{ marginTop: 'var(--sp-4)' }}>
             {reorderCarburant.length
               ? <DataTable columns={carburantColumns} rows={reorderCarburant.map(r => ({ ...r, id: r.produit }))} />
@@ -151,9 +164,9 @@ export default function Prevision() {
       {(tab === 'gaz' || tab === 'lubrifiant') && (() => {
         const rows = reorderProduit.filter(r => r.categorie === tab)
         return (
-          <Panel title={`Prévision de commande — ${tab === 'gaz' ? 'Gaz' : 'Lubrifiant'}`} flush>
+          <Panel title={`Prévision de commande — ${tab === 'gaz' ? 'Gaz' : 'Lubrifiant'}`} status={rows.some(besoinProduit) ? 'alarm' : 'ok'} flush>
             <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
-              Cible = seuil ou consommation moyenne × (délai livraison + jours de sécurité), selon le plus élevé. Le nombre de cartons est calculé automatiquement.
+              Cible = seuil ou consommation moyenne × (délai livraison + jours de sécurité), selon le plus élevé — net de ce qui est déjà en commande (une commande en cours insuffisante reste signalée comme "complément"). Le nombre de cartons est calculé automatiquement.
             </p>
             <div style={{ marginTop: 'var(--sp-4)' }}>
               {rows.length
