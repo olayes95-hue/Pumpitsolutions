@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate, today } from '../lib/format'
-import { readCsvFile, parseCsv, detectColumns, buildBankLines } from '../lib/bankImport'
+import { readCsvFile, parseCsv, detectColumns, buildBankLines, categoriser } from '../lib/bankImport'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
@@ -112,18 +112,46 @@ export default function BankRecon() {
   async function doImport(cols, rows) {
     setImportBusy(true)
     const lignes = buildBankLines(rows, cols, categories)
-    // Doublon : même date + même montant + même sens déjà présent (ex. relevé déjà importé pour
-    // partie, ou période qui chevauche un import précédent) — on ne les réinsère pas.
-    const existantes = new Set(bank.map(b => `${b.date_operation}|${Math.round(N(b.montant))}|${b.type}`))
-    const nouvelles = lignes.filter(l => !existantes.has(`${l.date_operation}|${Math.round(l.montant)}|${l.type}`))
-    const doublons = lignes.length - nouvelles.length
+    // Une ligne "déjà présente" (même date + même montant + même sens — ex. relevé réimporté
+    // en partie, ou période qui chevauche un import précédent) n'est pas réinsérée en double,
+    // mais SA CATÉGORIE EST QUAND MÊME MISE À JOUR si les mots-clés ont changé depuis — sinon,
+    // modifier une catégorie puis réimporter le même relevé ne changeait jamais rien.
+    const existantesParCle = new Map(bank.map(b => [`${b.date_operation}|${Math.round(N(b.montant))}|${b.type}`, b]))
+    const nouvelles = [], aRecategoriser = []
+    for (const l of lignes) {
+      const cle = `${l.date_operation}|${Math.round(l.montant)}|${l.type}`
+      const existante = existantesParCle.get(cle)
+      if (!existante) nouvelles.push(l)
+      else if (existante.categorie_id !== l.categorie_id) aRecategoriser.push({ id: existante.id, categorie_id: l.categorie_id })
+    }
     if (nouvelles.length) {
       const { error } = await supabase.from('bank_lines').insert(
         nouvelles.map(l => ({ ...l, station_id: stationId, created_by: session.user.id })))
       if (error) { setErr(error.message); setImportBusy(false); return }
     }
-    setMsg(`${nouvelles.length} ligne(s) importée(s)${doublons ? `, ${doublons} déjà présente(s) ignorée(s)` : ''}.`)
+    for (const r of aRecategoriser) await supabase.from('bank_lines').update({ categorie_id: r.categorie_id }).eq('id', r.id)
+    const inchangees = lignes.length - nouvelles.length - aRecategoriser.length
+    setMsg(`${nouvelles.length} ligne(s) importée(s)`
+      + (aRecategoriser.length ? `, ${aRecategoriser.length} recatégorisée(s)` : '')
+      + (inchangees ? `, ${inchangees} déjà à jour` : '') + '.')
     setImportBusy(false); setImportNeedsMapping(false); setImportRows([]); setImportHeaders([]); setImportCols(null)
+    load()
+  }
+
+  // Reclasse les lignes déjà en base avec les catégories ACTUELLES, sans avoir besoin de
+  // réimporter le fichier — pour qu'une modification des mots-clés s'applique tout de suite.
+  async function reclasserTout() {
+    setImportBusy(true); setErr(''); setMsg('')
+    const { data: freshCats } = await supabase.from('bank_line_categories').select('*').eq('actif', true).order('ordre')
+    const cats = freshCats || categories
+    if (freshCats) setCategories(freshCats)
+    let n = 0
+    for (const b of bank) {
+      const nouvelleCat = categoriser(b.reference || '', cats)
+      if (nouvelleCat !== b.categorie_id) { await supabase.from('bank_lines').update({ categorie_id: nouvelleCat }).eq('id', b.id); n++ }
+    }
+    setMsg(`${n} ligne(s) reclassée(s) selon les catégories actuelles${n === 0 ? ' (déjà à jour)' : ''}.`)
+    setImportBusy(false)
     load()
   }
 
@@ -228,6 +256,7 @@ export default function BankRecon() {
       <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
         <Button tone={showImport ? 'dark' : 'neutral'} icon="upload" onClick={() => { setShowImport(v => !v); setShowManual(false) }}>Importer un relevé (CSV)</Button>
         <Button tone={showManual ? 'dark' : 'neutral'} icon="plus" onClick={() => { setShowManual(v => !v); setShowImport(false) }}>Saisir une ligne manuellement</Button>
+        <Button icon="refresh-cw" disabled={importBusy || !bank.length} title="Réapplique les catégories actuelles (mots-clés) à toutes les lignes déjà importées, sans réimporter le fichier" onClick={reclasserTout}>{importBusy ? 'Reclassement…' : 'Reclasser avec les catégories actuelles'}</Button>
       </div>
 
       {showImport && (

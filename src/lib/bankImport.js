@@ -87,7 +87,9 @@ export function parseDateFR(raw) {
 
 // Catégorie d'une ligne : premier mot-clé (insensible accents/majuscules) trouvé dans la
 // description+référence, sinon la catégorie "autre" si elle existe, sinon aucune (null).
-function categoriser(texte, categories) {
+// Exportée : réutilisée pour reclasser des lignes déjà en base (sans re-importer le fichier)
+// après une modification des mots-clés.
+export function categoriser(texte, categories) {
   const t = norm(texte)
   for (const cat of categories) {
     if ((cat.mots_cles || []).some(mc => mc && t.includes(norm(mc)))) return cat.id

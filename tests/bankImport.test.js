@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseCsv, detectColumns, parseMontant, parseDateFR, buildBankLines } from '../src/lib/bankImport.js'
+import { parseCsv, detectColumns, parseMontant, parseDateFR, buildBankLines, categoriser } from '../src/lib/bankImport.js'
 
 describe('parseCsv', () => {
   it('détecte le séparateur point-virgule et découpe les lignes', () => {
@@ -108,5 +108,25 @@ describe('buildBankLines', () => {
       { date_operation: '2026-09-29', montant: 5200, reference: 'VERSEMENT ESPECES GERANT TEST/STATION TEST — ACX0001', type: 'credit', categorie_id: 1 },
       { date_operation: '2026-09-29', montant: 99900, reference: 'VERSEMENT ESPECES GERANT TEST/STATION TEST — ACX0002', type: 'credit', categorie_id: 1 },
     ])
+  })
+})
+
+describe('categoriser', () => {
+  const CATS = [
+    { id: 1, key: 'versement_gerant', mots_cles: ['VERSEMENT ESPECES'] },
+    { id: 2, key: 'virement_fournisseur', mots_cles: ['VIR.RECU', 'VIREMENT RECU'] },
+    { id: 3, key: 'frais_bancaire', mots_cles: ['TAXE', 'COMMISSION', 'PRELEV'] },
+    { id: 4, key: 'cheque_commande', mots_cles: ['CHEQUE'] },
+    { id: 5, key: 'salaire', mots_cles: [] },
+    { id: 6, key: 'autre', mots_cles: [] },
+  ]
+  it('reconnaît "Vir.recu" (point, minuscules) comme virement fournisseur', () => {
+    expect(categoriser('Vir.recu: BENIN PETRO S A OPERATIO', CATS)).toBe(2)
+  })
+  it('reconnaît un prélèvement comme frais bancaire une fois le mot-clé ajouté', () => {
+    expect(categoriser('PRELEV. PRIME ASSURANCE MOYEN DE PAIEMENT PACK. MID', CATS)).toBe(3)
+  })
+  it('retombe sur "autre" quand aucun mot-clé ne correspond (ex. catégorie sans mot-clé, à classer à la main)', () => {
+    expect(categoriser('PAIEMENT CHQ 0253423 PAR CAISSE UN TEL', CATS)).toBe(6)
   })
 })
