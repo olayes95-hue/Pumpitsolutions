@@ -85,6 +85,11 @@ export default function Submit() {
   const [lub, setLub] = useState({})
   const [lubVendu, setLubVendu] = useState({})   // {nom: quantité vendue aujourd'hui} — pour la commission réelle (prix vente − prix achat), plus une estimation à %
   const [lubVenduSplit, setLubVenduSplit] = useState({})
+  // Espèces gaz/lubrifiant : préremplies depuis les quantités vendues × prix (voir
+  // gazEspeceCalc/lubEspeceCalc), mais le gérant peut corriger (ex. bouteille offerte, rabais) —
+  // dès qu'il touche le champ, le préremplissage s'arrête de l'écraser pour cette journée.
+  const [gazEspeceTouched, setGazEspeceTouched] = useState(false)
+  const [lubEspeceTouched, setLubEspeceTouched] = useState(false)
   const [lubTheorique, setLubTheorique] = useState({})   // {nom: stock_theorique} — v_stock_theorique, pour l'écart en direct
   const [expenses, setExpenses] = useState([])
   const [deposits, setDeposits] = useState([])
@@ -199,12 +204,21 @@ export default function Submit() {
       setF(c); setLub(r.data.lubrifiant_stock || {}); setLubVendu(r.data.lubrifiant_vendu || {})
       // La journée est réellement enregistrée en base : le brouillon local n'a plus lieu d'être.
       clearDraft(stationId, d)
+      // Valeurs déjà déclarées (espèces) : ne jamais les recalculer silencieusement par-dessus
+      // à la relecture d'un jour passé (les prix peuvent avoir changé depuis) — seule une vraie
+      // modification du gérant doit les changer, via le champ lui-même.
+      setGazEspeceTouched(true); setLubEspeceTouched(true)
     }
     // Restauration silencieuse (pas de bannière) : un brouillon existe dès qu'une saisie du
     // jour est en cours, que la page ait redémarré ou non — l'afficher à chaque fois serait
     // trompeur (laisserait croire à un incident alors que c'est le cas normal).
-    else if (draft?.f) { setF(draft.f); setLub(draft.lub || {}); setLubVendu(draft.lubVendu || {}) }
-    else { setF({ ...EMPTY, ess_pu: settings.essence_pv, gas_pu: settings.gasoil_pv }); setLub({}); setLubVendu({}) }
+    else if (draft?.f) {
+      setF(draft.f); setLub(draft.lub || {}); setLubVendu(draft.lubVendu || {})
+      setGazEspeceTouched(false); setLubEspeceTouched(false)
+    } else {
+      setF({ ...EMPTY, ess_pu: settings.essence_pv, gas_pu: settings.gasoil_pv }); setLub({}); setLubVendu({})
+      setGazEspeceTouched(false); setLubEspeceTouched(false)
+    }
     setLubVenduSplit({})
     // Dépenses/versements/achats : la base fait autorité dès qu'il y a quelque chose ; sinon,
     // on retombe sur le brouillon local (ex. après un rechargement inattendu de la page).
@@ -348,6 +362,9 @@ export default function Submit() {
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   // valeur brute pendant la frappe, reformatée avec séparateurs de milliers à la sortie du champ
   const numProps = (k) => ({ value: f[k], onChange: e => set(k, e.target.value), onBlur: () => set(k, formatThousands(f[k])) })
+  // Comme numProps, mais marque le champ "touché" dès la première frappe — pour que le
+  // préremplissage (gaz/lubrifiant, voir plus haut) ne vienne plus écraser une correction du gérant.
+  const touchedNumProps = (k, setTouched) => ({ value: f[k], onChange: e => { setTouched(true); set(k, e.target.value) }, onBlur: () => set(k, formatThousands(f[k])) })
   const cashDeclare = N(f.ess_espece)+N(f.gas_espece)+N(f.gaz_espece)+N(f.superette_espece)+N(f.lubrifiant_espece)
   const totDepense = expenses.reduce((s, e) => s + N(e.montant), 0)
   const totVerse = deposits.reduce((s, d) => s + N(d.montant), 0)
@@ -390,13 +407,13 @@ export default function Submit() {
     if (gasCompteur != null && f.gas_litres === '') set('gas_litres', String(gasCompteur))
   }, [essCompteur, gasCompteur])
   useEffect(() => {
-    if (!showVenduLubGaz) return
+    if (!showVenduLubGaz || gazEspeceTouched) return
     set('gaz_espece', gazEspeceCalc ? formatThousands(String(Math.round(gazEspeceCalc))) : '0')
-  }, [gazEspeceCalc, showVenduLubGaz])
+  }, [gazEspeceCalc, showVenduLubGaz, gazEspeceTouched])
   useEffect(() => {
-    if (!showVenduLubGaz) return
+    if (!showVenduLubGaz || lubEspeceTouched) return
     set('lubrifiant_espece', lubEspeceCalc ? formatThousands(String(Math.round(lubEspeceCalc))) : '0')
-  }, [lubEspeceCalc, showVenduLubGaz])
+  }, [lubEspeceCalc, showVenduLubGaz, lubEspeceTouched])
   // Litres/Prix/Bon/Espèces sont 4 champs saisis indépendamment — rien ne garantit que
   // Bon + Espèces corresponde à Litres × Prix/L. Vérification en temps réel, non bloquante
   // (juste un repère visuel), pour repérer une saisie incohérente avant l'envoi.
@@ -919,7 +936,9 @@ export default function Submit() {
 
         {!isPompiste && <Panel>
           <StepHead n="4" title={activite('gaz') ? 'Gaz et autres ventes' : 'Autres ventes'} />
-          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Bouteilles vendues aujourd'hui, et recettes en espèces des autres pôles.</p>
+          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>
+            {showVenduLubGaz ? 'Bouteilles et quantités vendues aujourd\'hui, et recettes en espèces des autres pôles.' : 'Recettes en espèces des autres pôles.'}
+          </p>
           {activite('gaz') && showVenduLubGaz && <FormSection title="Bouteilles de gaz vendues">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
               {GAZ.map(([k, lab]) => (
@@ -969,14 +988,25 @@ export default function Submit() {
             </div>
           </FormSection>}
           <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', marginTop: 'var(--sp-4)' }}>
-            {activite('gaz') && (showVenduLubGaz
-              ? <Field label="Espèces gaz" style={{ flex: '1 1 160px' }} hint="Calculé depuis les bouteilles vendues ci-dessus"><Input type="text" value={f.gaz_espece || '0'} disabled /></Field>
-              : <Field label="Espèces gaz" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('gaz_espece')} /></Field>)}
+            {activite('gaz') && <Field label="Espèces gaz" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...touchedNumProps('gaz_espece', setGazEspeceTouched)} /></Field>}
             {activite('superette') && <Field label="Espèces supérette" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('superette_espece')} /></Field>}
-            {activite('lubrifiant') && (showVenduLubGaz
-              ? <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }} hint="Calculé depuis les lubrifiants vendus ci-dessus"><Input type="text" value={f.lubrifiant_espece || '0'} disabled /></Field>
-              : <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('lubrifiant_espece')} /></Field>)}
+            {activite('lubrifiant') && <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...touchedNumProps('lubrifiant_espece', setLubEspeceTouched)} /></Field>}
           </div>
+          {/* Préremplies depuis les quantités vendues × prix, mais modifiables (bouteille offerte,
+              rabais…) — l'écart avec l'attendu reste visible, comme pour essence/gasoil plus haut :
+              un repère pour le gérant, jamais bloquant à l'envoi. */}
+          {activite('gaz') && showVenduLubGaz && gazEspeceCalc > 0 && (
+            <p style={{ font: '400 13px/1.4 var(--font-ui)', color: Math.abs(gazEspeceCalc - N(f.gaz_espece)) > 1 ? 'var(--state-alarm)' : 'var(--state-ok)', margin: 'var(--sp-2) 0 0' }}>
+              Espèces gaz attendues (bouteilles vendues × prix) : {Math.round(gazEspeceCalc).toLocaleString('fr-FR')} F — déclaré {Math.round(N(f.gaz_espece)).toLocaleString('fr-FR')} F
+              {Math.abs(gazEspeceCalc - N(f.gaz_espece)) > 1 ? ` (écart ${Math.round(N(f.gaz_espece) - gazEspeceCalc).toLocaleString('fr-FR')} F)` : ' ✓'}
+            </p>
+          )}
+          {activite('lubrifiant') && showVenduLubGaz && lubEspeceCalc > 0 && (
+            <p style={{ font: '400 13px/1.4 var(--font-ui)', color: Math.abs(lubEspeceCalc - N(f.lubrifiant_espece)) > 1 ? 'var(--state-alarm)' : 'var(--state-ok)', margin: 'var(--sp-2) 0 0' }}>
+              Espèces lubrifiant attendues (lubrifiants vendus × prix) : {Math.round(lubEspeceCalc).toLocaleString('fr-FR')} F — déclaré {Math.round(N(f.lubrifiant_espece)).toLocaleString('fr-FR')} F
+              {Math.abs(lubEspeceCalc - N(f.lubrifiant_espece)) > 1 ? ` (écart ${Math.round(N(f.lubrifiant_espece) - lubEspeceCalc).toLocaleString('fr-FR')} F)` : ' ✓'}
+            </p>
+          )}
           <Field label="Total des bons en cours (cumul)" style={{ marginTop: 'var(--sp-3)' }}><Input type="text" inputMode="decimal" numeric {...numProps('total_bon_cumul')} /></Field>
         </Panel>}
       </>)}
