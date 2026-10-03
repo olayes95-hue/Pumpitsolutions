@@ -3,10 +3,12 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, frDate, today } from '../lib/format'
+import { readCsvFile, parseCsv, detectColumns, buildBankLines } from '../lib/bankImport'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
+import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
@@ -22,6 +24,13 @@ export default function BankRecon() {
   const [bank, setBank] = useState([])
   const [nl, setNl] = useState({ date_operation: today(), montant: '', reference: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
+  // Import CSV du relevé — colonnes auto-détectées par nom d'en-tête ; si date/crédit ne sont
+  // pas reconnues, l'admin les choisit lui-même dans la liste des colonnes du fichier.
+  const [importHeaders, setImportHeaders] = useState([])
+  const [importRows, setImportRows] = useState([])
+  const [importCols, setImportCols] = useState(null)
+  const [importNeedsMapping, setImportNeedsMapping] = useState(false)
+  const [importBusy, setImportBusy] = useState(false)
 
   async function load() {
     if (!stationId) return
@@ -40,6 +49,36 @@ export default function BankRecon() {
     else { setNl({ date_operation: today(), montant: '', reference: '' }); setMsg('Ligne ajoutée'); setTimeout(() => setMsg(''), 2000); load() }
   }
   async function delLine(id) { await supabase.from('bank_lines').delete().eq('id', id); load() }
+
+  async function onImportFile(e) {
+    const file = e.target.files[0]; e.target.value = ''
+    if (!file) return
+    setErr(''); setMsg('')
+    let text
+    try { text = await readCsvFile(file) } catch { setErr('Impossible de lire ce fichier.'); return }
+    const { headers, rows } = parseCsv(text)
+    if (!headers.length || !rows.length) { setErr('Fichier vide ou illisible — vérifiez que c\'est bien un export CSV.'); return }
+    const cols = detectColumns(headers)
+    setImportHeaders(headers); setImportRows(rows); setImportCols(cols); setImportNeedsMapping(true)
+  }
+
+  async function doImport(cols, rows) {
+    setImportBusy(true)
+    const lignes = buildBankLines(rows, cols)
+    // Doublon : même date + même montant déjà présent (ex. relevé déjà importé pour partie,
+    // ou période qui chevauche un import précédent) — on ne les réinsère pas.
+    const existantes = new Set(bank.map(b => `${b.date_operation}|${Math.round(N(b.montant))}`))
+    const nouvelles = lignes.filter(l => !existantes.has(`${l.date_operation}|${Math.round(l.montant)}`))
+    const doublons = lignes.length - nouvelles.length
+    if (nouvelles.length) {
+      const { error } = await supabase.from('bank_lines').insert(
+        nouvelles.map(l => ({ ...l, station_id: stationId, created_by: session.user.id })))
+      if (error) { setErr(error.message); setImportBusy(false); return }
+    }
+    setMsg(`${nouvelles.length} ligne(s) importée(s)${doublons ? `, ${doublons} déjà présente(s) ignorée(s)` : ''}.`)
+    setImportBusy(false); setImportNeedsMapping(false); setImportRows([]); setImportHeaders([]); setImportCols(null)
+    load()
+  }
 
   // Appariement glouton : chaque ligne bancaire ↔ un versement déclaré (montant ± TOL, date ± WIN j)
   const recon = useMemo(() => {
@@ -96,9 +135,54 @@ export default function BankRecon() {
         <Kpi label="Non rapprochés" value={nbNonRapproches} status={nbNonRapproches > 0 ? 'alarm' : 'ok'} />
       </div>
 
-      <Panel title="Saisir une ligne du relevé BOA">
+      <Panel title="Importer un relevé (CSV)">
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
-          Reporte chaque crédit du relevé bancaire (date, montant). Le pointage est automatique.
+          Exportez le relevé depuis le site de votre banque (CSV ou Excel exporté en CSV), pour la période voulue, puis importez-le ici. Seuls les crédits (argent reçu) sont importés — les débits ne servent pas au rapprochement.
+        </p>
+        <Input type="file" accept=".csv,text/csv" onChange={onImportFile} />
+
+        {importNeedsMapping && (() => {
+          const colOptions = [{ value: -1, label: '— aucune —' }, ...importHeaders.map((h, i) => ({ value: i, label: h }))]
+          const lignes = buildBankLines(importRows, importCols)
+          const pret = importCols.date >= 0 && importCols.credit >= 0
+          return (
+            <div style={{ marginTop: 'var(--sp-4)', padding: 'var(--sp-4)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+              <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
+                Vérifiez (ou corrigez) à quoi correspond chaque colonne du fichier :
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+                <Field label="Date opération *" style={{ flex: '1 1 160px' }}>
+                  <Select value={importCols.date} onChange={e => setImportCols({ ...importCols, date: Number(e.target.value) })} options={colOptions} style={{ width: '100%' }} />
+                </Field>
+                <Field label="Montant crédité *" style={{ flex: '1 1 160px' }}>
+                  <Select value={importCols.credit} onChange={e => setImportCols({ ...importCols, credit: Number(e.target.value) })} options={colOptions} style={{ width: '100%' }} />
+                </Field>
+                <Field label="Description" style={{ flex: '1 1 160px' }}>
+                  <Select value={importCols.description} onChange={e => setImportCols({ ...importCols, description: Number(e.target.value) })} options={colOptions} style={{ width: '100%' }} />
+                </Field>
+                <Field label="Référence" style={{ flex: '1 1 160px' }}>
+                  <Select value={importCols.reference} onChange={e => setImportCols({ ...importCols, reference: Number(e.target.value) })} options={colOptions} style={{ width: '100%' }} />
+                </Field>
+              </div>
+              {pret ? (
+                <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-body)', margin: 0 }}>
+                  <b>{lignes.length}</b> ligne(s) crédit détectée(s){lignes[0] ? ` — ex. ${frDate(lignes[0].date_operation)} : ${fcfa(lignes[0].montant)}` : ''}.
+                </p>
+              ) : (
+                <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--state-alarm)', margin: 0 }}>Choisissez au moins la colonne date et la colonne crédit.</p>
+              )}
+              <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+                <Button tone="primary" disabled={!pret || importBusy} onClick={() => doImport(importCols, importRows)}>{importBusy ? 'Import…' : `Importer ${lignes.length} ligne(s)`}</Button>
+                <Button onClick={() => { setImportNeedsMapping(false); setImportRows([]); setImportHeaders([]); setImportCols(null) }}>Annuler</Button>
+              </div>
+            </div>
+          )
+        })()}
+      </Panel>
+
+      <Panel title="Saisir une ligne manuellement">
+        <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
+          Pour une correction ponctuelle, ou si l'import CSV ci-dessus n'est pas possible. Le pointage est automatique.
         </p>
         <form onSubmit={addLine} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'end' }}>
           <Field label="Date opération" style={{ flex: '1 1 150px' }}>
