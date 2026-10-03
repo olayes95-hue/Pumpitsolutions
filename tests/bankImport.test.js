@@ -65,19 +65,31 @@ describe('parseDateFR', () => {
 
 describe('buildBankLines', () => {
   const cols = { date: 0, description: 1, reference: 2, debit: 3, credit: 4 }
-  it('ne garde que les lignes avec un crédit positif', () => {
+  const CATS = [
+    { id: 1, key: 'versement_gerant', mots_cles: ['DEPOT', 'VERSEMENT ESPECES'] },
+    { id: 2, key: 'frais_bancaire', mots_cles: ['FRAIS', 'TAXE', 'COMMISSION'] },
+    { id: 3, key: 'autre', mots_cles: [] },
+  ]
+  it('garde les lignes crédit ET débit, avec leur type', () => {
     const rows = [
       ['01/03/2026', 'Dépôt', 'REF1', '', '150000'],
       ['02/03/2026', 'Frais tenue de compte', '', '2000', ''],
       ['', '', '', '', ''],
       ['Totaux', '', '', '2000', '150000'],
     ]
-    const lines = buildBankLines(rows, cols)
-    expect(lines).toEqual([{ date_operation: '2026-03-01', montant: 150000, reference: 'Dépôt — REF1' }])
+    const lines = buildBankLines(rows, cols, CATS)
+    expect(lines).toEqual([
+      { date_operation: '2026-03-01', montant: 150000, reference: 'Dépôt — REF1', type: 'credit', categorie_id: 1 },
+      { date_operation: '2026-03-02', montant: 2000, reference: 'Frais tenue de compte', type: 'debit', categorie_id: 2 },
+    ])
+  })
+  it('classe en "autre" quand aucun mot-clé ne correspond', () => {
+    const rows = [['01/03/2026', 'Virement inconnu', '', '', '500']]
+    expect(buildBankLines(rows, cols, CATS)[0].categorie_id).toBe(3)
   })
   it('ignore une ligne sans date valide même avec un crédit', () => {
     const rows = [['Totaux', '', '', '', '150000']]
-    expect(buildBankLines(rows, cols)).toEqual([])
+    expect(buildBankLines(rows, cols, CATS)).toEqual([])
   })
 
   it('import bout en bout sur le format d\'un export réel (BOA, année sur 2 chiffres) — données anonymisées', () => {
@@ -90,10 +102,11 @@ describe('buildBankLines', () => {
     const { headers, rows } = parseCsv(csv)
     const detected = detectColumns(headers)
     expect(detected).toEqual({ date: 0, description: 2, reference: 3, debit: 6, credit: 7 })
-    const lines = buildBankLines(rows, detected)
+    const lines = buildBankLines(rows, detected, CATS)
     expect(lines).toEqual([
-      { date_operation: '2026-09-29', montant: 5200, reference: 'VERSEMENT ESPECES GERANT TEST/STATION TEST — ACX0001' },
-      { date_operation: '2026-09-29', montant: 99900, reference: 'VERSEMENT ESPECES GERANT TEST/STATION TEST — ACX0002' },
+      { date_operation: '2026-09-30', montant: 45, reference: 'TAXE SUR Commission de mouvements — Frais', type: 'debit', categorie_id: 2 },
+      { date_operation: '2026-09-29', montant: 5200, reference: 'VERSEMENT ESPECES GERANT TEST/STATION TEST — ACX0001', type: 'credit', categorie_id: 1 },
+      { date_operation: '2026-09-29', montant: 99900, reference: 'VERSEMENT ESPECES GERANT TEST/STATION TEST — ACX0002', type: 'credit', categorie_id: 1 },
     ])
   })
 })

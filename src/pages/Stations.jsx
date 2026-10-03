@@ -31,6 +31,8 @@ export default function Stations() {
   const [formules, setFormules] = useState([])   // offres — pour la limite max_utilisateurs_station
   const [expenseCats, setExpenseCats] = useState([])
   const [newExpCat, setNewExpCat] = useState({ key: '', label: '', non_cash: false })
+  const [bankLineCats, setBankLineCats] = useState([])
+  const [newBankCat, setNewBankCat] = useState({ key: '', label: '', mots_cles: '' })
   const [selectedRole, setSelectedRole] = useState(null)
   const [newRole, setNewRole] = useState({ key: '', label: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
@@ -47,7 +49,7 @@ export default function Stations() {
   const [tab, setTab] = useState(() => TABS[0]?.value || 'stations')
 
   async function load() {
-    const [s, u, st, r, p, rp, ps, ec, fo] = await Promise.all([
+    const [s, u, st, r, p, rp, ps, ec, fo, bc] = await Promise.all([
       supabase.from('stations').select('*').order('id'),
       supabase.from('profiles').select('id, full_name, role, station_id, approved').order('full_name'),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
@@ -57,6 +59,7 @@ export default function Stations() {
       supabase.from('profile_stations').select('*'),
       supabase.from('expense_categories').select('*').order('ordre'),
       supabase.from('formules').select('key, label, max_utilisateurs_station'),
+      supabase.from('bank_line_categories').select('*').order('ordre'),
     ])
     setStations(s.data || []); setUsers(u.data || []); setSettings(st.data || null)
     setRoles(r.data || []); setPermissions(p.data || []); setRolePerms(rp.data || [])
@@ -64,6 +67,9 @@ export default function Stations() {
     setProfileStations(psm)
     setExpenseCats(ec.data || [])
     setFormules(fo.data || [])
+    // _motsClesInput : représentation texte éditable (virgules) des mots-clés, dérivée du
+    // tableau stocké en base — évite de jongler entre tableau et texte pendant la frappe.
+    setBankLineCats((bc.data || []).map(c => ({ ...c, _motsClesInput: (c.mots_cles || []).join(', ') })))
     setSelectedRole(prev => prev || (r.data || [])[0]?.key || null)
   }
   useEffect(() => { load() }, [])
@@ -204,6 +210,29 @@ export default function Stations() {
   }
   async function deleteExpCat(c) {
     const { error } = await supabase.from('expense_categories').delete().eq('id', c.id)
+    error ? fail(error) : (load(), flash('Catégorie supprimée'))
+  }
+
+  async function addBankCat(e) {
+    e.preventDefault()
+    const key = (newBankCat.key || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '_')
+    const motsCles = newBankCat.mots_cles.split(',').map(m => m.trim().toUpperCase()).filter(Boolean)
+    if (!key || !newBankCat.label.trim()) { setErr('Renseignez une clé et un libellé.'); return }
+    const { error } = await supabase.from('bank_line_categories').insert({ key, label: newBankCat.label.trim(), mots_cles: motsCles, is_system: false })
+    if (error) fail(error); else { setNewBankCat({ key: '', label: '', mots_cles: '' }); load(); flash('Catégorie de relevé créée') }
+  }
+  const upBankCat = (id, k, v) => setBankLineCats(p => p.map(c => c.id === id ? { ...c, [k]: v } : c))
+  async function saveBankCat(c) {
+    const motsCles = String(c._motsClesInput || '').split(',').map(m => m.trim().toUpperCase()).filter(Boolean)
+    const { error } = await supabase.from('bank_line_categories').update({ mots_cles: motsCles, label: c.label }).eq('id', c.id)
+    error ? fail(error) : (load(), flash('Catégorie enregistrée'))
+  }
+  async function toggleBankCatActif(c, actif) {
+    const { error } = await supabase.from('bank_line_categories').update({ actif }).eq('id', c.id)
+    error ? fail(error) : load()
+  }
+  async function deleteBankCat(c) {
+    const { error } = await supabase.from('bank_line_categories').delete().eq('id', c.id)
     error ? fail(error) : (load(), flash('Catégorie supprimée'))
   }
 
@@ -478,6 +507,38 @@ export default function Stations() {
               <Input value={newExpCat.label} onChange={e => setNewExpCat({ ...newExpCat, label: e.target.value })} placeholder="ex : Téléphone / internet" />
             </Field>
             <Checkbox label="Non-cash (pas de justificatif requis)" checked={newExpCat.non_cash} onChange={v => setNewExpCat({ ...newExpCat, non_cash: v })} />
+            <Button type="submit" tone="dark" size="sm">+ Créer</Button>
+          </form>
+        </Panel>
+      )}
+
+      {tab === 'parametres' && (
+        <Panel title="Catégories du relevé bancaire" flush>
+          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+            À l'import d'un relevé (Rapprochement), chaque ligne est classée en testant ses mots-clés dans l'ordre ci-dessous (insensible aux accents/majuscules) ; "Autre" si rien ne correspond. Modifie les mots-clés à tout moment, ou crée une nouvelle catégorie (ex. "Remise de chèque").
+          </p>
+          <div style={{ margin: 'var(--sp-4) var(--gutter-panel) 0', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            {bankLineCats.map(c => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-3)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)', flexWrap: 'wrap' }}>
+                <Input value={c.label} onChange={e => upBankCat(c.id, 'label', e.target.value)} style={{ width: 180 }} />
+                {c.is_system && <span style={{ color: 'var(--text-muted)', font: '400 12px/1.25 var(--font-ui)' }}>(système)</span>}
+                <Input value={c._motsClesInput} onChange={e => upBankCat(c.id, '_motsClesInput', e.target.value)} placeholder="mots-clés séparés par des virgules" style={{ flex: '1 1 260px' }} />
+                <Button size="sm" tone="dark" onClick={() => saveBankCat(c)}>Enregistrer</Button>
+                <Checkbox label="Actif" checked={c.actif} onChange={v => toggleBankCatActif(c, v)} />
+                {!c.is_system && <Button size="sm" tone="danger" onClick={() => deleteBankCat(c)}>Suppr.</Button>}
+              </div>
+            ))}
+          </div>
+          <form onSubmit={addBankCat} style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'end', padding: 'var(--gutter-panel)', marginTop: 'var(--sp-4)', borderTop: '1px solid var(--border-hairline)' }}>
+            <Field label="Nouvelle catégorie — clé" style={{ flex: '1 1 160px' }}>
+              <Input value={newBankCat.key} onChange={e => setNewBankCat({ ...newBankCat, key: e.target.value })} placeholder="ex : remise_cheque" />
+            </Field>
+            <Field label="Libellé" style={{ flex: '1 1 160px' }}>
+              <Input value={newBankCat.label} onChange={e => setNewBankCat({ ...newBankCat, label: e.target.value })} placeholder="ex : Remise de chèque" />
+            </Field>
+            <Field label="Mots-clés (virgules)" style={{ flex: '1 1 220px' }}>
+              <Input value={newBankCat.mots_cles} onChange={e => setNewBankCat({ ...newBankCat, mots_cles: e.target.value })} placeholder="ex : REMISE CHEQUE, REMISE CHQ" />
+            </Field>
             <Button type="submit" tone="dark" size="sm">+ Créer</Button>
           </form>
         </Panel>

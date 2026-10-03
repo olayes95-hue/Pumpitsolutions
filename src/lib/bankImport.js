@@ -1,6 +1,6 @@
-// Import d'un relevé bancaire (CSV) dans Rapprochement — bank_lines ne stocke que les CRÉDITS
-// (= versements reçus par la banque, voir migration_v4) : les lignes débit du relevé sont
-// ignorées, elles ne servent pas à vérifier que les versements déclarés sont bien arrivés.
+// Import d'un relevé bancaire (CSV) dans Rapprochement. Depuis la v107, les débits sont gardés
+// aussi (plus seulement les crédits) et chaque ligne est classée dans une catégorie — mots-clés
+// définis par l'admin (bank_line_categories, voir Stations & équipe → Paramètres).
 
 const norm = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
 
@@ -85,17 +85,36 @@ export function parseDateFR(raw) {
   return null
 }
 
-// Construit les lignes bank_lines (crédits uniquement) à partir des lignes CSV + colonnes mappées.
-// Ignore toute ligne sans date valide ou sans montant crédit (lignes de total/solde, lignes vides).
-export function buildBankLines(rows, cols) {
+// Catégorie d'une ligne : premier mot-clé (insensible accents/majuscules) trouvé dans la
+// description+référence, sinon la catégorie "autre" si elle existe, sinon aucune (null).
+function categoriser(texte, categories) {
+  const t = norm(texte)
+  for (const cat of categories) {
+    if ((cat.mots_cles || []).some(mc => mc && t.includes(norm(mc)))) return cat.id
+  }
+  return categories.find(c => c.key === 'autre')?.id ?? null
+}
+
+// Construit les lignes bank_lines (crédits ET débits désormais) à partir des lignes CSV +
+// colonnes mappées + catégories admin. Ignore toute ligne sans date valide (lignes de
+// total/solde, lignes vides) ou sans montant ni en crédit ni en débit.
+export function buildBankLines(rows, cols, categories = []) {
   const out = []
   for (const r of rows) {
     const date_operation = parseDateFR(cols.date >= 0 ? r[cols.date] : null)
-    const montant = cols.credit >= 0 ? parseMontant(r[cols.credit]) : null
-    if (!date_operation || !montant || montant <= 0) continue
+    if (!date_operation) continue
     const description = cols.description >= 0 ? r[cols.description] : ''
     const reference = cols.reference >= 0 ? r[cols.reference] : ''
-    out.push({ date_operation, montant, reference: [description, reference].filter(Boolean).join(' — ') || null })
+    const refText = [description, reference].filter(Boolean).join(' — ') || null
+    const categorie_id = categoriser(`${description} ${reference}`, categories)
+    const credit = cols.credit >= 0 ? parseMontant(r[cols.credit]) : null
+    if (credit != null && Math.abs(credit) > 0) {
+      out.push({ date_operation, montant: Math.abs(credit), reference: refText, type: 'credit', categorie_id })
+    }
+    const debit = cols.debit >= 0 ? parseMontant(r[cols.debit]) : null
+    if (debit != null && Math.abs(debit) > 0) {
+      out.push({ date_operation, montant: Math.abs(debit), reference: refText, type: 'debit', categorie_id })
+    }
   }
   return out
 }
