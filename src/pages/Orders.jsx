@@ -654,22 +654,18 @@ export default function Orders() {
         {mainTab === 'historique' && (<>
           <div style={{ padding: 'var(--gutter-panel)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
             <div style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>{shown.length} commande(s) · total {fcfa(totalMontant)}</div>
-            <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
               <Select size="sm" value={year} onChange={e => { setYear(e.target.value); setDateFrom(''); setDateTo('') }} options={[{ value: 'all', label: 'Toutes années' }, ...orderYears.map(y => ({ value: y, label: y }))]} />
               <Select size="sm" value={month} onChange={e => { setMonth(e.target.value); setDateFrom(''); setDateTo('') }} options={[{ value: 'all', label: 'Tous mois' }, ...['01','02','03','04','05','06','07','08','09','10','11','12'].map(m => ({ value: m, label: m }))]} />
               <span style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>ou période :</span>
               <Input type="date" size="sm" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width: 150 }} />
               <span style={{ color: 'var(--text-muted)' }}>→</span>
               <Input type="date" size="sm" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: 150 }} />
-              {filtersActive && <Button size="sm" onClick={resetFilters}>Réinitialiser</Button>}
-            </div>
-            <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               <Button size="sm" tone={fCat === 'tous' ? 'dark' : 'neutral'} onClick={() => setFCat('tous')}>Toutes catégories</Button>
               {cats.map(([k, l]) => <Button key={k} size="sm" tone={fCat === k ? 'dark' : 'neutral'} onClick={() => setFCat(k)}>{l}</Button>)}
-            </div>
-            <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
               <Select size="sm" value={fStatut} onChange={e => setFStatut(e.target.value)}
                 options={[['en_cours', `En cours, tous mois (${nbAValider + nbALancer + nbAReceptionner})`], ['tous', 'Tous statuts (mois sélectionné)'], ['proposee', `Proposées (${count('proposee')})`], ['validee', `Validées (${count('validee')})`], ['a_receptionner', `À réceptionner (${nbAReceptionner})`], ['lancee', `Lancées (${count('lancee')})`], ['partielle', `Partielles (${count('partielle')})`], ['recue', `Reçues (${count('recue')})`], ['annulee', `Refusées (${count('annulee')})`]].map(([k, l]) => ({ value: k, label: l }))} />
+              {filtersActive && <Button size="sm" onClick={resetFilters}>Réinitialiser</Button>}
             </div>
           </div>
           <DataTable columns={columns} rows={pageRows} onRowClick={o => setDetailId(o.id)} />
