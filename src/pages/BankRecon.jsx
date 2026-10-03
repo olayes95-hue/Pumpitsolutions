@@ -208,11 +208,28 @@ export default function BankRecon() {
     }
     const unmatchedDep = deps.filter(d => !d._used)
     return {
+      matchedAll: matched,   // pour le marquage « bordereau vérifié » — jamais borné à la période affichée
       matched: matched.filter(m => inPeriod(m.bank.date_operation) || inPeriod(m.dep.deposit_date || m.dep.report_date)),
       unmatchedBank: unmatchedBank.filter(b => inPeriod(b.date_operation)),
       unmatchedDep: unmatchedDep.filter(d => inPeriod(d.deposit_date || d.report_date)),
     }
   }, [creditsVersementAll, deposits, isVersementTab, years, months])
+
+  // Un versement dont le crédit est retrouvé en banque est au moins aussi fiable qu'une
+  // relecture à l'œil de la photo (la banque confirme le montant elle-même) — on marque donc
+  // le bordereau "vérifié" automatiquement dès qu'il est rapproché, pour éviter au comptable
+  // de revérifier à la main ce que le rapprochement vient de confirmer. Jamais l'inverse : on
+  // ne dévérifie pas tout seul si un rapprochement est dissocié (voir matcherManuellement/
+  // dissocier) — l'admin garde la main pour corriger via "Vérif bordereaux" si besoin.
+  useEffect(() => {
+    const aVerifier = (recon.matchedAll || []).filter(m => !m.dep.verifie).map(m => m.dep.id)
+    if (!aVerifier.length) return
+    ;(async () => {
+      const verifie_at = new Date().toISOString()
+      await supabase.from('deposits').update({ verifie: true, verifie_par: session.user.id, verifie_at, verifie_source: 'rapprochement' }).in('id', aVerifier)
+      setDeposits(prev => prev.map(d => aVerifier.includes(d.id) ? { ...d, verifie: true, verifie_par: session.user.id, verifie_at, verifie_source: 'rapprochement' } : d))
+    })()
+  }, [recon.matchedAll])
 
   async function matcherManuellement(bankLine, depositId) {
     await supabase.from('bank_lines').update({ matched_deposit_id: depositId }).eq('id', bankLine.id)

@@ -50,8 +50,8 @@ export default function OcrCheck() {
     setErr(''); setBusy('batch')
     try {
       const patch = verifie
-        ? { verifie: true, verifie_par: session.user.id, verifie_at: new Date().toISOString() }
-        : { verifie: false, verifie_par: null, verifie_at: null }
+        ? { verifie: true, verifie_par: session.user.id, verifie_at: new Date().toISOString(), verifie_source: 'manuel' }
+        : { verifie: false, verifie_par: null, verifie_at: null, verifie_source: null }
       const { error } = await supabase.from('deposits').update(patch).in('id', ids)
       if (error) throw error
       setSelectedIds(p => p.filter(id => !ids.includes(id)))
@@ -82,8 +82,8 @@ export default function OcrCheck() {
       const color = ec == null ? 'var(--text-muted)' : Math.abs(ec) > 100 ? 'var(--state-alarm)' : 'var(--state-ok)'
       return <span style={{ color, fontWeight: 600 }}>{ec == null ? '—' : Math.abs(ec) <= 100 ? '✓ OK' : (ec > 0 ? '+' : '') + fcfa(ec)}</span>
     } },
-    { key: 'verifie', header: 'Vérifié à l\'œil', render: r => r.verifie
-      ? <Badge tone="ok">✓ {r.verifie_at ? frDate(r.verifie_at.slice(0, 10)) : ''}</Badge>
+    { key: 'verifie', header: 'Vérifié', render: r => r.verifie
+      ? <Badge tone="ok">✓ {r.verifie_source === 'rapprochement' ? 'Rapprochement bancaire' : 'À l\'œil'}{r.verifie_at ? ` — ${frDate(r.verifie_at.slice(0, 10))}` : ''}</Badge>
       : <Badge tone="idle">Non vérifié</Badge> },
     { key: 'actions', header: '', align: 'right', render: r => (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
@@ -102,7 +102,7 @@ export default function OcrCheck() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
         <Kpi label="Bordereaux avec photo" value={rows.length} />
-        <Kpi label="Vérifiés (à l'œil ou OCR)" value={nbVerifies} status={nbVerifies === rows.length && rows.length > 0 ? 'ok' : undefined} />
+        <Kpi label="Vérifiés (à l'œil ou rapprochement)" value={nbVerifies} status={nbVerifies === rows.length && rows.length > 0 ? 'ok' : undefined} />
         <Kpi label="Analysés (OCR)" value={withOcr.length} />
         <Kpi label="Écarts détectés" value={mismatches.length} status={mismatches.length > 0 ? 'alarm' : 'ok'} />
       </div>
