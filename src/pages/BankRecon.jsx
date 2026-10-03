@@ -18,7 +18,7 @@ import { Kpi } from '../lib/Kpi.jsx'
 
 const N = (v) => (v ? Number(v) : 0)
 const TOL = 200        // tolérance FCFA (timbre) pour l'appariement
-const WIN = 7          // fenêtre en jours
+const WIN = 35         // fenêtre en jours — couvre un versement crédité le mois suivant (retard banque)
 const MONTHS = [['01','Janv'],['02','Févr'],['03','Mars'],['04','Avril'],['05','Mai'],['06','Juin'],['07','Juil'],['08','Août'],['09','Sept'],['10','Oct'],['11','Nov'],['12','Déc']]
 const PAGE_DEFAULT = 25
 
@@ -177,13 +177,21 @@ export default function BankRecon() {
     bank.filter(b => b.categorie_id === activeCat?.id && inPeriod(b.date_operation)),
     [bank, activeCat, years, months])
 
-  // Appariement glouton : chaque crédit "versement gérant" ↔ un versement déclaré (montant ± TOL, date ± WIN j)
+  // Appariement glouton sur TOUT l'historique (pas seulement la période affichée) : un
+  // versement déclaré fin de mois peut n'être crédité en banque que le mois suivant — le
+  // restreindre à la période choisie dès la recherche de correspondance le ferait manquer à
+  // tort, même si les deux lignes existent bien quelque part. Seul l'AFFICHAGE est ensuite
+  // borné à la période (sur l'une ou l'autre date de la paire, pour qu'un rapprochement à
+  // cheval sur deux mois reste visible depuis chacun des deux écrans mensuels).
+  const creditsVersementAll = useMemo(() =>
+    bank.filter(b => b.categorie_id === activeCat?.id && b.type === 'credit'),
+    [bank, activeCat])
+
   const recon = useMemo(() => {
     if (!isVersementTab) return { matched: [], unmatchedBank: [], unmatchedDep: [] }
-    const credits = bankInTab.filter(b => b.type === 'credit')
-    const deps = deposits.filter(d => inPeriod(d.deposit_date || d.report_date)).map(d => ({ ...d, _used: false }))
+    const deps = deposits.map(d => ({ ...d, _used: false }))
     const matched = [], unmatchedBank = []
-    for (const b of credits) {
+    for (const b of creditsVersementAll) {
       const bd = b.date_operation
       let hit = null
       if (b.matched_deposit_id) hit = deps.find(d => d.id === b.matched_deposit_id && !d._used)
@@ -197,8 +205,12 @@ export default function BankRecon() {
       else unmatchedBank.push(b)
     }
     const unmatchedDep = deps.filter(d => !d._used)
-    return { matched, unmatchedBank, unmatchedDep }
-  }, [bankInTab, deposits, isVersementTab, years, months])
+    return {
+      matched: matched.filter(m => inPeriod(m.bank.date_operation) || inPeriod(m.dep.deposit_date || m.dep.report_date)),
+      unmatchedBank: unmatchedBank.filter(b => inPeriod(b.date_operation)),
+      unmatchedDep: unmatchedDep.filter(d => inPeriod(d.deposit_date || d.report_date)),
+    }
+  }, [creditsVersementAll, deposits, isVersementTab, years, months])
 
   async function matcherManuellement(bankLine, depositId) {
     await supabase.from('bank_lines').update({ matched_deposit_id: depositId }).eq('id', bankLine.id)
