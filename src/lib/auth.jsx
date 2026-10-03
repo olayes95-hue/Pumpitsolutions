@@ -36,14 +36,19 @@ export function AuthProvider({ children }) {
     // la page en cours, ex. Saisie du jour) le temps du calcul, et l'écran revient à son état
     // par défaut au lieu de garder celui sur lequel l'utilisateur était.
     if (!silent) setProfileLoading(true)
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
+    // role_permissions est une toute petite table (une poignée de lignes, tous rôles confondus) —
+    // la charger en ENTIER en parallèle du profil, plutôt qu'après (filtrée par rôle), retire un
+    // aller-retour réseau séquentiel du chemin critique de CHAQUE chargement de page.
+    const [{ data }, { data: rp }] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', userId).single(),
+      supabase.from('role_permissions').select('role_key,permission_key'),
+    ])
     setProfile(data || null)
     // L'admin n'a jamais de ligne dans role_permissions (son accès passe toujours par
-    // is_admin() côté RLS / isAdmin côté front, jamais par la matrice) — inutile de la
-    // charger pour lui, et ça évite qu'une matrice mal configurée le concerne un jour.
+    // is_admin() côté RLS / isAdmin côté front, jamais par la matrice) — inutile de s'en
+    // servir pour lui, et ça évite qu'une matrice mal configurée le concerne un jour.
     if (data && data.role !== 'admin') {
-      const { data: rp } = await supabase.from('role_permissions').select('permission_key').eq('role_key', data.role)
-      setPermissions(new Set((rp || []).map(r => r.permission_key)))
+      setPermissions(new Set((rp || []).filter(r => r.role_key === data.role).map(r => r.permission_key)))
     } else {
       setPermissions(new Set())
     }
