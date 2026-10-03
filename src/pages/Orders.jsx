@@ -25,6 +25,7 @@ import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 const CATS = [['carburant', 'Carburant'], ['gaz', 'Gaz'], ['lubrifiant', 'Lubrifiant'], ['superette', 'Supérette']]
+const MONTHS = [['01','Janv'],['02','Févr'],['03','Mars'],['04','Avril'],['05','Mai'],['06','Juin'],['07','Juil'],['08','Août'],['09','Sept'],['10','Oct'],['11','Nov'],['12','Déc']]
 // Lignes carburant par défaut (essence + gasoil commandés simultanément).
 const carbRows = () => [{ produit: 'essence', qte: '', bons: '', cheque: '', ref: '' }, { produit: 'gasoil', qte: '', bons: '', cheque: '', ref: '' }]
 const blankNf = () => ({ categorie: 'carburant', mode_paiement: 'cheque', rows: carbRows(), lignes: [{ article: '', qte: '' }], montant_paiement: '', date_proposition: today(), note: '' })
@@ -51,9 +52,12 @@ export default function Orders() {
   // filtré par mois) reste disponible dans le sélecteur pour qui veut consulter l'historique.
   const [fStatut, setFStatut] = useState('en_cours'); const [fCat, setFCat] = useState('tous')
   // Filtre par défaut : mois en cours (plus lisible qu'un historique complet non filtré).
+  // Tableau vide = pas de filtre (tous) ; plusieurs valeurs possibles (plusieurs mois/années).
   const now = new Date()
-  const [year, setYear] = useState(String(now.getFullYear())); const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, '0'))
-  const [dateFrom, setDateFrom] = useState(''); const [dateTo, setDateTo] = useState('')
+  const [years, setYears] = useState([String(now.getFullYear())])
+  const [months, setMonths] = useState([String(now.getMonth() + 1).padStart(2, '0')])
+  const [yearsOpen, setYearsOpen] = useState(false)
+  const [monthsOpen, setMonthsOpen] = useState(false)
   const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
   const [matinWarn, setMatinWarn] = useState('')
   const [bonsRestant, setBonsRestant] = useState(0)
@@ -328,13 +332,13 @@ export default function Orders() {
 
   const inPeriod = (d) => {
     if (!d) return true
-    if (dateFrom && dateTo) return d >= dateFrom && d <= dateTo
-    if (year !== 'all' && d.slice(0, 4) !== year) return false
-    if (month !== 'all' && d.slice(5, 7) !== month) return false
+    if (years.length && !years.includes(d.slice(0, 4))) return false
+    if (months.length && !months.includes(d.slice(5, 7))) return false
     return true
   }
-  const resetFilters = () => { setYear('all'); setMonth('all'); setDateFrom(''); setDateTo(''); setFCat('tous'); setFStatut('tous') }
-  const filtersActive = year !== 'all' || month !== 'all' || dateFrom || dateTo || fCat !== 'tous' || fStatut !== 'tous'
+  const toggleVal = (list, setList, v) => setList(list.includes(v) ? list.filter(x => x !== v) : [...list, v])
+  const resetFilters = () => { setYears([]); setMonths([]); setFCat('tous'); setFStatut('tous') }
+  const filtersActive = years.length > 0 || months.length > 0 || fCat !== 'tous' || fStatut !== 'tous'
 
   // Statuts d'une commande pas encore soldée ni refusée — définis ici (pas plus bas) car « en
   // cours », comme « à réceptionner », doit ignorer le filtre de période.
@@ -355,7 +359,7 @@ export default function Orders() {
   const pageCount = Math.max(1, Math.ceil(shown.length / pageSize))
   const pageClamped = Math.min(page, pageCount)
   const pageRows = shown.slice((pageClamped - 1) * pageSize, pageClamped * pageSize)
-  useEffect(() => { setPage(1) }, [fStatut, fCat, year, month, dateFrom, dateTo])
+  useEffect(() => { setPage(1) }, [fStatut, fCat, years, months])
 
   // Compte des commandes qui attendent une action, tous statuts confondus — résumé en haut de page.
   const nbAValider = count('proposee')
@@ -655,12 +659,12 @@ export default function Orders() {
           <div style={{ padding: 'var(--gutter-panel)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
             <div style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>{shown.length} commande(s) · total {fcfa(totalMontant)}</div>
             <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
-              <Select size="sm" value={year} onChange={e => { setYear(e.target.value); setDateFrom(''); setDateTo('') }} options={[{ value: 'all', label: 'Toutes années' }, ...orderYears.map(y => ({ value: y, label: y }))]} />
-              <Select size="sm" value={month} onChange={e => { setMonth(e.target.value); setDateFrom(''); setDateTo('') }} options={[{ value: 'all', label: 'Tous mois' }, ...['01','02','03','04','05','06','07','08','09','10','11','12'].map(m => ({ value: m, label: m }))]} />
-              <span style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>ou période :</span>
-              <Input type="date" size="sm" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width: 150 }} />
-              <span style={{ color: 'var(--text-muted)' }}>→</span>
-              <Input type="date" size="sm" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: 150 }} />
+              <MultiSelectPopover label="Années" allLabel="Toutes années" options={orderYears.map(y => [y, y])}
+                selected={years} onToggle={v => toggleVal(years, setYears, v)}
+                open={yearsOpen} onToggleOpen={() => { setYearsOpen(v => !v); setMonthsOpen(false) }} />
+              <MultiSelectPopover label="Mois" allLabel="Tous mois" options={MONTHS}
+                selected={months} onToggle={v => toggleVal(months, setMonths, v)}
+                open={monthsOpen} onToggleOpen={() => { setMonthsOpen(v => !v); setYearsOpen(false) }} />
               <Select size="sm" value={fCat} onChange={e => setFCat(e.target.value)}
                 options={[{ value: 'tous', label: 'Toutes catégories' }, ...cats.map(([k, l]) => ({ value: k, label: l }))]} />
               <Select size="sm" value={fStatut} onChange={e => setFStatut(e.target.value)}
@@ -837,6 +841,26 @@ export default function Orders() {
           )
         })()}
       </Drawer>
+    </div>
+  )
+}
+
+// Bouton compact qui ouvre un petit panneau de cases à cocher — pour choisir plusieurs mois ou
+// plusieurs années sans prendre de place en permanence sur la ligne de filtres (contrairement à
+// une rangée de cases à cocher toujours visible, ou à deux listes déroulantes "du / au").
+function MultiSelectPopover({ label, allLabel, options, selected, onToggle, open, onToggleOpen }) {
+  return (
+    <div style={{ position: 'relative' }}>
+      <Button size="sm" tone={selected.length ? 'dark' : 'neutral'} onClick={onToggleOpen}>
+        {selected.length ? `${label} (${selected.length})` : allLabel}
+      </Button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 20, marginTop: 4, padding: 'var(--sp-3)', background: 'var(--surface-panel)', border: 'var(--border-panel)', borderRadius: 'var(--radius-1)', boxShadow: '0 4px 16px rgba(0,0,0,.16)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 140, maxHeight: 280, overflowY: 'auto' }}>
+          {options.map(([v, l]) => (
+            <Checkbox key={v} label={l} checked={selected.includes(v)} onChange={() => onToggle(v)} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
