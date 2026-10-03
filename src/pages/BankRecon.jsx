@@ -14,7 +14,6 @@ import { MultiSelectPopover } from '../ds/pumpit/components/forms/MultiSelectPop
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
-import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
 const N = (v) => (v ? Number(v) : 0)
@@ -42,15 +41,20 @@ export default function BankRecon() {
   const [showImport, setShowImport] = useState(false)
   const [showManual, setShowManual] = useState(false)
   // Filtre période — plusieurs mois/années possibles, comme Commandes (voir MultiSelectPopover).
-  const [years, setYears] = useState([])
-  const [months, setMonths] = useState([])
+  // Par défaut : année + mois en cours (pas "toutes périodes"), pour ouvrir sur les lignes récentes.
+  const [years, setYears] = useState([String(today().slice(0, 4))])
+  const [months, setMonths] = useState([today().slice(5, 7)])
   const [yearsOpen, setYearsOpen] = useState(false)
   const [monthsOpen, setMonthsOpen] = useState(false)
+  // Le tableau "Rapprochés" ne s'affiche qu'au clic sur la tuile Kpi correspondante — sinon il
+  // prend de la place à chaque chargement alors que c'est le moins souvent consulté des 3.
+  const [showMatched, setShowMatched] = useState(false)
   // Pagination — une page distincte par tableau, pour ne pas désynchroniser l'un en changeant l'autre.
   const [pageMatched, setPageMatched] = useState(1)
   const [pageUnBank, setPageUnBank] = useState(1)
   const [pageUnDep, setPageUnDep] = useState(1)
   const [pageFlat, setPageFlat] = useState(1)
+  const [pageDoublons, setPageDoublons] = useState(1)
   const [pageSize, setPageSize] = useState(PAGE_DEFAULT)
 
   async function load() {
@@ -66,7 +70,7 @@ export default function BankRecon() {
     setCatTab(prev => prev && (c.data || []).some(x => x.key === prev) ? prev : (c.data || [])[0]?.key || null)
   }
   useEffect(() => { load() }, [stationId])
-  useEffect(() => { setPageMatched(1); setPageUnBank(1); setPageUnDep(1); setPageFlat(1) }, [catTab, years, months])
+  useEffect(() => { setPageMatched(1); setPageUnBank(1); setPageUnDep(1); setPageFlat(1); setPageDoublons(1); setShowMatched(false) }, [catTab, years, months])
 
   const toggleVal = (list, setList, v) => setList(list.includes(v) ? list.filter(x => x !== v) : [...list, v])
   const inPeriod = (d) => {
@@ -75,7 +79,13 @@ export default function BankRecon() {
     if (months.length && !months.includes(d.slice(5, 7))) return false
     return true
   }
-  const availableYears = useMemo(() => [...new Set(bank.map(b => (b.date_operation || '').slice(0, 4)).filter(Boolean))].sort().reverse(), [bank])
+  // Toujours proposer l'année en cours même si aucune ligne n'y figure encore (relevé pas
+  // encore importé pour ce mois) — sinon le filtre par défaut (année en cours) pointerait vers
+  // une liste d'années qui ne la contient pas.
+  const availableYears = useMemo(() => [...new Set([
+    ...bank.map(b => (b.date_operation || '').slice(0, 4)).filter(Boolean),
+    today().slice(0, 4),
+  ])].sort().reverse(), [bank])
 
   async function addLine(e) {
     e.preventDefault(); setErr('')
@@ -198,6 +208,19 @@ export default function BankRecon() {
     await supabase.from('bank_lines').update({ matched_deposit_id: null }).eq('id', bankLine.id)
     load()
   }
+  async function delDeposit(d) { await supabase.from('deposits').delete().eq('id', d.id); load() }
+
+  // Déclarations doublons : le gérant a pu valider deux fois le même versement (même jour,
+  // même montant) — on les regroupe pour que l'admin vérifie et supprime le(s) doublon(s).
+  const doublons = useMemo(() => {
+    const groupes = new Map()
+    for (const d of deposits.filter(x => inPeriod(x.report_date))) {
+      const cle = `${d.report_date}|${d.pole}|${Math.round(N(d.montant))}`
+      if (!groupes.has(cle)) groupes.set(cle, [])
+      groupes.get(cle).push(d)
+    }
+    return [...groupes.values()].filter(g => g.length > 1).flat()
+  }, [deposits, years, months])
 
   const totDecl = deposits.filter(d => inPeriod(d.deposit_date || d.report_date)).reduce((s, d) => s + N(d.montant), 0)
   const totCredit = bankInTab.filter(b => b.type === 'credit').reduce((s, b) => s + N(b.montant), 0)
@@ -215,6 +238,14 @@ export default function BankRecon() {
     { key: 'pole', header: 'Pôle' },
     { key: 'montant', header: 'Montant', numeric: true, align: 'right', render: r => <span style={{ color: 'var(--state-alarm)' }}>{fcfa(r.montant)}</span> },
     { key: 'ref_bordereau', header: 'Réf', muted: true, render: r => r.ref_bordereau || '—' },
+  ]
+  const doublonColumns = [
+    { key: 'report_date', header: 'Jour déclaré', render: r => frDate(r.report_date) },
+    { key: 'pole', header: 'Pôle' },
+    { key: 'montant', header: 'Montant', numeric: true, align: 'right', render: r => fcfa(r.montant) },
+    { key: 'deposit_date', header: 'Date bordereau', muted: true, render: r => r.deposit_date ? frDate(r.deposit_date) : '—' },
+    { key: 'ref_bordereau', header: 'Réf', muted: true, render: r => r.ref_bordereau || '—' },
+    { key: 'actions', header: '', align: 'right', render: r => <Button size="sm" tone="danger" onClick={() => delDeposit(r)}>Supprimer</Button> },
   ]
   const catSelectOptions = [{ value: '', label: '— aucune —' }, ...categories.map(c => ({ value: c.id, label: c.label }))]
   const bankColumns = [
@@ -245,6 +276,7 @@ export default function BankRecon() {
   const unBankPage = paginate(recon.unmatchedBank, pageUnBank)
   const unDepPage = paginate(recon.unmatchedDep, pageUnDep)
   const flatPage = paginate(bankInTab, pageFlat)
+  const doublonPage = paginate(doublons, pageDoublons)
 
   const pager = (p, setPage) => <Pagination page={p.clamped} pageCount={p.pageCount} total={p.total} pageSize={pageSize} onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
 
@@ -344,14 +376,30 @@ export default function BankRecon() {
           open={monthsOpen} onToggleOpen={() => { setMonthsOpen(v => !v); setYearsOpen(false) }} />
       </div>
 
-      <Tabs items={categories.map(c => ({ value: c.key, label: c.label }))} value={catTab} onChange={setCatTab} />
+      {doublons.length > 0 && (
+        <Panel title="Versements déclarés en double (même jour, même pôle, même montant)" meta={`${doublons.length}`} status="alarm" flush>
+          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+            Le gérant a peut-être validé deux fois la même déclaration — vérifiez les photos/réf avant de supprimer le doublon.
+          </p>
+          <div style={{ marginTop: 'var(--sp-4)' }}>
+            <DataTable columns={doublonColumns} rows={doublonPage.rows} />
+          </div>
+          {pager(doublonPage, setPageDoublons)}
+        </Panel>
+      )}
+
+      <Field label="Catégorie" style={{ maxWidth: 280 }}>
+        <Select value={catTab || ''} onChange={e => setCatTab(e.target.value)} options={categories.map(c => ({ value: c.key, label: c.label }))} style={{ width: '100%' }} />
+      </Field>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
         {isVersementTab && <Kpi label="Versements déclarés" value={fcfa(totDecl)} />}
         <Kpi label="Crédits" value={fcfa(totCredit)} />
         <Kpi label="Débits" value={fcfa(totDebit)} />
         {isVersementTab && <>
-          <Kpi label="Rapprochés" value={recon.matched.length} status="ok" />
+          <div onClick={() => setShowMatched(v => !v)} style={{ cursor: 'pointer' }} title="Cliquer pour afficher/masquer le détail">
+            <Kpi label="Rapprochés" value={recon.matched.length} status="ok" />
+          </div>
           <Kpi label="Non rapprochés" value={nbNonRapproches} status={nbNonRapproches > 0 ? 'alarm' : 'ok'} />
         </>}
       </div>
@@ -377,12 +425,14 @@ export default function BankRecon() {
           {pager(unBankPage, setPageUnBank)}
         </Panel>
 
-        <Panel title="Rapprochés" meta={`${recon.matched.length}`} status="ok" flush>
-          {matchedPage.rows.length
-            ? <DataTable columns={matchedColumns} rows={matchedPage.rows.map((m, i) => ({ ...m, id: i }))} />
-            : <PanelEmpty icon="landmark" label="Rien encore rapproché" />}
-          {pager(matchedPage, setPageMatched)}
-        </Panel>
+        {showMatched && (
+          <Panel title="Rapprochés" meta={`${recon.matched.length}`} status="ok" flush>
+            {matchedPage.rows.length
+              ? <DataTable columns={matchedColumns} rows={matchedPage.rows.map((m, i) => ({ ...m, id: i }))} />
+              : <PanelEmpty icon="landmark" label="Rien encore rapproché" />}
+            {pager(matchedPage, setPageMatched)}
+          </Panel>
+        )}
       </>) : (
         <Panel title={activeCat?.label || 'Lignes'} meta={`${bankInTab.length}`} flush>
           <div style={{ marginTop: 'var(--sp-4)' }}>
