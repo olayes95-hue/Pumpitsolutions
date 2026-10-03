@@ -52,6 +52,9 @@ describe('parseDateFR', () => {
   it('convertit JJ-MM-AAAA en ISO', () => {
     expect(parseDateFR('5-3-2026')).toBe('2026-03-05')
   })
+  it('convertit JJ/MM/AA (année sur 2 chiffres, export BOA réel) en ISO', () => {
+    expect(parseDateFR('30/09/26')).toBe('2026-09-30')
+  })
   it('laisse passer une date déjà ISO', () => {
     expect(parseDateFR('2026-03-05')).toBe('2026-03-05')
   })
@@ -75,5 +78,22 @@ describe('buildBankLines', () => {
   it('ignore une ligne sans date valide même avec un crédit', () => {
     const rows = [['Totaux', '', '', '', '150000']]
     expect(buildBankLines(rows, cols)).toEqual([])
+  })
+
+  it('import bout en bout sur le format d\'un export réel (BOA, année sur 2 chiffres) — données anonymisées', () => {
+    const csv = [
+      'Date op.,Numéro du compte,Description,Référence,Date valeur,Devise,Débit,Crédit,Solde courant',
+      '30/09/26,XX0000000000000000000000,TAXE SUR Commission de mouvements,Frais,30/09/26,XOF,-45.0,,498637.0',
+      '29/09/26,XX0000000000000000000000,VERSEMENT ESPECES GERANT TEST/STATION TEST,ACX0001,29/09/26,XOF,,5200.0,510800.0',
+      '29/09/26,XX0000000000000000000000,VERSEMENT ESPECES GERANT TEST/STATION TEST,ACX0002,29/09/26,XOF,,99900.0,505600.0',
+    ].join('\n')
+    const { headers, rows } = parseCsv(csv)
+    const detected = detectColumns(headers)
+    expect(detected).toEqual({ date: 0, description: 2, reference: 3, debit: 6, credit: 7 })
+    const lines = buildBankLines(rows, detected)
+    expect(lines).toEqual([
+      { date_operation: '2026-09-29', montant: 5200, reference: 'VERSEMENT ESPECES GERANT TEST/STATION TEST — ACX0001' },
+      { date_operation: '2026-09-29', montant: 99900, reference: 'VERSEMENT ESPECES GERANT TEST/STATION TEST — ACX0002' },
+    ])
   })
 })

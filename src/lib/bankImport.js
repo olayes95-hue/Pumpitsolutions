@@ -70,14 +70,18 @@ export function parseMontant(raw) {
   return isNaN(n) ? null : n
 }
 
-// Accepte JJ/MM/AAAA, JJ-MM-AAAA, JJ.MM.AAAA et AAAA-MM-JJ (déjà ISO) → renvoie une date ISO ou null.
+// Accepte JJ/MM/AAAA, JJ/MM/AA (année sur 2 chiffres — ex. export BOA "30/09/26"), JJ-MM-AAAA,
+// JJ.MM.AAAA et AAAA-MM-JJ (déjà ISO) → renvoie une date ISO ou null.
 export function parseDateFR(raw) {
   if (!raw) return null
   const s = String(raw).trim()
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (m) return `${m[1]}-${m[2]}-${m[3]}`
-  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/)
-  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4}|\d{2})/)
+  if (m) {
+    const annee = m[3].length === 2 ? `20${m[3]}` : m[3]
+    return `${annee}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+  }
   return null
 }
 
