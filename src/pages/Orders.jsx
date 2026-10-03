@@ -661,8 +661,8 @@ export default function Orders() {
               <Input type="date" size="sm" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width: 150 }} />
               <span style={{ color: 'var(--text-muted)' }}>→</span>
               <Input type="date" size="sm" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: 150 }} />
-              <Button size="sm" tone={fCat === 'tous' ? 'dark' : 'neutral'} onClick={() => setFCat('tous')}>Toutes catégories</Button>
-              {cats.map(([k, l]) => <Button key={k} size="sm" tone={fCat === k ? 'dark' : 'neutral'} onClick={() => setFCat(k)}>{l}</Button>)}
+              <Select size="sm" value={fCat} onChange={e => setFCat(e.target.value)}
+                options={[{ value: 'tous', label: 'Toutes catégories' }, ...cats.map(([k, l]) => ({ value: k, label: l }))]} />
               <Select size="sm" value={fStatut} onChange={e => setFStatut(e.target.value)}
                 options={[['en_cours', `En cours, tous mois (${nbAValider + nbALancer + nbAReceptionner})`], ['tous', 'Tous statuts (mois sélectionné)'], ['proposee', `Proposées (${count('proposee')})`], ['validee', `Validées (${count('validee')})`], ['a_receptionner', `À réceptionner (${nbAReceptionner})`], ['lancee', `Lancées (${count('lancee')})`], ['partielle', `Partielles (${count('partielle')})`], ['recue', `Reçues (${count('recue')})`], ['annulee', `Refusées (${count('annulee')})`]].map(([k, l]) => ({ value: k, label: l }))} />
               {filtersActive && <Button size="sm" onClick={resetFilters}>Réinitialiser</Button>}
