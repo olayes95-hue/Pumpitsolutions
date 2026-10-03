@@ -28,6 +28,7 @@ export default function Stations() {
   const [permissions, setPermissions] = useState([])
   const [rolePerms, setRolePerms] = useState([])
   const [profileStations, setProfileStations] = useState({})   // {profileId: [stationId,...]}
+  const [formules, setFormules] = useState([])   // offres — pour la limite max_utilisateurs_station
   const [expenseCats, setExpenseCats] = useState([])
   const [newExpCat, setNewExpCat] = useState({ key: '', label: '', non_cash: false })
   const [selectedRole, setSelectedRole] = useState(null)
@@ -46,7 +47,7 @@ export default function Stations() {
   const [tab, setTab] = useState(() => TABS[0]?.value || 'stations')
 
   async function load() {
-    const [s, u, st, r, p, rp, ps, ec] = await Promise.all([
+    const [s, u, st, r, p, rp, ps, ec, fo] = await Promise.all([
       supabase.from('stations').select('*').order('id'),
       supabase.from('profiles').select('id, full_name, role, station_id, approved').order('full_name'),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
@@ -55,12 +56,14 @@ export default function Stations() {
       supabase.from('role_permissions').select('*'),
       supabase.from('profile_stations').select('*'),
       supabase.from('expense_categories').select('*').order('ordre'),
+      supabase.from('formules').select('key, label, max_utilisateurs_station'),
     ])
     setStations(s.data || []); setUsers(u.data || []); setSettings(st.data || null)
     setRoles(r.data || []); setPermissions(p.data || []); setRolePerms(rp.data || [])
     const psm = {}; for (const x of (ps.data || [])) (psm[x.profile_id] = psm[x.profile_id] || []).push(x.station_id)
     setProfileStations(psm)
     setExpenseCats(ec.data || [])
+    setFormules(fo.data || [])
     setSelectedRole(prev => prev || (r.data || [])[0]?.key || null)
   }
   useEffect(() => { load() }, [])
@@ -84,11 +87,30 @@ export default function Stations() {
     const { error } = await supabase.from('stations').insert({ nom: newName })
     if (error) fail(error); else { setNewName(''); load(); flash('Station ajoutée') }
   }
+  // Limite d'utilisateurs par station, réglée par l'admin de la plateforme offre par offre
+  // (Back-office → Offres → "Nombre max. d'utilisateurs par station", voir migration_v104).
+  // null = illimité.
+  const stationUserLimit = (stationId) => {
+    const st = stations.find(s => s.id === stationId)
+    return formules.find(f => f.key === st?.formule)?.max_utilisateurs_station ?? null
+  }
+  const usersAtStation = (stationId, excludeId) => users.filter(u2 => u2.id !== excludeId && u2.approved && (
+    SINGLE_STATION_ROLES.includes(u2.role) ? u2.station_id === stationId : (profileStations[u2.id] || []).includes(stationId)
+  )).length
   async function saveUser(u, { approve } = {}) {
     const isMulti = !SINGLE_STATION_ROLES.includes(u.role)
     if (approve) {
       const hasStation = isMulti ? (profileStations[u.id] || []).length > 0 : !!u.station_id
       if (!hasStation) { setErr('Attribue une station avant de valider ce compte.'); return }
+    }
+    const targetStations = isMulti ? (profileStations[u.id] || []) : (u.station_id ? [Number(u.station_id)] : [])
+    for (const sid of targetStations) {
+      const limit = stationUserLimit(sid)
+      if (limit != null && usersAtStation(sid, u.id) + 1 > limit) {
+        const st = stations.find(s => s.id === sid)
+        setErr(`« ${st?.nom || sid} » a déjà atteint son maximum de ${limit} utilisateur(s) pour son offre actuelle. Change l'offre de la station, ou retire un autre compte avant d'en ajouter un nouveau.`)
+        return
+      }
     }
     const patch = { role: u.role, station_id: isMulti ? null : (u.station_id ? Number(u.station_id) : null) }
     if (approve) patch.approved = true

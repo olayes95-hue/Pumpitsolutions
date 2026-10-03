@@ -73,7 +73,9 @@ export default function Offres() {
     const prix = nombre(fiche.prix_mensuel)
     if (!String(fiche.label || '').trim()) return fail('Donnez un nom à l\'offre.')
     if (prix === null || prix < 0) return fail('Prix invalide. Mettez 0 pour une offre gratuite.')
-    const champs = { label: fiche.label.trim(), description: String(fiche.description || '').trim() || null, prix_mensuel: prix, ordre: nombre(fiche.ordre) ?? 0 }
+    const maxUsers = nombre(fiche.max_utilisateurs_station)
+    if (maxUsers !== null && maxUsers < 1) return fail('Le nombre maximum d\'utilisateurs doit être vide (illimité) ou au moins 1.')
+    const champs = { label: fiche.label.trim(), description: String(fiche.description || '').trim() || null, prix_mensuel: prix, ordre: nombre(fiche.ordre) ?? 0, max_utilisateurs_station: maxUsers }
     if (fiche.nouvelle) {
       const key = cleDepuis(fiche.label)
       if (!key) return fail('Nom invalide.')
@@ -118,7 +120,7 @@ export default function Offres() {
                 </div>
                 <div><span style={{ font: '800 26px/1.1 var(--font-display)' }}>{Number(o.prix_mensuel) ? fcfa(o.prix_mensuel) : 'Gratuit'}</span>{Number(o.prix_mensuel) ? <span style={{ color: 'var(--text-muted)' }}> / station / mois</span> : null}</div>
                 {o.description && <p style={{ margin: 0, font: '400 14px/1.45 var(--font-ui)', color: 'var(--text-secondary)' }}>{o.description}</p>}
-                <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>{usage[o.key] || 0} station{(usage[o.key] || 0) > 1 ? 's' : ''} · {(o.activites || []).length} activité{(o.activites || []).length > 1 ? 's' : ''} · {(o.fonctions || []).length} fonction{(o.fonctions || []).length > 1 ? 's' : ''}</span>
+                <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>{usage[o.key] || 0} station{(usage[o.key] || 0) > 1 ? 's' : ''} · {(o.activites || []).length} activité{(o.activites || []).length > 1 ? 's' : ''} · {(o.fonctions || []).length} fonction{(o.fonctions || []).length > 1 ? 's' : ''} · {o.max_utilisateurs_station ? `${o.max_utilisateurs_station} util. max/station` : 'utilisateurs illimités'}</span>
                 <Button size="sm" style={{ alignSelf: 'flex-start', marginTop: 'auto' }} onClick={() => { setErr(''); setFiche({ ...o }) }}>Modifier</Button>
               </div>
             ))}
@@ -174,6 +176,9 @@ export default function Offres() {
             <Field label="Prix par station et par mois" required hint="0 pour une offre gratuite."><Input numeric inputMode="numeric" suffix="F" value={fiche.prix_mensuel ?? ''} onChange={e => setFiche({ ...fiche, prix_mensuel: e.target.value })} /></Field>
             <Field label="Description" hint="Affichée dans le back-office."><Input value={fiche.description || ''} onChange={e => setFiche({ ...fiche, description: e.target.value })} /></Field>
             <Field label="Ordre d'affichage"><Input numeric inputMode="numeric" value={fiche.ordre ?? 0} onChange={e => setFiche({ ...fiche, ordre: e.target.value })} style={{ maxWidth: 120 }} /></Field>
+            <Field label="Nombre max. d'utilisateurs par station" hint="Vide = illimité. Compte tous les comptes rattachés à une même station (gérant, pompiste, vendeuse, admin, directeur, comptable...).">
+              <Input numeric inputMode="numeric" value={fiche.max_utilisateurs_station ?? ''} onChange={e => setFiche({ ...fiche, max_utilisateurs_station: e.target.value })} style={{ maxWidth: 120 }} placeholder="illimité" />
+            </Field>
             <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>{fiche.nouvelle ? 'Créer l\'offre' : 'Enregistrer'}</Button>
             {!fiche.nouvelle && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', marginTop: 'var(--sp-5)', paddingTop: 'var(--sp-5)', borderTop: '1px solid var(--border-hairline)' }}>
