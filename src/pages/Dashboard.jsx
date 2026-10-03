@@ -40,7 +40,7 @@ function periodBounds(year, month) {
 }
 
 export default function Dashboard() {
-  const { stationId } = useStation()
+  const { stationId, current } = useStation()
   const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const nav = useNavigate()
   const [months, setMonths] = useState([])   // v_ventes_mensuelles (agrégé, rapide)
@@ -337,6 +337,14 @@ export default function Dashboard() {
   const yearOptions = [{ value: 'all', label: 'Toutes années' }, ...years.map(y => ({ value: y, label: y }))]
   const monthOptions = [{ value: 'all', label: 'Tous mois' }, ...MONTHS.map(m => ({ value: m, label: ML[m] }))]
 
+  // Capacité de cuve — pour répondre à "combien de litres puis-je commander" (jusqu'au plein),
+  // pas seulement "quand". Même repli que Journal.jsx (stations créées avant cette colonne).
+  const capaciteEssence = N(current?.capacite_essence) || 20000
+  const capaciteGasoil = N(current?.capacite_gasoil) || 20000
+  const qteACommander = (r) => {
+    const capacite = r.produit === 'essence' ? capaciteEssence : capaciteGasoil
+    return r.stock != null ? Math.max(0, Math.round(capacite - r.stock)) : null
+  }
   const reorderColumns = [
     { key: 'produit', header: 'Produit', render: r => <span style={{ textTransform: 'capitalize' }}>{r.produit}</span> },
     { key: 'stock', header: 'Stock', numeric: true, align: 'right', render: r => r.stock != null ? Math.round(r.stock).toLocaleString('fr-FR') + ' L' : '—' },
@@ -345,6 +353,7 @@ export default function Dashboard() {
     { key: 'lead', header: 'Délai livr.', numeric: true, align: 'right', render: r => <>{r.lead != null ? `${r.lead} j` : '—'}{N(r.nb_delai) > 0 ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}> ({N(r.nb_delai)})</span> : <span style={{ color: 'var(--text-muted)', fontSize: 10 }}> déf.</span>}</> },
     { key: 'commander', header: 'Commander le', render: r => r.commande_en_cours ? <span style={{ color: 'var(--text-muted)' }}>commande en cours</span> : r.commander_maintenant ? <b style={{ color: 'var(--state-alarm)' }}>maintenant</b> : (r.date_commande_conseillee ? frDate(r.date_commande_conseillee) : '—') },
     { key: 'rupture', header: 'Rupture estimée', muted: true, render: r => r.date_rupture_estimee ? frDate(r.date_rupture_estimee) : '—' },
+    { key: 'qte', header: 'Qté à commander (cuve pleine)', numeric: true, align: 'right', render: r => { const q = qteACommander(r); return q != null ? <b>{q.toLocaleString('fr-FR')} L</b> : '—' } },
     { key: 'action', header: 'Action', render: r => r.commande_en_cours
       ? <Badge tone="info" title="Une commande est déjà proposée/validée/lancée pour ce produit">Commande en cours</Badge>
       : r.commander_maintenant
@@ -379,7 +388,7 @@ export default function Dashboard() {
       {reorder.length > 0 && (
         <Panel title="Prévision de commande carburant" status={reorder.some(r => r.commander_maintenant) ? 'alarm' : 'ok'} flush>
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
-            Quand commander pour ne jamais tomber en rupture (rupture = ventes perdues). Calcul : autonomie − délai de livraison − marge de sécurité. Le <b>délai</b> est calculé automatiquement sur l'historique des commandes (lancement → réception).
+            Quand commander pour ne jamais tomber en rupture (rupture = ventes perdues), et combien de litres pour remplir la cuve au stock d'aujourd'hui (le camion mettra un peu plus, le temps du délai de livraison). Calcul de la date : autonomie − délai de livraison − marge de sécurité. Le <b>délai</b> est calculé automatiquement sur l'historique des commandes (lancement → réception).
           </p>
           <div style={{ marginTop: 'var(--sp-4)' }}>
             <DataTable columns={reorderColumns} rows={reorder.map(r => ({ ...r, id: r.produit }))} />
