@@ -32,7 +32,6 @@ const Products = lazy(() => import('./pages/Products.jsx'))
 const Stock = lazy(() => import('./pages/Stock.jsx'))
 const Aide = lazy(() => import('./pages/Aide.jsx'))
 const Journal = lazy(() => import('./pages/Journal.jsx'))
-const PriceHistory = lazy(() => import('./pages/PriceHistory.jsx'))
 const Entreprise = lazy(() => import('./pages/Entreprise.jsx'))
 const Assistance = lazy(() => import('./pages/Assistance.jsx'))
 const AdminApp = lazy(() => import('./admin/AdminApp.jsx'))
@@ -67,12 +66,11 @@ function useSpaces() {
       can('view_dashboard') && { to: '/tableau', icon: 'layout-dashboard', label: 'Tableau de bord' },
       can('view_alerts') && { to: '/alertes', icon: 'bell', label: 'Alertes' },
       can('view_history') && { to: '/historique', icon: 'calendar-days', label: 'Historique' },
-      can('view_price_history') && { to: '/historique-prix', icon: 'tag', label: 'Historique des prix' },
     ] },
     { key: 'stock', label: 'Stock', icon: 'package', items: [
       stock && { to: '/stock', icon: isVendeuse ? 'shopping-cart' : 'package', label: isVendeuse ? 'Supérette' : 'Stock et mouvements' },
       (op || can('validate_orders')) && { to: '/commandes', icon: 'truck', label: 'Commandes' },
-      can('manage_products') && { to: '/produits', icon: 'book-open', label: 'Produits et prix' },
+      (can('manage_products') || can('view_price_history')) && { to: '/produits', icon: 'book-open', label: 'Produits et prix' },
       can('manage_suppliers') && { to: '/fournisseurs', icon: 'factory', label: 'Fournisseurs' },
     ] },
     { key: 'finance', label: 'Finance', icon: 'wallet', items: [
@@ -282,11 +280,10 @@ function AppRoutes() {
           <Route path="/tableau" element={guard(can('view_dashboard'), <Dashboard />)} />
           <Route path="/alertes" element={guard(can('view_alerts'), <AlertsPage />)} />
           <Route path="/historique" element={guard(can('view_history'), <History />)} />
-          <Route path="/historique-prix" element={guard(can('view_price_history'), <PriceHistory />)} />
           <Route path="/saisies" element={<Navigate to="/historique" />} />
           <Route path="/stock" element={guard(stock, <Stock />)} />
           <Route path="/commandes" element={guard(op || can('validate_orders'), <Orders />)} />
-          <Route path="/produits" element={guard(can('manage_products'), <Products />)} />
+          <Route path="/produits" element={guard(can('manage_products') || can('view_price_history'), <Products />)} />
           <Route path="/fournisseurs" element={guard(can('manage_suppliers'), <Suppliers />)} />
           <Route path="/finance" element={guard(can('view_finance') && has('finance'), <Finance />)} />
           <Route path="/rapprochement" element={guard(can('view_bank_recon') && has('finance'), <BankRecon />)} />

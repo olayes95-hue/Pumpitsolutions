@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/auth.jsx'
 import { numFR } from '../lib/format'
 import { Panel } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
@@ -9,6 +10,8 @@ import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
+import PriceHistory from './PriceHistory.jsx'
 
 const CATS = ['gaz', 'lubrifiant', 'superette', 'autre']
 const UNITES = ['bouteille', 'bidon', 'carton', 'fût', 'unité', 'litre', 'valeur']
@@ -16,6 +19,14 @@ const UNITE_OPTIONS = UNITES.map(u => ({ value: u, label: u }))
 const CAT_OPTIONS = CATS.map(c => ({ value: c, label: c }))
 
 export default function Products() {
+  const { isAdmin, can } = useAuth()
+  // Catalogue : réservé à qui gère les produits. Historique des prix : aussi ouvert au
+  // directeur (permission séparée, voir migration_v101) — simple consultation, pas d'édition.
+  const TABS = [
+    (isAdmin || can('manage_products')) && { value: 'catalogue', label: 'Catalogue' },
+    (isAdmin || can('view_price_history')) && { value: 'prix', label: 'Historique des prix' },
+  ].filter(Boolean)
+  const [tab, setTab] = useState(() => TABS[0]?.value || 'catalogue')
   const [list, setList] = useState([])
   const [cat, setCat] = useState('gaz')
   const [nf, setNf] = useState({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '' })
@@ -95,6 +106,9 @@ export default function Products() {
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
       {err && <AlertBanner tone="alarm" title="Erreur">{err}</AlertBanner>}
 
+      <Tabs items={TABS} value={tab} onChange={setTab} />
+
+      {tab === 'catalogue' && (<>
       <Panel title="Produits & prix">
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
           Catalogue par catégorie avec prix d'achat, prix de vente et seuil d'alerte. (Le carburant se règle dans « Prix &amp; marge ».)
@@ -132,6 +146,9 @@ export default function Products() {
           <Button type="submit" tone="primary">+ Ajouter à « {cat} »</Button>
         </form>
       </Panel>
+      </>)}
+
+      {tab === 'prix' && <PriceHistory />}
     </div>
   )
 }

@@ -120,17 +120,13 @@ export default function AlertsPage() {
                 const meta = ALERT_TONES[a.type] || { label: a.type, tone: 'info' }
                 const urgent = a.gravite === 'haute'
                 return (
-                  <div key={i} style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-start', padding: 'var(--sp-4)', background: 'var(--surface-raised)', borderLeft: `${urgent ? '3px' : 'var(--bw-accent)'} solid var(--state-${meta.tone})`, borderRadius: 'var(--radius-1)' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
-                          {urgent && <Badge tone="alarm">Urgent</Badge>}
-                          <Badge tone={meta.tone}>{meta.label}</Badge>
-                        </div>
-                        <Tag>{frDate(a.report_date)}</Tag>
-                      </div>
-                      <div style={{ marginTop: 'var(--sp-3)', font: '400 15px/1.4 var(--font-ui)', color: 'var(--text-body)' }}>{a.detail}</div>
+                  <div key={i} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', padding: 'var(--sp-3) var(--sp-4)', background: 'var(--surface-raised)', borderLeft: `${urgent ? '3px' : 'var(--bw-accent)'} solid var(--state-${meta.tone})`, borderRadius: 'var(--radius-1)' }}>
+                    <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexShrink: 0 }}>
+                      {urgent && <Badge tone="alarm">Urgent</Badge>}
+                      <Badge tone={meta.tone}>{meta.label}</Badge>
                     </div>
+                    <Tag style={{ flexShrink: 0 }}>{frDate(a.report_date)}</Tag>
+                    <div title={a.detail} style={{ flex: 1, minWidth: 0, font: '400 15px/1.4 var(--font-ui)', color: 'var(--text-body)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.detail}</div>
                     <div style={{ display: 'flex', gap: 'var(--sp-2)', flexShrink: 0 }}>
                       {a.report_date && <Button size="sm" onClick={() => nav(`/saisie?date=${a.report_date}`)}>Traiter</Button>}
                       {isAdmin && (showDismissed
