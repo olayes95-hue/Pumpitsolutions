@@ -1,7 +1,7 @@
 -- ============================================================
---  v101 : OFFRES PAR STATION ET ACTIVITÉS PAR OFFRE
+--  v103 : OFFRES PAR STATION ET ACTIVITÉS PAR OFFRE
 -- ============================================================
---  À exécuter après la v100. Transactionnel, rejouable.
+--  À exécuter après la v102. Transactionnel, rejouable.
 --
 --  1. Chaque station a sa propre offre. Un client peut avoir une station
 --     en Complet et deux en Essentiel. L'offre du client (organisations.formule)
@@ -16,7 +16,7 @@ begin;
 
 do $$ begin
   if to_regprocedure('public.agent_can(text)') is null then
-    raise exception 'Exécutez d''abord migration_v100_backoffice_complet.sql.';
+    raise exception 'Exécutez d''abord migration_v102_backoffice_complet.sql.';
   end if;
 end $$;
 

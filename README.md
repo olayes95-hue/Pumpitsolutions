@@ -70,8 +70,10 @@ Une seule base sert plusieurs exploitants. Chaque client est une « organisation
    - `supabase/migration_v96_multiclient.sql` (organisations et cloisonnement) ;
    - `supabase/migration_v97_abonnements_photos.sql` (formules, suspension, factures, droits sur les photos, ancienne application) ;
    - `supabase/migration_v99_backoffice_assistance.sql` (supervision et assistance) ;
-   - `supabase/migration_v100_backoffice_complet.sql` (agents PumpIT, offres paramétrables, période d'essai, statistiques) ;
-   - `supabase/migration_v101_offres_par_station.sql` (une offre par station, activités par offre, facturation par station).
+   - `supabase/migration_v100.sql` (photo obligatoire, suivi stock/vendu par station, catégories de dépense) ;
+   - `supabase/migration_v101.sql` (historique des prix) ;
+   - `supabase/migration_v102_backoffice_complet.sql` (agents PumpIT, offres paramétrables, période d'essai, statistiques) ;
+   - `supabase/migration_v103_offres_par_station.sql` (une offre par station, activités par offre, facturation par station).
 
    Chaque script est transactionnel : en cas d'erreur, rien n'est modifié. Seul le dernier script appliqué se rejoue : les précédents refusent de s'exécuter, pour ne pas écraser ce que les suivants ont remplacé.
 3. Nommez-vous administrateur de la plateforme et renommez le client initial :

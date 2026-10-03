@@ -1,9 +1,9 @@
 -- ============================================================
---  v100 : BACK-OFFICE COMPLET
+--  v102 : BACK-OFFICE COMPLET
 --         agents PumpIT, offres paramétrables, période d'essai,
 --         comptabilité et statistiques
 -- ============================================================
---  À exécuter après la v99. Transactionnel, rejouable tant que la v101 n'est pas appliquée.
+--  À exécuter après la v99. Transactionnel, rejouable tant que la v103 n'est pas appliquée.
 --
 --  1. Agents PumpIT : plusieurs personnes gèrent la plateforme, chacune
 --     avec un rôle (super administrateur, support, comptable, commercial).
@@ -18,12 +18,12 @@
 
 begin;
 
--- Garde-fou : une fois la v101 appliquée, ce script ne doit plus être rejoué
+-- Garde-fou : une fois la v103 appliquée, ce script ne doit plus être rejoué
 -- (il écraserait la facturation par station et les statistiques).
 do $$ begin
   if exists (select 1 from information_schema.columns
              where table_schema = 'public' and table_name = 'stations' and column_name = 'formule') then
-    raise exception 'La v101 est déjà appliquée : ne rejouez pas ce script. Seule la v101 se rejoue.';
+    raise exception 'La v103 est déjà appliquée : ne rejouez pas ce script. Seule la v103 se rejoue.';
   end if;
 end $$;
 
