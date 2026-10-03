@@ -32,6 +32,7 @@ const Products = lazy(() => import('./pages/Products.jsx'))
 const Stock = lazy(() => import('./pages/Stock.jsx'))
 const Aide = lazy(() => import('./pages/Aide.jsx'))
 const Journal = lazy(() => import('./pages/Journal.jsx'))
+const Prevision = lazy(() => import('./pages/Prevision.jsx'))
 const Entreprise = lazy(() => import('./pages/Entreprise.jsx'))
 const Assistance = lazy(() => import('./pages/Assistance.jsx'))
 const AdminApp = lazy(() => import('./admin/AdminApp.jsx'))
@@ -66,6 +67,7 @@ function useSpaces() {
       can('view_dashboard') && { to: '/tableau', icon: 'layout-dashboard', label: 'Tableau de bord' },
       can('view_alerts') && { to: '/alertes', icon: 'bell', label: 'Alertes' },
       can('view_history') && { to: '/historique', icon: 'calendar-days', label: 'Historique' },
+      can('view_prevision') && has('prevision') && { to: '/prevision', icon: 'truck', label: 'Prévision de commande' },
     ] },
     { key: 'stock', label: 'Stock', icon: 'package', items: [
       stock && { to: '/stock', icon: isVendeuse ? 'shopping-cart' : 'package', label: isVendeuse ? 'Supérette' : 'Stock et mouvements' },
@@ -280,6 +282,7 @@ function AppRoutes() {
           <Route path="/tableau" element={guard(can('view_dashboard'), <Dashboard />)} />
           <Route path="/alertes" element={guard(can('view_alerts'), <AlertsPage />)} />
           <Route path="/historique" element={guard(can('view_history'), <History />)} />
+          <Route path="/prevision" element={guard(can('view_prevision') && has('prevision'), <Prevision />)} />
           <Route path="/saisies" element={<Navigate to="/historique" />} />
           <Route path="/stock" element={guard(stock, <Stock />)} />
           <Route path="/commandes" element={guard(op || can('validate_orders'), <Orders />)} />

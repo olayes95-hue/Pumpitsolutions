@@ -11,7 +11,6 @@ import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveCo
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { IconButton } from '../ds/pumpit/components/core/IconButton.jsx'
-import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Tag } from '../ds/pumpit/components/core/Tag.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
@@ -40,17 +39,13 @@ function periodBounds(year, month) {
 }
 
 export default function Dashboard() {
-  const { stationId, current } = useStation()
+  const { stationId } = useStation()
   const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const nav = useNavigate()
   const [months, setMonths] = useState([])   // v_ventes_mensuelles (agrégé, rapide)
   const [alerts, setAlerts] = useState([])   // v_alerts des 60 derniers jours (station active), triées par gravité
   const [stock, setStock] = useState(null)
   const [forecast, setForecast] = useState(null)
-  const [reorder, setReorder] = useState([])
-  const [enCoursRestant, setEnCoursRestant] = useState({ essence: 0, gasoil: 0 })   // {produit: litres déjà en commande, pas encore reçus}
-  const [paPrix, setPaPrix] = useState({ essence_pa: 0, gasoil_pa: 0 })   // prix d'achat — coût de la commande suggérée
-  const [soldeBancaire, setSoldeBancaire] = useState(0)   // v_compte_bancaire.solde_actuel — financement dispo avec les bons
   const [loading, setLoading] = useState(true)
   // Par défaut, mois en cours (pas le dernier mois avec des données, qui peut être ancien).
   const today = new Date().toISOString().slice(0, 10)
@@ -131,26 +126,11 @@ export default function Dashboard() {
 
   async function loadStock() {
     if (!stationId) return
-    const [ls, sf, ro, fo, orc, st, cb] = await Promise.all([
+    const [ls, sf] = await Promise.all([
       supabase.from('v_latest_stock').select('*').eq('station_id', stationId).maybeSingle(),
       supabase.from('v_stock_forecast').select('*').eq('station_id', stationId).maybeSingle(),
-      supabase.from('v_reorder').select('*').eq('station_id', stationId),
-      // Commandes carburant en cours (ni reçues ni refusées) — pour ne pas suggérer de
-      // recommander ce qui est déjà en route (voir enCoursRestant plus bas).
-      supabase.from('fuel_orders').select('id,produit').eq('station_id', stationId).in('statut', ['proposee', 'validee', 'lancee', 'partielle']),
-      supabase.from('v_order_reception').select('order_id,produit,reste').eq('station_id', stationId),
-      supabase.from('settings').select('essence_pa,gasoil_pa').eq('id', 1).maybeSingle(),
-      // Financement disponible pour commander : bons restants (stock.bons_restant, ci-dessous)
-      // + solde bancaire suivi (Point financier → Compte bancaire).
-      supabase.from('v_compte_bancaire').select('solde_actuel').eq('station_id', stationId).maybeSingle(),
     ])
-    setStock(ls.data || null); setForecast(sf.data || null); setReorder(has('prevision') ? (ro.data || []) : [])
-    const idsEnCours = new Set((fo.data || []).map(o => o.id))
-    const ec = { essence: 0, gasoil: 0 }
-    for (const r of (orc.data || [])) if (idsEnCours.has(r.order_id)) ec[r.produit] = (ec[r.produit] || 0) + N(r.reste)
-    setEnCoursRestant(ec)
-    setPaPrix(st.data || { essence_pa: 0, gasoil_pa: 0 })
-    setSoldeBancaire(N(cb.data?.solde_actuel))
+    setStock(ls.data || null); setForecast(sf.data || null)
     setRefreshedAt(new Date().toLocaleTimeString('fr-FR'))
   }
   useEffect(() => { if (!stationId) return
@@ -354,68 +334,6 @@ export default function Dashboard() {
   const yearOptions = [{ value: 'all', label: 'Toutes années' }, ...years.map(y => ({ value: y, label: y }))]
   const monthOptions = [{ value: 'all', label: 'Tous mois' }, ...MONTHS.map(m => ({ value: m, label: ML[m] }))]
 
-  // Capacité de cuve — pour répondre à "combien de litres puis-je commander", pas seulement
-  // "quand". Même repli que Journal.jsx (stations créées avant cette colonne).
-  const capaciteEssence = N(current?.capacite_essence) || 20000
-  const capaciteGasoil = N(current?.capacite_gasoil) || 20000
-  // Min/max de la quantité à commander MAINTENANT, en tenant compte de ce qui est déjà en
-  // commande (dejaEnCours — sinon on suggérait de recommander ce qui est déjà en route) :
-  //   - min : pour que le stock, une fois CETTE livraison arrivée (stock actuel − conso pendant
-  //     le délai, plus ce qui arrive déjà via une commande en cours), revienne au moins au seuil
-  //     de sécurité (conso/j × (délai+marge)) — sinon on retombe en alerte dès la livraison reçue.
-  //   - max : pour ne jamais dépasser la capacité de la cuve, en comptant aussi ce qui est déjà
-  //     en commande (hypothèse prudente : tout peut arriver avant que le stock ne baisse encore).
-  const qteMinMax = (r) => {
-    if (r.stock == null) return null
-    const capacite = r.produit === 'essence' ? capaciteEssence : capaciteGasoil
-    const dejaEnCours = N(enCoursRestant[r.produit])
-    const stockALivraison = Math.max(0, N(r.stock) - N(r.conso_jour) * N(r.lead)) + dejaEnCours
-    // Les commandes se passent par multiples de 1000 L : le min est arrondi AU-DESSUS (ne jamais
-    // suggérer moins que ce qu'il faut) et le max arrondi EN-DESSOUS (ne jamais risquer un
-    // débordement de cuve en arrondissant à la hausse).
-    const min = Math.max(0, Math.ceil((N(r.seuil_commande_litres) - stockALivraison) / 1000) * 1000)
-    const max = Math.max(0, Math.floor((capacite - N(r.stock) - dejaEnCours) / 1000) * 1000)
-    return { min: Math.min(min, max), max }
-  }
-  // Une commande déjà en cours ne doit masquer l'action QUE si elle couvre vraiment le besoin —
-  // une commande en cours plus petite que ce qu'il faut (min > 0 malgré elle) doit continuer à
-  // dire "commander" (un complément), pas "commande en cours" silencieux.
-  const besoin = (r) => {
-    const urgent = r.jours_restant != null && r.conso_jour > 0 && r.jours_restant <= (N(r.lead) + N(r.secu))
-    const q = qteMinMax(r)
-    return urgent && !!q && q.min > 0
-  }
-  // Financement : une commande se paie en bons et/ou par chèque (compte bancaire) — voir
-  // Commandes et Point financier. Alerte PRÉVISIONNELLE (jamais bloquante) si ce qu'il faut
-  // commander maintenant coûterait plus que ce qui est disponible des deux côtés.
-  const pa = (produit) => produit === 'gasoil' ? N(paPrix.gasoil_pa) : N(paPrix.essence_pa)
-  const coutBesoinTotal = reorder.filter(besoin).reduce((s, r) => s + (qteMinMax(r)?.min || 0) * pa(r.produit), 0)
-  const financementDisponible = N(stock?.bons_restant) + soldeBancaire
-  const manqueFinancement = Math.max(0, Math.round(coutBesoinTotal - financementDisponible))
-  const reorderColumns = [
-    { key: 'produit', header: 'Produit', render: r => <span style={{ textTransform: 'capitalize' }}>{r.produit}</span> },
-    { key: 'stock', header: 'Stock', numeric: true, align: 'right', render: r => r.stock != null ? Math.round(r.stock).toLocaleString('fr-FR') + ' L' : '—' },
-    { key: 'conso_jour', header: 'Conso/j', numeric: true, align: 'right', render: r => r.conso_jour ? Math.round(r.conso_jour).toLocaleString('fr-FR') + ' L' : '—' },
-    { key: 'jours_restant', header: 'Autonomie', numeric: true, align: 'right', render: r => <span style={{ color: YEAR_COLOR(r.jours_restant) }}>{r.jours_restant != null ? `≈ ${r.jours_restant} j` : '—'}</span> },
-    { key: 'lead', header: 'Délai livr.', numeric: true, align: 'right', render: r => <>{r.lead != null ? `${r.lead} j` : '—'}{N(r.nb_delai) > 0 ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}> ({N(r.nb_delai)})</span> : <span style={{ color: 'var(--text-muted)', fontSize: 10 }}> déf.</span>}</> },
-    { key: 'commander', header: 'Commander le', render: r => {
-      if (besoin(r)) return <b style={{ color: 'var(--state-alarm)' }}>maintenant{r.commande_en_cours ? ' (complément)' : ''}</b>
-      if (r.commande_en_cours) return <span style={{ color: 'var(--text-muted)' }}>commande en cours</span>
-      return r.date_commande_conseillee ? frDate(r.date_commande_conseillee) : '—'
-    } },
-    { key: 'rupture', header: 'Rupture estimée', muted: true, render: r => r.date_rupture_estimee ? frDate(r.date_rupture_estimee) : '—' },
-    { key: 'qte', header: 'Qté à commander (min – max)', numeric: true, align: 'right', render: r => {
-      const q = qteMinMax(r)
-      if (!q) return '—'
-      return <b>{q.min.toLocaleString('fr-FR')} – {q.max.toLocaleString('fr-FR')} L</b>
-    } },
-    { key: 'action', header: 'Action', render: r => {
-      if (besoin(r)) return <Badge tone="alarm">Commander{r.commande_en_cours ? ' un complément' : ''}{r.manque_a_gagner_estime > 0 ? ` (−${Math.round(r.manque_a_gagner_estime).toLocaleString('fr-FR')} F)` : ''}</Badge>
-      if (r.commande_en_cours) return <Badge tone="info" title="Une commande est déjà proposée/validée/lancée pour ce produit, et couvre le besoin">Commande en cours</Badge>
-      return <span style={{ color: 'var(--state-ok)' }}>ok</span>
-    } },
-  ]
-
   const reconColumns = [
     { key: 'mois', header: 'Mois' },
     { key: 'esp', header: 'Espèces', numeric: true, align: 'right', render: m => fcfa(N(m.recettes_especes)) },
@@ -439,25 +357,6 @@ export default function Dashboard() {
           </div>
         </>)}
       </Panel>
-
-      {reorder.length > 0 && (
-        <Panel title="Prévision de commande carburant" status={reorder.some(besoin) ? 'alarm' : 'ok'} flush>
-          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
-            Quand commander pour ne jamais tomber en rupture (rupture = ventes perdues), et combien de litres : un <b>minimum</b> (pour revenir au seuil de sécurité une fois cette livraison arrivée) et un <b>maximum</b> (ce que la cuve peut recevoir sans déborder) — en tenant compte de ce qui est déjà en commande, et arrondi au millier (les commandes se passent par multiples de 1000 L). Calcul de la date : autonomie − délai de livraison − marge de sécurité. Le <b>délai</b> est calculé automatiquement sur l'historique des commandes (lancement → réception).
-          </p>
-          {manqueFinancement > 0 && (
-            <div style={{ margin: '0 var(--gutter-panel) var(--sp-4)' }}>
-              <AlertBanner tone="warn" title="Alerte prévisionnelle — financement insuffisant">
-                Pour commander ce qu'il faut maintenant (≈ {Math.round(coutBesoinTotal).toLocaleString('fr-FR')} F), les bons restants et le solde bancaire suivi ne couvrent que {Math.round(financementDisponible).toLocaleString('fr-FR')} F.
-                Il manque <b>{manqueFinancement.toLocaleString('fr-FR')} F</b> — pensez à verser ce montant en banque avant de passer la commande.
-              </AlertBanner>
-            </div>
-          )}
-          <div style={{ marginTop: 'var(--sp-4)' }}>
-            <DataTable columns={reorderColumns} rows={reorder.map(r => ({ ...r, id: r.produit }))} />
-          </div>
-        </Panel>
-      )}
 
       <Panel bodyStyle={{ display: 'none' }} actions={<>
         <Select size="sm" value={year} onChange={e => setYear(e.target.value)} options={yearOptions} />

@@ -55,14 +55,13 @@ const AUTRE_MOUVEMENT_SOURCES = [
 export default function Stock() {
   const { session, isAdmin, isVendeuse, isPompiste } = useAuth()
   const { stationId } = useStation()
-  const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
+  const { activite } = useOffre()   // activités incluses dans l'offre de la station courante
   const [stock, setStock] = useState([])
   const [valeur, setValeur] = useState([])
   const [mvts, setMvts] = useState([])
   const [sorties, setSorties] = useState([])
   const [theorique, setTheorique] = useState([])
   const [snapshots, setSnapshots] = useState([])
-  const [reorder, setReorder] = useState([])   // v_reorder_produit — gaz + lubrifiant
   const [products, setProducts] = useState([])
   const [histProduit, setHistProduit] = useState('')
   const [action, setAction] = useState(null)   // null | 'entree' | 'ajustement'
@@ -87,7 +86,7 @@ export default function Stock() {
 
   async function load() {
     if (!stationId) return
-    const [sp, sv, mv, so, pr, th, sn, ro] = await Promise.all([
+    const [sp, sv, mv, so, pr, th, sn] = await Promise.all([
       supabase.from('v_stock_produits').select('*').eq('station_id', stationId),
       supabase.from('v_stock_valeur').select('*').eq('station_id', stationId),
       supabase.from('stock_movements').select('*').eq('station_id', stationId).order('date_mouvement', { ascending: false }).limit(400),
@@ -95,10 +94,9 @@ export default function Stock() {
       supabase.from('products').select('*').eq('actif', true).order('ordre'),
       supabase.from('v_stock_theorique').select('*').eq('station_id', stationId),
       supabase.from('stock_declarations_snapshot').select('*').eq('station_id', stationId).order('report_date', { ascending: false }).limit(200),
-      supabase.from('v_reorder_produit').select('*').eq('station_id', stationId),
     ])
     setStock(sp.data || []); setValeur(sv.data || []); setMvts(mv.data || []); setSorties(so.data || []); setProducts(pr.data || [])
-    setTheorique(th.data || []); setSnapshots(sn.data || []); setReorder(has('prevision') ? (ro.data || []) : [])
+    setTheorique(th.data || []); setSnapshots(sn.data || [])
   }
   useEffect(() => { load() }, [stationId])
   const flash = (m) => { setMsg(m); setErr(''); setTimeout(() => setMsg(''), 2500) }
@@ -195,18 +193,6 @@ export default function Stock() {
     ) : null },
   ]
 
-  const reorderColumns = [
-    { key: 'produit', header: 'Produit' },
-    { key: 'stock_theorique_actuel', header: 'Stock', numeric: true, align: 'right', render: r => N(r.stock_theorique_actuel) },
-    { key: 'conso_moy_jour', header: 'Conso/jour', numeric: true, align: 'right', muted: true, render: r => (Number(r.conso_moy_jour) || 0).toFixed(1) },
-    { key: 'stock_cible', header: 'Cible', numeric: true, align: 'right', muted: true, render: r => N(r.stock_cible) },
-    { key: 'quantite_a_commander', header: 'À commander', numeric: true, align: 'right', render: r => {
-      if (r.commande_en_cours) return <Badge tone="info">Déjà en cours</Badge>
-      if (N(r.quantite_a_commander) <= 0) return <span style={{ color: 'var(--state-ok)' }}>—</span>
-      return <span style={{ fontWeight: 600, color: 'var(--state-alarm)' }}>{N(r.quantite_a_commander)} {r.conditionnement_qte ? '(' + N(r.cartons_a_commander) + ' ' + (r.conditionnement_nom || 'carton') + '(s))' : ''}</span>
-    } },
-    { key: 'cout_estimatif', header: 'Coût estimé', numeric: true, align: 'right', muted: true, render: r => r.quantite_a_commander > 0 && !r.commande_en_cours ? fcfa(r.cout_estimatif) : '—' },
-  ]
 
   const histColumns = [
     { key: 'report_date', header: 'Date', render: s => frDate(s.report_date) },
@@ -373,7 +359,6 @@ export default function Stock() {
           au lieu de panneaux séparés dispersés sur la page. ===== */}
       {!isVendeuse && (() => {
         const catLabel = { gaz: 'Gaz', lubrifiant: 'Lubrifiant', superette: 'Supérette' }[catTab]
-        const reorderCat = reorder.filter(r => r.categorie === catTab)
         const sortiesCat = sorties.filter(s => s.categorie === catTab
           && (fYear === 'all' || (s.report_date || '').slice(0, 4) === fYear)
           && (fMonth === 'all' || (s.report_date || '').slice(5, 7) === fMonth))
@@ -412,15 +397,6 @@ export default function Stock() {
                 </div>
               )}
 
-              {catTab !== 'superette' && reorderCat.length > 0 && (
-                <div>
-                  <SectionLabel>Suggestions de commande</SectionLabel>
-                  <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
-                    Cible = seuil ou consommation moyenne × (délai livraison + jours de sécurité), selon le plus élevé. Le nombre de cartons est calculé automatiquement.
-                  </p>
-                  <DataTable columns={reorderColumns} rows={reorderCat.map((r, i) => ({ ...r, id: i }))} />
-                </div>
-              )}
 
               {catTab === 'lubrifiant' && ecartRows.length > 0 && (
                 <div>
