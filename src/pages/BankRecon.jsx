@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
@@ -23,6 +24,7 @@ const MONTHS = [['01','Janv'],['02','Févr'],['03','Mars'],['04','Avril'],['05',
 const PAGE_DEFAULT = 25
 
 export default function BankRecon() {
+  const nav = useNavigate()
   const { session } = useAuth()
   const { stationId } = useStation()
   const [deposits, setDeposits] = useState([])
@@ -257,7 +259,12 @@ export default function BankRecon() {
     { key: 'montant', header: 'Montant', numeric: true, align: 'right', render: r => fcfa(r.montant) },
     { key: 'deposit_date', header: 'Date bordereau', muted: true, render: r => r.deposit_date ? frDate(r.deposit_date) : '—' },
     { key: 'ref_bordereau', header: 'Réf', muted: true, render: r => r.ref_bordereau || '—' },
-    { key: 'actions', header: '', align: 'right', render: r => <Button size="sm" tone="danger" onClick={() => delDeposit(r)}>Supprimer</Button> },
+    { key: 'actions', header: '', align: 'right', render: r => (
+      <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
+        <Button size="sm" onClick={() => nav(`/saisie?date=${r.report_date}`)}>Ouvrir la saisie</Button>
+        <Button size="sm" tone="danger" onClick={() => delDeposit(r)}>Supprimer</Button>
+      </div>
+    ) },
   ]
   const catSelectOptions = [{ value: '', label: '— aucune —' }, ...categories.map(c => ({ value: c.id, label: c.label }))]
   const bankColumns = [
