@@ -74,7 +74,7 @@ function clearDraft(stationId, date) {
 }
 
 export default function Submit() {
-  const { session, isAdmin, isPompiste, isVendeuse } = useAuth()
+  const { session, isAdmin, isPompiste, isVendeuse, profile, can } = useAuth()
   const { stationId, current } = useStation()
   const { activite } = useOffre()   // activités incluses dans l'offre de la station (carburant, lubrifiant, gaz, superette)
   const [params] = useSearchParams()
@@ -374,8 +374,15 @@ export default function Submit() {
   // gérant/pompiste/vendeuse : verrouillage aligné sur la règle RLS réelle côté base
   // (migration v47, configurable par l'admin dans Stations & équipe — settings.jours_correction_gerant).
   const joursCorrection = Number(settings.jours_correction_gerant) || 2
-  const locked = !isAdmin && date < daysAgoIso(joursCorrection)
-  const lockedMsg = `Journée verrouillée : vous pouvez créer ou corriger un jour des ${joursCorrection} derniers jours seulement. Au-delà, demandez à la direction.`
+  // Accès lecture seule (directeur/comptable arrivés ici via un lien "Ouvrir la saisie"
+  // depuis Alertes/Historique/Journal/Rapprochement — voir App.jsx, route /saisie — sans
+  // avoir le droit d'opérer la saisie). Ils voient tout, y compris les photos, mais ne
+  // peuvent rien envoyer.
+  const lectureSeule = !(isAdmin || isPompiste || isVendeuse || profile?.role === 'gerant' || can('manage_orders'))
+  const locked = lectureSeule || (!isAdmin && date < daysAgoIso(joursCorrection))
+  const lockedMsg = lectureSeule
+    ? 'Accès en lecture — vous pouvez consulter cette journée et ses photos, mais pas la modifier.'
+    : `Journée verrouillée : vous pouvez créer ou corriger un jour des ${joursCorrection} derniers jours seulement. Au-delà, demandez à la direction.`
   const nombreMachines = Math.min(MAX_MACHINES, Math.max(1, Number(current?.nombre_machines) || 4))
   // Choix admin par station (Stations & équipe) : déclarer le STOCK (matin, réconciliation),
   // la quantité VENDUE (16h, commission réelle), ou les deux (comportement historique, par défaut).
@@ -1084,7 +1091,12 @@ export default function Submit() {
                         onChange={ev => { const file = ev.target.files[0]; ev.target.value = ''; if (file) handleExpensePhoto(i, file) }} />
                     </Field>
                     {expPhotoBusy[i] && <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Envoi de la photo…</p>}
-                    {e.photo_path && !expPhotoBusy[i] && <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--state-ok)', margin: 0 }}>Justificatif envoyé ✓</p>}
+                    {e.photo_path && !expPhotoBusy[i] && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+                        <PhotoThumb path={e.photo_path} label="Justificatif" status="none" size={72} />
+                        <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--state-ok)', margin: 0 }}>Justificatif envoyé ✓</p>
+                      </div>
+                    )}
                   </>)}
                   <Button size="sm" tone="danger" onClick={() => rm(setExpenses, i)} style={{ alignSelf: 'flex-start' }}>Retirer</Button>
                 </div>
@@ -1126,7 +1138,12 @@ export default function Submit() {
                       onChange={ev => { const file = ev.target.files[0]; ev.target.value = ''; if (file) handleDepositPhoto(i, file) }} />
                   </Field>
                   {depPhotoBusy[i] && <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Envoi de la photo…</p>}
-                  {d.photo_path && !depPhotoBusy[i] && <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--state-ok)', margin: 0 }}>Photo envoyée ✓</p>}
+                  {d.photo_path && !depPhotoBusy[i] && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+                      <PhotoThumb path={d.photo_path} label="Bordereau" status="none" size={72} />
+                      <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--state-ok)', margin: 0 }}>Photo envoyée ✓</p>
+                    </div>
+                  )}
                   <Button size="sm" tone="danger" onClick={() => rm(setDeposits, i)} style={{ alignSelf: 'flex-start' }}>Retirer</Button>
                 </div>
               ))}

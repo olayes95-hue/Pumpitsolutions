@@ -276,7 +276,7 @@ function AppRoutes() {
     <Shell>
       <Suspense fallback={<Loading />}>
         <Routes>
-          <Route path="/saisie" element={guard(op, <Submit />)} />
+          <Route path="/saisie" element={guard(op || can('view_history'), <Submit />)} />
           <Route path="/journal" element={guard(op || can('view_journal'), <Journal />)} />
           <Route path="/controles" element={guard(op, <Inspections />)} />
           <Route path="/tableau" element={guard(can('view_dashboard'), <Dashboard />)} />

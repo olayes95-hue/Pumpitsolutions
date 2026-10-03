@@ -252,6 +252,7 @@ export default function BankRecon() {
     { key: 'pole', header: 'Pôle' },
     { key: 'montant', header: 'Montant', numeric: true, align: 'right', render: r => <span style={{ color: 'var(--state-alarm)' }}>{fcfa(r.montant)}</span> },
     { key: 'ref_bordereau', header: 'Réf', muted: true, render: r => r.ref_bordereau || '—' },
+    { key: 'actions', header: '', align: 'right', render: r => <Button size="sm" onClick={() => nav(`/saisie?date=${r.report_date}`)}>Ouvrir la saisie</Button> },
   ]
   const doublonColumns = [
     { key: 'report_date', header: 'Jour déclaré', render: r => frDate(r.report_date) },
