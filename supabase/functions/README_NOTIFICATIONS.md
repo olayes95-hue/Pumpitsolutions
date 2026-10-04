@@ -15,10 +15,9 @@ Crée une clé API sur https://app.brevo.com → SMTP & API → API Keys.
 
 ## 3. Secrets + déploiement des fonctions
 
-⚠️ Depuis la v2, `send-notification` et `notification-poller` importent un fichier partagé
-(`_shared/template.ts`, le gabarit d'e-mail avec logo/« Bonjour »/pied de page) — le déploiement
-**doit** passer par le CLI (il embarque automatiquement `_shared/`) ; la méthode "coller le code
-dans le dashboard" ne fonctionne plus pour ces deux fonctions.
+Chaque fonction est autonome (le gabarit d'e-mail — logo/« Bonjour »/pied de page — est inclus
+directement dans chacune, pas de fichier partagé) : déploiement par CLI ou copier-coller dans le
+dashboard, les deux marchent.
 
 ```bash
 supabase secrets set BREVO_API_KEY=xkeysib-xxxxxxxx

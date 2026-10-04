@@ -17,7 +17,6 @@
 // Déploiement : voir supabase/functions/README_NOTIFICATIONS.md
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { enveloppeEmail, render } from "../_shared/template.ts"
 
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY")!
 const SENDER_EMAIL = Deno.env.get("BREVO_SENDER_EMAIL") ?? "notifications@pumpit.app"
@@ -27,6 +26,31 @@ const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS, GET" }
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { ...CORS, "content-type": "application/json" } })
+
+// Gabarit e-mail (logo + "Bonjour," + corps + pied de page) — dupliqué dans send-notification
+// ET notification-poller plutôt que partagé via _shared/ : certaines versions du CLI Supabase
+// n'embarquent pas correctement ce dossier au déploiement ("Module not found _shared/...").
+// Deux petites fonctions, le doublon est moins coûteux que ce risque de déploiement.
+const LOGO_URL = "https://pumpit-app.vercel.app/brand/pumpit-logo-principal.png"
+function enveloppeEmail(corpsHtml: string): string {
+  return `
+<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0B1F17;line-height:1.5">
+  <div style="margin-bottom:24px">
+    <img src="${LOGO_URL}" alt="PumpIT" style="height:32px;display:block">
+  </div>
+  <p style="margin:0 0 16px">Bonjour,</p>
+  <div style="margin:0 0 20px">${corpsHtml}</div>
+  <p style="margin:0">Cordialement,<br>L'équipe PumpIT</p>
+  <hr style="border:none;border-top:1px solid #DCE5E0;margin:24px 0">
+  <p style="font-size:12px;color:#6b7a72;margin:0">
+    Cet e-mail est envoyé automatiquement par votre back-office PumpIT.<br>
+    Pour toute question, contactez l'assistance depuis votre espace PumpIT.
+  </p>
+</div>`.trim()
+}
+function render(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (m, k) => (k in vars ? String(vars[k]) : m))
+}
 
 // ---------- Envoi + journal ----------
 async function envoyer(ruleId: number, triggerKey: string, email: string, sujet: string, corps: string, vars: Record<string, string>) {
