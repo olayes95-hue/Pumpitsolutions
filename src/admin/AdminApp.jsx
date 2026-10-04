@@ -14,6 +14,7 @@ const Stats = lazy(() => import('./Stats.jsx'))
 const Offres = lazy(() => import('./Offres.jsx'))
 const Compta = lazy(() => import('./Compta.jsx'))
 const Agents = lazy(() => import('./Agents.jsx'))
+const Notifications = lazy(() => import('./Notifications.jsx'))
 
 // Back-office PumpIT : l'espace de l'exploitant de la plateforme, séparé de l'application
 // des clients. Ici on ne voit pas « un client » mais tous : supervision, abonnements,
@@ -31,6 +32,7 @@ const NAV = [
   { to: '/admin/comptabilite', perm: 'facturation', icon: 'wallet', label: 'Comptabilité', court: 'Compta', el: <Compta /> },
   { to: '/admin/assistance', perm: 'assistance', icon: 'message-circle', label: 'Assistance', court: 'Aide', el: <Inbox /> },
   { to: '/admin/equipe', perm: 'agents', icon: 'shield-check', label: 'Équipe PumpIT', court: 'Équipe', el: <Agents /> },
+  { to: '/admin/notifications', perm: 'notifications', icon: 'bell', label: 'Notifications', court: 'Notifs', el: <Notifications /> },
   { to: '/admin/reglages', perm: 'reglages', icon: 'settings', label: 'Réglages', court: 'Réglages', el: <Reglages /> },
 ]
 
