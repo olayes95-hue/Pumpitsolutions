@@ -24,6 +24,10 @@ import { Drawer } from '../ds/pumpit/components/feedback/Drawer.jsx'
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre']
 const jours = (iso) => Math.floor((new Date(today()) - new Date(iso)) / 86400000)
 const somme = (liste, cle = 'montant_ttc') => liste.reduce((s, f) => s + Number(f[cle] || 0), 0)
+// Charges de PumpIT elle-même (salaires, hébergement...) — distinctes de `charges` (par station
+// cliente). mois 'YYYY-MM', même esprit que Finance.jsx côté station.
+const CAT_PLATEFORME = ['SALAIRES', 'HEBERGEMENT', 'LOYER', 'SBEE', 'SONEB', 'IMPOTS', 'PRESTATIONS', 'AUTRE']
+const blankPCharge = () => ({ categorie: 'SALAIRES', montant: '', note: '' })
 
 // Comptabilité de la plateforme : ce qui est facturé, encaissé et dû, d'après les factures.
 // Tous les montants sont TTC. Les factures annulées ne comptent nulle part.
@@ -41,6 +45,8 @@ export default function Compta() {
   const [emission, setEmission] = useState({ org: '', debut: today().slice(0, 8) + '01', mois: 1 })
   const [encaisse, setEncaisse] = useState(null)
   const [aImprimer, setAImprimer] = useState(null)
+  const [pcharges, setPcharges] = useState([])
+  const [ncp, setNcp] = useState(blankPCharge())
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -49,12 +55,13 @@ export default function Compta() {
   const ok = (m) => { setErr(''); setMsg(m) }
 
   async function load() {
-    const [f, o, p] = await Promise.all([
+    const [f, o, p, pc] = await Promise.all([
       supabase.from('factures').select('*').order('date_emission', { ascending: false }).order('id', { ascending: false }).limit(5000),
       supabase.from('organisations').select('*').order('nom'),
       supabase.from('formules').select('*'),
+      supabase.from('plateforme_charges').select('*').order('mois', { ascending: false }).order('id', { ascending: false }),
     ])
-    setFactures(f.data || []); setOrgs(o.data || []); setFormules(p.data || [])
+    setFactures(f.data || []); setOrgs(o.data || []); setFormules(p.data || []); setPcharges(pc.data || [])
     const st = await supabase.rpc('bo_stations')
     setStations(st.data || [])
   }
@@ -93,6 +100,36 @@ export default function Compta() {
 
   const journal = factures.filter(f => dansPeriode(f.date_emission) && (filtre === 'toutes' || f.statut === filtre))
   const libellePeriode = (mois ? MOIS[Number(mois) - 1] + ' ' : '') + annee
+
+  // Charges de PumpIT elle-même sur la période sélectionnée (mois 'YYYY-MM').
+  const dansPeriodeMois = (m) => !!m && m.startsWith(annee) && (!mois || m.slice(5, 7) === mois)
+  const chargesPeriode = pcharges.filter(c => dansPeriodeMois(c.mois))
+  const totalCharges = somme(chargesPeriode, 'montant')
+  const resultatNet = somme(encaissees) - totalCharges
+
+  async function ajouterChargePF(e) {
+    e.preventDefault()
+    if (!mois) return fail('Choisissez un mois précis (pas « toute l\'année ») pour ajouter une charge.')
+    if (!ncp.montant) return fail('Indiquez un montant.')
+    const { error } = await supabase.from('plateforme_charges').insert({
+      mois: `${annee}-${mois}`, categorie: ncp.categorie, montant: Number(ncp.montant), note: ncp.note || null,
+    })
+    if (error) return fail(error)
+    setNcp(blankPCharge()); ok('Charge ajoutée.'); load()
+  }
+  async function supprimerChargePF(id) {
+    const { error } = await supabase.from('plateforme_charges').delete().eq('id', id)
+    if (error) return fail(error)
+    load()
+  }
+  async function togglePayeChargePF(c) {
+    const payee = c.statut === 'paye'
+    const { error } = await supabase.from('plateforme_charges').update({
+      statut: payee ? 'a_payer' : 'paye', date_paiement: payee ? null : today(),
+    }).eq('id', c.id)
+    if (error) return fail(error)
+    load()
+  }
 
   function exporter() {
     exportRowsToCsv(`factures-pumpit-${annee}${mois ? '-' + mois : ''}.csv`,
@@ -220,6 +257,44 @@ export default function Compta() {
             pageCount={Math.max(1, Math.ceil(journal.length / pageSize))} total={journal.length} pageSize={pageSize}
             onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
         </> : <PanelEmpty icon="receipt" label="Aucune facture sur cette période." />}
+      </Panel>
+
+      <Panel title="Charges PumpIT" meta={libellePeriode} flush>
+        <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+          Les charges de PumpIT elle-même : salaires, hébergement, loyer, SBEE, SONEB... Distinctes des charges des stations clientes.
+        </p>
+        <div className="pi-bo-kpis" style={{ margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+          <MetricTile label={`Charges, ${libellePeriode}`} value={fcfa(totalCharges)} sub={`${chargesPeriode.length} charge${chargesPeriode.length > 1 ? 's' : ''}`} />
+          <MetricTile label="Résultat net" value={fcfa(resultatNet)} sub="Encaissé − charges PumpIT" status={resultatNet >= 0 ? 'ok' : 'alarm'} />
+        </div>
+        <div style={{ marginTop: 'var(--sp-4)' }}>
+          {chargesPeriode.length
+            ? <DataTable zebra={false} rows={chargesPeriode} columns={[
+                { key: 'categorie', header: 'Catégorie' },
+                { key: 'montant', header: 'Montant', numeric: true, align: 'right', render: c => fcfa(c.montant) },
+                { key: 'note', header: 'Note', muted: true, render: c => c.note || '—' },
+                { key: 'statut', header: 'État', render: c => <Badge tone={c.statut === 'paye' ? 'ok' : 'warn'}>{c.statut === 'paye' ? 'Payée' : 'À payer'}</Badge> },
+                { key: 'action', header: '', align: 'right', render: c => (
+                  <span style={{ display: 'inline-flex', gap: 'var(--sp-2)' }}>
+                    <Button size="sm" onClick={() => togglePayeChargePF(c)}>{c.statut === 'paye' ? 'Marquer à payer' : 'Marquer payée'}</Button>
+                    <Button size="sm" tone="ghost" onClick={() => supprimerChargePF(c.id)}>Supprimer</Button>
+                  </span>) },
+              ]} footer={{ categorie: 'Total', montant: fcfa(totalCharges) }} />
+            : <PanelEmpty icon="wallet" label="Aucune charge PumpIT sur cette période." />}
+        </div>
+        <form onSubmit={ajouterChargePF} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'end', padding: 'var(--gutter-panel)', borderTop: '1px solid var(--border-hairline)' }}>
+          <Field label="Catégorie" style={{ flex: '1 1 160px' }}>
+            <Select value={ncp.categorie} onChange={e => setNcp({ ...ncp, categorie: e.target.value })} options={CAT_PLATEFORME.map(c => ({ value: c, label: c }))} style={{ width: '100%' }} />
+          </Field>
+          <Field label="Montant" style={{ flex: '1 1 120px' }}>
+            <Input numeric value={ncp.montant} onChange={e => setNcp({ ...ncp, montant: e.target.value })} />
+          </Field>
+          <Field label="Note" style={{ flex: '2 1 200px' }}>
+            <Input value={ncp.note} onChange={e => setNcp({ ...ncp, note: e.target.value })} placeholder="optionnel" />
+          </Field>
+          <Button type="submit" tone="primary" disabled={!mois}>+ Ajouter à « {libellePeriode} »</Button>
+        </form>
+        {!mois && <p style={{ color: 'var(--text-muted)', margin: '0 var(--gutter-panel) var(--sp-4)' }}>Choisissez un mois précis ci-dessus pour ajouter une charge.</p>}
       </Panel>
 
       <Drawer open={!!encaisse} title="Encaisser" meta={encaisse ? `${encaisse.numero} · ${fcfa(encaisse.montant)}` : ''} width={420} onClose={() => setEncaisse(null)}>
