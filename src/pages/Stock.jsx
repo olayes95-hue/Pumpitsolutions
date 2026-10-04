@@ -74,7 +74,9 @@ export default function Stock() {
   const [sortiesPage, setSortiesPage] = useState(1)
   const [histPage, setHistPage] = useState(1)
   const [journalPage, setJournalPage] = useState(1)
-  useEffect(() => { setSortiesPage(1); setHistPage(1); setJournalPage(1) }, [catTab])
+  const [stockPage, setStockPage] = useState(1)
+  const [stockSearch, setStockSearch] = useState('')
+  useEffect(() => { setSortiesPage(1); setHistPage(1); setJournalPage(1); setStockPage(1); setStockSearch('') }, [catTab])
 
   function openAction(action, overrides) { setNm({ ...blank(action), ...overrides }); setAction(action); setErr('') }
   function blank(action) {
@@ -372,9 +374,16 @@ export default function Stock() {
                     ? <>Ce qu'il reste, d'après le <b>dernier comptage déclaré dans la Saisie du jour</b>. Ici, vous n'ajoutez que les <b>entrées</b> (livraisons) — les sorties/ventes sont calculées toutes seules.</>
                     : <>Ce qu'il reste, calculé depuis les livraisons, sorties et corrections enregistrées ici — pas de déclaration quotidienne à faire, contrairement au gaz et au lubrifiant.</>}
                 </p>
-                {(stockByCat[catTab] || []).length
-                  ? <DataTable columns={productColumns(catTab)} rows={(stockByCat[catTab] || []).map(s => ({ ...s, id: s.produit }))} />
-                  : <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>{catTab !== 'superette' ? 'Aucun comptage encore.' : 'Aucun mouvement encore.'}</p>}
+                {(stockByCat[catTab] || []).length ? (() => {
+                  const all = (stockByCat[catTab] || []).map(s => ({ ...s, id: s.produit }))
+                  const rows = all.filter(s => !stockSearch || (s.produit || '').toLowerCase().includes(stockSearch.toLowerCase()))
+                  return (<>
+                    {all.length > PAGE_SIZE && <Input size="sm" value={stockSearch} onChange={e => setStockSearch(e.target.value)} placeholder="Rechercher un produit…" style={{ maxWidth: 280, marginBottom: 'var(--sp-3)' }} />}
+                    {rows.length
+                      ? (<><DataTable columns={productColumns(catTab)} rows={pageSlice(rows, stockPage)} /><Pager page={stockPage} setPage={setStockPage} total={rows.length} /></>)
+                      : <PanelEmpty icon="search" label="Aucun produit ne correspond à la recherche." />}
+                  </>)
+                })() : <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>{catTab !== 'superette' ? 'Aucun comptage encore.' : 'Aucun mouvement encore.'}</p>}
               </div>
 
               {catTab === 'superette' && isAdmin && (
