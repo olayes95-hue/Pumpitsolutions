@@ -171,7 +171,7 @@ export default function Orders() {
   function changeCat(cat) {
     let rows = []
     if (cat === 'carburant') rows = carbRows()
-    else if (cat === 'gaz' || cat === 'lubrifiant') rows = prodOf(cat).map(p => ({ produit: p.nom, product_id: p.id, qte: '', montant: '' }))
+    else if (cat === 'gaz' || cat === 'lubrifiant') rows = prodOf(cat).map(p => ({ produit: p.nom, product_id: p.id, qte: '', montant: '', qteCartons: '', qteUnites: '' }))
     setNf({ ...blankNf(), categorie: cat, rows })
   }
   const setRow = (i, k, v) => setNf(p => ({ ...p, rows: p.rows.map((r, j) => j === i ? { ...r, [k]: v } : r) }))
@@ -180,6 +180,17 @@ export default function Orders() {
   // demande validée par le directeur/admin (product_price_requests), pas la commande elle-même.
   const pxAchat = (cat, produit) => N((prodOf(cat).find(p => p.nom === produit) || {}).prix_achat)
   const setQte = (i, cat, v) => setNf(p => ({ ...p, rows: p.rows.map((r, j) => j === i ? { ...r, qte: v, montant: N(v) > 0 ? String(N(v) * pxAchat(cat, r.produit)) : '' } : r) }))
+  // Lubrifiant : on commande au fournisseur en cartons, mais le stock et les ventes se suivent à
+  // l'unité (même logique qu'à la réception, via packagingSplit) — la quantité commandée se déduit
+  // du détail carton + unité plutôt que d'être tapée directement.
+  const setRowPackaging = (i, cat, patch) => setNf(p => ({ ...p, rows: p.rows.map((r, j) => {
+    if (j !== i) return r
+    const next = { ...r, ...patch }
+    const pr = prodOf(cat).find(x => x.nom === r.produit)
+    const { quantite_recue } = packagingSplit({ pr, qteCartons: next.qteCartons, qteUnites: next.qteUnites })
+    const qte = quantite_recue || ''
+    return { ...next, qte, montant: N(qte) > 0 ? String(N(qte) * pxAchat(cat, r.produit)) : '' }
+  }) }))
 
   async function propose(e) {
     e.preventDefault(); setErr('')
@@ -574,7 +585,19 @@ export default function Orders() {
                     const pa = pxAchat(nf.categorie, r.produit)
                     return <span style={{ color: pa ? 'var(--text-muted)' : 'var(--state-alarm)' }}>{pa ? fcfa(pa) : 'manquant'}</span>
                   } },
-                  { key: 'qte', header: 'Quantité', numeric: true, align: 'right', render: r => <Input size="sm" type="text" inputMode="decimal" numeric value={r.qte} onChange={e => setQte(r.id, nf.categorie, e.target.value)} style={{ width: 90 }} /> },
+                  { key: 'qte', header: 'Quantité', numeric: true, align: 'right', render: r => {
+                    const pr = prodOf(nf.categorie).find(x => x.nom === r.produit)
+                    const hasCondit = pr && N(pr.conditionnement_qte) > 0
+                    if (!hasCondit) return <Input size="sm" type="text" inputMode="decimal" numeric value={r.qte} onChange={e => setQte(r.id, nf.categorie, e.target.value)} style={{ width: 90 }} />
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', justifyContent: 'flex-end' }}>
+                        <Input size="sm" type="text" inputMode="numeric" numeric value={r.qteCartons || ''} placeholder="0" style={{ width: 50 }} onChange={e => setRowPackaging(r.id, nf.categorie, { qteCartons: e.target.value })} />
+                        <span style={{ font: '400 12px/1 var(--font-ui)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{pr.conditionnement_nom || 'carton'}+</span>
+                        <Input size="sm" type="text" inputMode="numeric" numeric value={r.qteUnites || ''} placeholder="0" style={{ width: 50 }} onChange={e => setRowPackaging(r.id, nf.categorie, { qteUnites: e.target.value })} />
+                        <span style={{ font: '400 12px/1 var(--font-ui)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{pr.unite || 'u'} = {r.qte || 0}</span>
+                      </div>
+                    )
+                  } },
                   { key: 'montant', header: 'Montant (F)', numeric: true, align: 'right', render: r => <b>{r.montant ? fcfa(N(r.montant)) : '—'}</b> },
                   { key: 'actions', header: '', render: r => (
                     <Button size="sm" onClick={() => { setPriceReqOpenFor(priceReqOpenFor === r.product_id ? null : r.product_id); setPriceReqValue({ prix: '', motif: '' }) }}>
