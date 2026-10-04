@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
 import { PhotoImage } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
@@ -13,8 +13,6 @@ import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
-const N = (v) => (v ? Number(v) : 0)
-
 export default function OcrCheck() {
   const { session } = useAuth()
   const { stationId } = useStation()
@@ -22,7 +20,9 @@ export default function OcrCheck() {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [selectedIds, setSelectedIds] = useState([])
-  const [onlyUnverified, setOnlyUnverified] = useState(false)
+  // Par défaut on ne montre que ce qui reste à vérifier — l'essentiel est déjà couvert par le
+  // rapprochement bancaire (verifie_source='rapprochement'), cet écran ne sert plus qu'au reste.
+  const [onlyUnverified, setOnlyUnverified] = useState(true)
 
   async function load() {
     if (!stationId) return
@@ -32,20 +32,9 @@ export default function OcrCheck() {
   }
   useEffect(() => { load() }, [stationId])
 
-  async function analyser(dep) {
-    setErr(''); setBusy(dep.id)
-    try {
-      const { data, error } = await supabase.functions.invoke('ocr-bordereau', { body: { deposit_id: dep.id } })
-      if (error) throw error
-      if (data?.error) throw new Error(data.error)
-      await load()
-    } catch (e) { setErr('Analyse impossible : ' + (e.message || e) + ' — la fonction serveur est-elle déployée ?') }
-    finally { setBusy(null) }
-  }
-
   // Validation visuelle manuelle : l'admin/comptable regarde la photo à l'œil et confirme que le
-  // montant déclaré correspond, sans passer par l'OCR (utile quand la photo est illisible par
-  // l'IA, ou simplement pour aller plus vite sur des bordereaux déjà visiblement corrects).
+  // montant déclaré correspond — pour les versements pas encore rapprochés avec la banque (ceux-là
+  // sont déjà vérifiés automatiquement, voir BankRecon.jsx / verifie_source='rapprochement').
   async function setVerifie(ids, verifie) {
     setErr(''); setBusy('batch')
     try {
@@ -60,8 +49,6 @@ export default function OcrCheck() {
     finally { setBusy(null) }
   }
 
-  const withOcr = rows.filter(r => r.montant_ocr != null)
-  const mismatches = withOcr.filter(r => Math.abs(N(r.ocr_ecart)) > 100)
   const nbVerifies = rows.filter(r => r.verifie).length
   const shownRows = onlyUnverified ? rows.filter(r => !r.verifie) : rows
 
@@ -76,23 +63,12 @@ export default function OcrCheck() {
       </div>
     ) },
     { key: 'montant', header: 'Déclaré', numeric: true, align: 'right', render: r => fcfa(r.montant) },
-    { key: 'montant_ocr', header: 'Lu (OCR)', numeric: true, align: 'right', render: r => r.montant_ocr != null ? fcfa(r.montant_ocr) : '—' },
-    { key: 'ecart', header: 'Écart', numeric: true, align: 'right', render: r => {
-      const ec = r.ocr_ecart
-      const color = ec == null ? 'var(--text-muted)' : Math.abs(ec) > 100 ? 'var(--state-alarm)' : 'var(--state-ok)'
-      return <span style={{ color, fontWeight: 600 }}>{ec == null ? '—' : Math.abs(ec) <= 100 ? '✓ OK' : (ec > 0 ? '+' : '') + fcfa(ec)}</span>
-    } },
     { key: 'verifie', header: 'Vérifié', render: r => r.verifie
       ? <Badge tone="ok">✓ {r.verifie_source === 'rapprochement' ? 'Rapprochement bancaire' : 'À l\'œil'}{r.verifie_at ? ` — ${frDate(r.verifie_at.slice(0, 10))}` : ''}</Badge>
       : <Badge tone="idle">Non vérifié</Badge> },
     { key: 'actions', header: '', align: 'right', render: r => (
-      <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
-        <Button size="sm" disabled={busy === r.id} onClick={() => analyser(r)}>
-          {busy === r.id ? '…' : (r.montant_ocr != null ? 'Ré-analyser' : 'Analyser')}
-        </Button>
-        <Button size="sm" tone={r.verifie ? 'outline' : 'primary'} disabled={busy === 'batch'}
-          onClick={() => setVerifie([r.id], !r.verifie)}>{r.verifie ? 'Dévérifier' : 'Vérifier'}</Button>
-      </div>
+      <Button size="sm" tone={r.verifie ? 'outline' : 'primary'} disabled={busy === 'batch'}
+        onClick={() => setVerifie([r.id], !r.verifie)}>{r.verifie ? 'Dévérifier' : 'Vérifier'}</Button>
     ) },
   ]
 
@@ -103,14 +79,12 @@ export default function OcrCheck() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
         <Kpi label="Bordereaux avec photo" value={rows.length} />
         <Kpi label="Vérifiés (à l'œil ou rapprochement)" value={nbVerifies} status={nbVerifies === rows.length && rows.length > 0 ? 'ok' : undefined} />
-        <Kpi label="Analysés (OCR)" value={withOcr.length} />
-        <Kpi label="Écarts détectés" value={mismatches.length} status={mismatches.length > 0 ? 'alarm' : 'ok'} />
+        <Kpi label="Restant à vérifier" value={rows.length - nbVerifies} status={rows.length - nbVerifies > 0 ? 'alarm' : 'ok'} />
       </div>
 
-      <Panel title="Vérification des bordereaux (déclaré vs lu sur la photo)" flush>
+      <Panel title="Vérification des bordereaux (déclaré vs photo)" flush>
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
-          Regardez la photo et comparez au montant déclaré — pas besoin de l'analyse IA pour valider ce qui se voit clairement à l'œil.
-          Sélectionnez plusieurs lignes pour les valider d'un coup. « Analyser » reste disponible pour une lecture automatique par IA.
+          Un versement déjà rapproché avec la banque (écran Rapprochement) est vérifié automatiquement. Il ne reste ici que ce que la banque n'a pas encore confirmé — regardez la photo et comparez au montant déclaré. Sélectionnez plusieurs lignes pour les valider d'un coup.
         </p>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-3)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
           <Checkbox label="N'afficher que les non vérifiés" checked={onlyUnverified} onChange={setOnlyUnverified} />
