@@ -71,6 +71,7 @@ export default function Stock() {
   const [fProduit, setFProduit] = useState('')
   const [catTab, setCatTab] = useState('gaz')   // onglet de catégorie actif (Gaz / Lubrifiant / Supérette) — regroupe toutes les infos de cette catégorie
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const [sortiesPage, setSortiesPage] = useState(1)
   const [histPage, setHistPage] = useState(1)
   const [journalPage, setJournalPage] = useState(1)
@@ -106,6 +107,7 @@ export default function Stock() {
 
   async function addMvt(e) {
     e.preventDefault(); setErr('')
+    if (busy) return   // garde anti double-clic/double-soumission (pas de protection côté DB sur cet insert)
     if (action === 'correction' && !nm.note.trim()) { setErr("Motif obligatoire pour une correction d'inventaire."); return }
     const row = { station_id: stationId, categorie: nm.categorie, type: nm.type, source: nm.source || null, note: nm.note || null, date_mouvement: nm.date_mouvement, created_by: session.user.id }
     if (!nm.produit) { setErr('Choisissez un produit.'); return }
@@ -131,7 +133,9 @@ export default function Stock() {
     // Supérette : suivie en valeur en plus de la quantité (valorisation existante, v_stock_valeur) —
     // le montant se déduit du prix catalogue plutôt que d'être tapé à la main.
     if (nm.categorie === 'superette') row.valeur = row.quantite * N(pr?.prix_achat)
+    setBusy(true)
     const { error } = await supabase.from('stock_movements').insert(row)
+    setBusy(false)
     if (error) setErr(error.message)
     else {
       setAction(null)
@@ -322,7 +326,7 @@ export default function Stock() {
               <Input value={nm.note} onChange={e => setNm({ ...nm, note: e.target.value })} placeholder={action === 'entree' ? 'ex. bon de livraison n°…' : action === 'correction' ? "ex. écart d'inventaire du 18/08/2026" : 'ex. casse, écart constaté…'} />
             </Field>
             <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
-              <Button type="submit" tone="primary">Enregistrer</Button>
+              <Button type="submit" tone="primary" disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</Button>
               <Button type="button" onClick={() => setAction(null)}>Annuler</Button>
             </div>
           </form>
