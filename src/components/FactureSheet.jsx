@@ -21,7 +21,7 @@ export default function FactureSheet({ facture, client, emetteur, onDone }) {
     <div className="pi-print-sheet">
       <div className="pi-facture">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24 }}>
-          <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 44 }} />
+          <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 44, width: 'auto' }} />
           <div style={{ textAlign: 'right' }}>
             <h1>FACTURE</h1>
             <div style={{ marginTop: 6 }}>N° {facture.numero} · {frDate(facture.date_emission)}</div>

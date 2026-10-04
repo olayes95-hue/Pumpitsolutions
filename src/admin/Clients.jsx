@@ -86,7 +86,7 @@ export default function Clients() {
   }
 
   async function majClient(champs, message) {
-    const { error } = await supabase.from('organisations').update(champs).eq('id', ficheId)
+    const { error } = await supabase.from('organisations').update({ ...champs, updated_at: new Date().toISOString() }).eq('id', ficheId)
     if (error) return fail(error)
     ok(message); recharger()
   }

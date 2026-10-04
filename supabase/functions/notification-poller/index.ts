@@ -223,6 +223,64 @@ async function traiterReceptionEcart(regles: any[]) {
   await setCursor("reception_ecart", dernier)
 }
 
+// ---------- Comptes employés (profiles) ----------
+// compte_a_valider cursor sur created_at (nouveau profil, jamais encore approuvé) ; compte_retire
+// cursor sur updated_at ET exige updated_at > created_at (sinon un profil tout juste créé, encore
+// non approuvé, se ferait aussi passer pour un "retrait" — les deux colonnes valent pareil à la
+// création puisque updated_at est posé explicitement par Stations.jsx, jamais au moment du signup).
+async function traiterCompteAValider(regles: any[]) {
+  const cursor = await getCursor("compte_a_valider")
+  const { data: profils } = await sb.from("profiles").select("id, full_name, organisation_id, created_at").eq("approved", false).gt("created_at", cursor).order("created_at")
+  if (!profils?.length) return
+  let dernier = cursor
+  for (const p of profils as any[]) {
+    const email = await emailDe(p.id)
+    const vars = { nom: p.full_name || "", email: email || "" }
+    for (const r of regles) {
+      const dest = r.destinataires?.type === "roles_client" && p.organisation_id
+        ? await emailsRoles(r.destinataires.roles, { organisationId: p.organisation_id })
+        : destinatairesStatiques(r)
+      for (const dEmail of dest) await envoyer(r.id, "compte_a_valider", dEmail, r.sujet, r.corps_html, vars)
+    }
+    if (p.created_at > dernier) dernier = p.created_at
+  }
+  await setCursor("compte_a_valider", dernier)
+}
+async function traiterCompteRetire(regles: any[]) {
+  const cursor = await getCursor("compte_retire")
+  const { data: profils } = await sb.from("profiles").select("id, full_name, organisation_id, created_at, updated_at").eq("approved", false).not("updated_at", "is", null).gt("updated_at", cursor).order("updated_at")
+  if (!profils?.length) return
+  let dernier = cursor
+  for (const p of profils as any[]) {
+    if (!p.updated_at || p.updated_at <= p.created_at) continue   // vient d'être créé, pas un retrait
+    const email = await emailDe(p.id)
+    const vars = { nom: p.full_name || "", email: email || "" }
+    for (const r of regles) {
+      const dest = r.destinataires?.type === "roles_client" && p.organisation_id
+        ? await emailsRoles(r.destinataires.roles, { organisationId: p.organisation_id })
+        : destinatairesStatiques(r)
+      for (const dEmail of dest) await envoyer(r.id, "compte_retire", dEmail, r.sujet, r.corps_html, vars)
+    }
+    if (p.updated_at > dernier) dernier = p.updated_at
+  }
+  await setCursor("compte_retire", dernier)
+}
+async function traiterClientSuspendu(regles: any[]) {
+  const cursor = await getCursor("client_suspendu")
+  const { data: orgs } = await sb.from("organisations").select("id, nom, updated_at").eq("statut", "suspendu").not("updated_at", "is", null).gt("updated_at", cursor).order("updated_at")
+  if (!orgs?.length) return
+  let dernier = cursor
+  for (const o of orgs as any[]) {
+    const vars = { station: o.nom }
+    for (const r of regles) {
+      const dest = r.destinataires?.type === "roles_client" ? await emailsRoles(r.destinataires.roles, { organisationId: o.id }) : destinatairesStatiques(r)
+      for (const email of dest) await envoyer(r.id, "client_suspendu", email, r.sujet, r.corps_html, vars)
+    }
+    if (o.updated_at > dernier) dernier = o.updated_at
+  }
+  await setCursor("client_suspendu", dernier)
+}
+
 // ---------- Compte / plateforme ----------
 async function traiterEssaiJ3(regles: any[]) {
   const cursor = await getCursor("essai_j3")
@@ -301,6 +359,9 @@ const HANDLERS: Record<string, (regles: any[]) => Promise<void>> = {
   essai_termine: traiterEssaiTermine,
   facture_emise: traiterFactureEmise,
   facture_retard: traiterFactureRetard,
+  compte_a_valider: traiterCompteAValider,
+  compte_retire: traiterCompteRetire,
+  client_suspendu: traiterClientSuspendu,
 }
 
 Deno.serve(async (req) => {

@@ -138,7 +138,7 @@ export default function Stations() {
     const { error } = await supabase.from('profiles').delete().eq('id', u.id)
     if (error) {
       if (error.code === '23503') {
-        const { error: e2 } = await supabase.from('profiles').update({ approved: false }).eq('id', u.id)
+        const { error: e2 } = await supabase.from('profiles').update({ approved: false, updated_at: new Date().toISOString() }).eq('id', u.id)
         if (e2) { fail(e2); return }
         flash('Ce compte a des données liées (saisies…) — suppression impossible, accès retiré à la place')
         load(); return
@@ -152,7 +152,7 @@ export default function Stations() {
   // l'accès directement (repasse par "en attente de validation", réactivable via Valider),
   // sans même tenter une suppression qui échouerait.
   async function disableUser(u) {
-    const { error } = await supabase.from('profiles').update({ approved: false }).eq('id', u.id)
+    const { error } = await supabase.from('profiles').update({ approved: false, updated_at: new Date().toISOString() }).eq('id', u.id)
     if (error) { fail(error); return }
     flash('Compte désactivé — accès à l\'application retiré'); load()
   }

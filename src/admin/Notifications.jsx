@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { frDate } from '../lib/format'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
@@ -11,12 +11,16 @@ import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 
 // Catalogue des déclencheurs gérés par notification-poller (voir ce fichier pour le détail de
 // la détection de chaque trigger) — en ajouter un ici ne suffit pas, il faut aussi coder sa
 // détection côté poller. destType = option de destinataires par défaut pour ce déclencheur.
 const TRIGGERS = [
   { key: 'user_signup', label: 'Nouvelle inscription', vars: ['nom', 'email'], destType: 'evenement' },
+  { key: 'compte_a_valider', label: 'Compte employé en attente de validation', vars: ['nom', 'email'], destType: 'roles_client' },
+  { key: 'compte_retire', label: 'Accès compte retiré', vars: ['nom', 'email'], destType: 'roles_client' },
+  { key: 'client_suspendu', label: 'Client suspendu', vars: ['station'], destType: 'roles_client' },
   { key: 'versement_manquant', label: 'Versement manquant', vars: ['station', 'date', 'detail'], destType: 'roles_client' },
   { key: 'versement_incomplet', label: 'Versement incomplet', vars: ['station', 'date', 'detail'], destType: 'roles_client' },
   { key: 'ecart_caisse', label: 'Écart de caisse', vars: ['station', 'date', 'detail'], destType: 'roles_client' },
@@ -58,10 +62,16 @@ export default function Notifications() {
   const [log, setLog] = useState([])
   const [f, setF] = useState(blank())
   const [editId, setEditId] = useState(null)
+  const [showForm, setShowForm] = useState(false)
   const [testEmail, setTestEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  const [filtreTrigger, setFiltreTrigger] = useState('tous')
+  const [filtreActif, setFiltreActif] = useState('tous')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const formRef = useRef(null)
 
   async function load() {
     const [r, l] = await Promise.all([
@@ -71,6 +81,7 @@ export default function Notifications() {
     setRegles(r.data || []); setLog(l.data || [])
   }
   useEffect(() => { load() }, [])
+  useEffect(() => { setPage(1) }, [filtreTrigger, filtreActif])
 
   const fail = (e) => { setMsg(''); setErr(e?.message || String(e)) }
   const ok = (m) => { setErr(''); setMsg(m) }
@@ -85,8 +96,15 @@ export default function Notifications() {
       sujet: r.sujet, corps_html: r.corps_html, actif: r.actif,
       requiert_fonction: r.requiert_fonction || '', formules: r.formules || [],
     })
+    setShowForm(true)
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
   }
-  function nouveau() { setEditId(null); setF(blank()) }
+  function nouveau() {
+    setEditId(null); setF(blank())
+    setShowForm(true)
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+  }
+  function fermerForm() { setShowForm(false); setEditId(null); setF(blank()) }
 
   async function enregistrer(e) {
     e.preventDefault(); setBusy(true)
@@ -105,7 +123,7 @@ export default function Notifications() {
       : await supabase.from('notification_rules').insert(payload)
     setBusy(false)
     if (error) return fail(error)
-    ok(editId ? 'Règle modifiée.' : 'Règle créée.'); nouveau(); load()
+    ok(editId ? 'Règle modifiée.' : 'Règle créée.'); fermerForm(); load()
   }
   async function supprimer(r) {
     setBusy(true)
@@ -136,6 +154,13 @@ export default function Notifications() {
   const toggleRole = (role) => setF(p => ({ ...p, destinataires_roles: p.destinataires_roles.includes(role) ? p.destinataires_roles.filter(r => r !== role) : [...p.destinataires_roles, role] }))
   const toggleFormule = (k) => setF(p => ({ ...p, formules: p.formules.includes(k) ? p.formules.filter(x => x !== k) : [...p.formules, k] }))
 
+  const reglesFiltrees = regles.filter(r =>
+    (filtreTrigger === 'tous' || r.trigger_key === filtreTrigger)
+    && (filtreActif === 'tous' || (filtreActif === 'actif' ? r.actif : !r.actif)))
+  const pageCount = Math.max(1, Math.ceil(reglesFiltrees.length / pageSize))
+  const pageClamped = Math.min(page, pageCount)
+  const reglesPage = reglesFiltrees.slice((pageClamped - 1) * pageSize, pageClamped * pageSize)
+
   const cols = [
     { key: 'nom', header: 'Règle', render: r => <b style={{ fontWeight: 600 }}>{r.nom}</b> },
     { key: 'trigger_key', header: 'Déclencheur', render: r => TRIGGERS.find(t => t.key === r.trigger_key)?.label || r.trigger_key },
@@ -165,11 +190,21 @@ export default function Notifications() {
       {err && <AlertBanner tone="alarm" title="Action impossible" onDismiss={() => setErr('')}>{err}</AlertBanner>}
       {msg && <AlertBanner tone="ok" title="Enregistré" onDismiss={() => setMsg('')}>{msg}</AlertBanner>}
 
-      <Panel title="Règles de notification" meta={`${regles.length}`} flush>
-        {regles.length ? <DataTable columns={cols} rows={regles} zebra={false} /> : <PanelEmpty icon="bell" label="Aucune règle — crée la première ci-dessous." />}
+      <Panel title="Règles de notification" meta={`${reglesFiltrees.length}/${regles.length}`} flush
+        actions={<Button size="sm" tone="primary" onClick={nouveau}>+ Nouvelle règle</Button>}>
+        <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+          <Select size="sm" value={filtreTrigger} onChange={e => setFiltreTrigger(e.target.value)}
+            options={[{ value: 'tous', label: 'Tous déclencheurs' }, ...TRIGGERS.map(t => ({ value: t.key, label: t.label }))]} />
+          <Select size="sm" value={filtreActif} onChange={e => setFiltreActif(e.target.value)}
+            options={[{ value: 'tous', label: 'Tous états' }, { value: 'actif', label: 'Actives' }, { value: 'inactif', label: 'Désactivées' }]} />
+        </div>
+        <div style={{ marginTop: 'var(--sp-4)' }}>
+          {reglesPage.length ? <DataTable columns={cols} rows={reglesPage} zebra={false} /> : <PanelEmpty icon="bell" label={regles.length ? 'Aucune règle ne correspond à ce filtre.' : 'Aucune règle — crée la première avec le bouton ci-dessus.'} />}
+        </div>
+        <Pagination page={pageClamped} pageCount={pageCount} total={reglesFiltrees.length} pageSize={pageSize} onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
       </Panel>
 
-      <Panel title={editId ? 'Modifier la règle' : 'Nouvelle règle'}>
+      {showForm && <Panel title={editId ? 'Modifier la règle' : 'Nouvelle règle'} sectionRef={formRef}>
         <form onSubmit={enregistrer} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
           <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
             <Field label="Nom (interne)" style={{ flex: '1 1 220px' }}><Input value={f.nom} onChange={e => setF({ ...f, nom: e.target.value })} placeholder="ex. Versement manquant" /></Field>
@@ -222,13 +257,13 @@ export default function Notifications() {
 
           <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap' }}>
             <Button type="submit" tone="primary" disabled={busy}>{editId ? 'Enregistrer' : 'Créer la règle'}</Button>
-            {editId && <Button type="button" onClick={nouveau}>Annuler</Button>}
+            <Button type="button" onClick={fermerForm}>Annuler</Button>
             <span style={{ flex: 1 }} />
             <Input placeholder="adresse de test" value={testEmail} onChange={e => setTestEmail(e.target.value)} style={{ maxWidth: 220 }} />
             <Button type="button" disabled={busy || !f.sujet || !f.corps_html} onClick={tester}>Envoyer un test</Button>
           </div>
         </form>
-      </Panel>
+      </Panel>}
 
       <Panel title="Historique d'envoi" meta={`${log.length} (100 derniers)`} flush>
         {log.length ? <DataTable columns={logCols} rows={log} zebra={false} /> : <PanelEmpty icon="bell" label="Aucun envoi pour le moment." />}

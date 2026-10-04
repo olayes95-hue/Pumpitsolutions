@@ -9,6 +9,8 @@ Supabase → SQL Editor → lance dans l'ordre :
 1. **`supabase/migration_v113_notifications.sql`** (tables de base)
 2. **`supabase/migration_v114_notifications_v2.sql`** (catalogue complet de déclencheurs +
    paramétrage par offre — règles créées **inactives**, à relire avant d'activer)
+3. **`supabase/migration_v115_notifications_v3.sql`** (compte à valider / accès retiré / client
+   suspendu — ajoute `profiles.updated_at` et `organisations.updated_at`)
 
 ## 2. Clé Brevo
 Crée une clé API sur https://app.brevo.com → SMTP & API → API Keys.
@@ -59,6 +61,9 @@ adresse avant d'activer, consulte l'historique d'envoi en bas de la page.
 | `reception_ecart` | `{{station}}`, `{{produit}}`, `{{quantite_commandee}}`, `{{quantite_recue}}` | admin + directeur de la station |
 | `essai_j3` / `essai_termine` | `{{station}}`, `{{date_fin}}` | admin + directeur du client |
 | `facture_emise` / `facture_retard` | `{{numero}}`, `{{montant}}`, `{{periode_debut}}`, `{{periode_fin}}` / `{{date_emission}}` | admin + directeur du client |
+| `compte_a_valider` | `{{nom}}`, `{{email}}` | admin + directeur de l'organisation |
+| `compte_retire` | `{{nom}}`, `{{email}}` | admin + directeur de l'organisation |
+| `client_suspendu` | `{{station}}` | admin + directeur du client |
 
 Chaque règle peut être limitée à une offre (`requiert_fonction` — réutilise les fonctions
 d'offre existantes, ex. `alertes_completes` — ou `formules`, liste directe de clés d'offre).

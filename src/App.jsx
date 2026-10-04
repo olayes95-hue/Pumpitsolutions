@@ -228,7 +228,7 @@ function PendingApproval() {
   const { session, profile, signOut } = useAuth()
   return (
     <div className="center" style={{ flexDirection: 'column', gap: 'var(--sp-5)', textAlign: 'center', padding: 'var(--sp-6)' }}>
-      <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 40 }} />
+      <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 40, width: 'auto' }} />
       <h2 style={{ fontSize: 24 }}>Compte en attente de validation</h2>
       <p style={{ font: '400 15px/1.55 var(--font-ui)', color: 'var(--text-secondary)', maxWidth: 440, margin: 0 }}>
         {profile?.organisation_id === null
@@ -248,7 +248,7 @@ function Suspended() {
   const finEssai = abonnement?.motif === 'essai'
   return (
     <div className="center" style={{ flexDirection: 'column', gap: 'var(--sp-5)', textAlign: 'center', padding: 'var(--sp-6)' }}>
-      <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 40 }} />
+      <img src="/brand/pumpit-logo-principal.png" alt="PumpIT" style={{ height: 40, width: 'auto' }} />
       <h2 style={{ fontSize: 24 }}>{finEssai ? 'Essai terminé' : 'Accès suspendu'}</h2>
       <p style={{ font: '400 15px/1.55 var(--font-ui)', color: 'var(--text-secondary)', maxWidth: 460, margin: 0 }}>
         {finEssai
