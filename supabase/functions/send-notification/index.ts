@@ -9,6 +9,7 @@
 //   4) supabase functions deploy send-notification
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { enveloppeEmail, render } from "../_shared/template.ts"
 
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY")!
 const SENDER_EMAIL = Deno.env.get("BREVO_SENDER_EMAIL") ?? "notifications@pumpit.app"
@@ -23,12 +24,6 @@ const CORS = {
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { ...CORS, "content-type": "application/json" } })
 
-// Remplace {{variable}} par sa valeur dans le sujet/corps — variables non reconnues laissées
-// telles quelles (pour repérer une erreur de template plutôt que de la masquer).
-function render(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (m, k) => (k in vars ? vars[k] : m))
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS })
   try {
@@ -37,7 +32,7 @@ Deno.serve(async (req) => {
 
     const vars = variables || {}
     const sujetRendu = render(sujet, vars)
-    const corpsRendu = render(corps_html, vars)
+    const corpsRendu = enveloppeEmail(render(corps_html, vars))
 
     const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
