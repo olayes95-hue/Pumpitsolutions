@@ -23,16 +23,15 @@ const WIN = 35         // fenêtre en jours — couvre un versement crédité le
 const MONTHS = [['01','Janv'],['02','Févr'],['03','Mars'],['04','Avril'],['05','Mai'],['06','Juin'],['07','Juil'],['08','Août'],['09','Sept'],['10','Oct'],['11','Nov'],['12','Déc']]
 const PAGE_DEFAULT = 25
 
-// Catégories pour lesquelles un rapprochement ligne-à-ligne a un sens — chacune a une
-// contrepartie saisie ailleurs dans l'appli : versement_gerant ↔ deposits (saisie du jour),
-// virement_fournisseur/frais_bancaire ↔ compte_bancaire_mouvements (Point financier, saisis
-// à la main par le comptable). Les autres catégories (salaire, prélèvement gérant, chèque
-// commande, autre) n'ont pas de contrepartie dans l'appli — plan phase 5.
+// Catégories pour lesquelles un rapprochement ligne-à-ligne a un sens — versement_gerant est
+// la seule à avoir encore une contrepartie SAISIE séparément (deposits, saisie du jour) à
+// confronter au relevé. virement_fournisseur et frais_bancaire sont devenus la source directe
+// de Trésorerie (v_compte_bancaire, migrations v111/v112) et de la charge FRAIS_BANCAIRE de
+// Point financier (voir comparaisonPF ci-dessous) — plus de double saisie à rapprocher.
 const MATCH_CONFIG = {
   versement_gerant: { sens: 'credit', source: 'deposits', label: 'versement déclaré', unLabel: 'Versement déclaré', plurielSujet: 'Versements déclarés' },
-  virement_fournisseur: { sens: 'credit', source: 'mouvements', mouvementType: 'virement_bons', label: 'virement enregistré (Point financier)', unLabel: 'Virement enregistré', plurielSujet: 'Virements enregistrés (Point financier)' },
-  frais_bancaire: { sens: 'debit', source: 'mouvements', mouvementType: 'frais_bancaire', label: 'frais enregistré (Point financier)', unLabel: 'Frais enregistré', plurielSujet: 'Frais enregistrés (Point financier)' },
 }
+const CAT_FRAIS_BANCAIRE = 'FRAIS_BANCAIRE'
 const targetDateOf = (cfg, t) => cfg.source === 'deposits' ? (t.deposit_date || t.report_date) : t.date_mouvement
 const targetLabelOf = (cfg, t) => cfg.source === 'deposits'
   ? `${frDate(targetDateOf(cfg, t))} · ${t.pole} · ${fcfa(t.montant)}`
@@ -45,8 +44,9 @@ export default function BankRecon() {
   const { stationId } = useStation()
   const [deposits, setDeposits] = useState([])
   const [bank, setBank] = useState([])
-  const [mouvements, setMouvements] = useState([])   // compte_bancaire_mouvements (Point financier)
+  const [charges, setCharges] = useState([])   // Point financier — pour comparer/synchroniser FRAIS_BANCAIRE
   const [categories, setCategories] = useState([])
+  const [busySync, setBusySync] = useState(false)
   const [catTab, setCatTab] = useState(null)
   const [nl, setNl] = useState({ date_operation: today(), type: 'credit', montant: '', reference: '', categorie_id: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
@@ -78,15 +78,15 @@ export default function BankRecon() {
 
   async function load() {
     if (!stationId) return
-    const [d, b, m, c] = await Promise.all([
+    const [d, b, ch, c] = await Promise.all([
       supabase.from('deposits').select('*').eq('station_id', stationId).order('deposit_date', { ascending: false }),
       supabase.from('bank_lines').select('*').eq('station_id', stationId).order('date_operation', { ascending: false }),
-      supabase.from('compte_bancaire_mouvements').select('*').eq('station_id', stationId).order('date_mouvement', { ascending: false }),
+      supabase.from('charges').select('*').eq('station_id', stationId),
       supabase.from('bank_line_categories').select('*').eq('actif', true).order('ordre'),
     ])
     setDeposits(d.data || [])
     setBank(b.data || [])
-    setMouvements(m.data || [])
+    setCharges(ch.data || [])
     setCategories(c.data || [])
     setCatTab(prev => prev && (c.data || []).some(x => x.key === prev) ? prev : (c.data || [])[0]?.key || null)
   }
@@ -197,10 +197,10 @@ export default function BankRecon() {
     bank.filter(b => b.categorie_id === activeCat?.id && inPeriod(b.date_operation)),
     [bank, activeCat, years, months])
 
-  const targetRowsAll = useMemo(() => {
-    if (!matchCfg) return []
-    return matchCfg.source === 'deposits' ? deposits : mouvements.filter(m => m.type === matchCfg.mouvementType)
-  }, [matchCfg, deposits, mouvements])
+  // MATCH_CONFIG ne contient plus que versement_gerant (source 'deposits') — virement_fournisseur
+  // et frais_bancaire sont désormais directement sourcés du relevé (v111/v112), plus de
+  // contrepartie manuelle à rapprocher ligne à ligne pour eux.
+  const targetRowsAll = useMemo(() => (matchCfg ? deposits : []), [matchCfg, deposits])
 
   // Appariement glouton sur TOUT l'historique (pas seulement la période affichée) : un
   // versement/virement/frais déclaré fin de mois peut n'apparaître en banque que le mois
@@ -309,15 +309,7 @@ export default function BankRecon() {
       </div>
     ) },
   ]
-  // Côté cible pour virement_fournisseur/frais_bancaire : mouvements saisis à la main dans
-  // Point financier — pas de photo/"ouvrir la saisie" (ça n'existe que pour les versements),
-  // juste la date, le montant et la note du comptable.
-  const mouvementColumns = [
-    { key: 'date_mouvement', header: 'Date', render: r => frDate(r.date_mouvement) },
-    { key: 'montant', header: 'Montant', numeric: true, align: 'right', render: r => <span style={{ color: 'var(--state-alarm)' }}>{fcfa(r.montant)}</span> },
-    { key: 'note', header: 'Note', muted: true, render: r => r.note || '—' },
-  ]
-  const targetColumns = matchCfg?.source === 'deposits' ? depColumns : mouvementColumns
+  const targetColumns = depColumns   // MATCH_CONFIG ne contient plus que versement_gerant (source deposits)
 
   const catSelectOptions = [{ value: '', label: '— aucune —' }, ...categories.map(c => ({ value: c.id, label: c.label }))]
   const bankColumns = [
@@ -350,15 +342,33 @@ export default function BankRecon() {
   const flatPage = paginate(bankInTab, pageFlat)
   const doublonPage = paginate(doublons, pageDoublons)
 
-  // Phase 6 du plan rapprochement : comparaison des totaux importés (relevé réel) avec ceux
-  // saisis à la main dans Point financier, pour la période choisie — indépendant de l'onglet
-  // catégorie actif, pour repérer un écart global même sans rapprocher ligne à ligne.
-  const comparaisonPF = Object.entries(MATCH_CONFIG).filter(([, c]) => c.source === 'mouvements').map(([key, cfg]) => {
-    const cat = catByKey(key)
-    const totBanque = bank.filter(b => b.categorie_id === cat?.id && b.type === cfg.sens && inPeriod(b.date_operation)).reduce((s, b) => s + N(b.montant), 0)
-    const totPF = mouvements.filter(m => m.type === cfg.mouvementType && inPeriod(m.date_mouvement)).reduce((s, m) => s + N(m.montant), 0)
-    return { key, label: cat?.label || key, totBanque, totPF, ecart: totBanque - totPF }
-  })
+  // Phase 6 du plan rapprochement : frais bancaires du relevé réel (import) comparés à la
+  // charge FRAIS_BANCAIRE de Point financier pour le mois choisi — seul un mois unique (année +
+  // mois, pas une sélection multiple) a un sens ici, puisque charges.mois est un mois unique.
+  const moisUnique = years.length === 1 && months.length === 1 ? `${years[0]}-${months[0]}` : null
+  const totFraisBanque = bank.filter(b => b.categorie_id === catByKey('frais_bancaire')?.id && b.type === 'debit' && inPeriod(b.date_operation)).reduce((s, b) => s + N(b.montant), 0)
+  const chargeFraisMois = moisUnique ? charges.find(c => c.categorie === CAT_FRAIS_BANCAIRE && c.mois === moisUnique) : null
+  const totFraisPF = N(chargeFraisMois?.montant)
+  const ecartFrais = totFraisBanque - totFraisPF
+
+  async function synchroniserFraisPF() {
+    if (!moisUnique) return
+    setBusySync(true); setErr('')
+    try {
+      if (chargeFraisMois) {
+        const { error } = await supabase.from('charges').update({ montant: totFraisBanque, note: `Synchronisé depuis Rapprochement le ${frDate(today())}` }).eq('id', chargeFraisMois.id)
+        if (error) throw error
+      } else if (totFraisBanque > 0) {
+        const { error } = await supabase.from('charges').insert({
+          station_id: stationId, mois: moisUnique, categorie: CAT_FRAIS_BANCAIRE, montant: totFraisBanque,
+          note: `Synchronisé depuis Rapprochement le ${frDate(today())}`, created_by: session.user.id })
+        if (error) throw error
+      }
+      setMsg('Point financier mis à jour (frais bancaires).'); setTimeout(() => setMsg(''), 3000)
+      load()
+    } catch (e) { setErr('Synchronisation impossible : ' + (e.message || e)) }
+    finally { setBusySync(false) }
+  }
 
   const pager = (p, setPage) => <Pagination page={p.clamped} pageCount={p.pageCount} total={p.total} pageSize={pageSize} onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
 
@@ -472,19 +482,26 @@ export default function BankRecon() {
 
       <Panel title="Comparaison avec Point financier" flush>
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
-          Totaux du relevé bancaire réel comparés à ce qui a été saisi à la main dans Point financier, pour la période choisie — indépendant de la catégorie sélectionnée ci-dessous.
+          Frais bancaires du relevé réel comparés à la charge « Frais bancaire » du Point financier, pour le mois choisi (un seul mois à la fois — pas une sélection multiple). Indépendant de la catégorie sélectionnée ci-dessous.
         </p>
-        <div style={{ margin: 'var(--sp-4) var(--gutter-panel) 0', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-          {comparaisonPF.map(c => (
-            <div key={c.key} style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-4)', padding: 'var(--sp-3) var(--sp-4)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)' }}>
-              <span style={{ flex: 1, font: '600 14px/1.3 var(--font-ui)' }}>{c.label}</span>
-              <span style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Relevé : <b style={{ color: 'var(--text-body)' }}>{fcfa(c.totBanque)}</b></span>
-              <span style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Point financier : <b style={{ color: 'var(--text-body)' }}>{fcfa(c.totPF)}</b></span>
-              <span style={{ font: '600 14px/1.3 var(--font-ui)', color: Math.abs(c.ecart) <= TOL ? 'var(--state-ok)' : 'var(--state-alarm)' }}>
-                {Math.abs(c.ecart) <= TOL ? '✓ cohérent' : `Écart ${c.ecart > 0 ? '+' : ''}${fcfa(c.ecart)}`}
+        <div style={{ margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+          {!moisUnique ? (
+            <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Sélectionne une seule année et un seul mois ci-dessus pour comparer.</p>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-4)', flexWrap: 'wrap', padding: 'var(--sp-3) var(--sp-4)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)' }}>
+              <span style={{ flex: '1 1 160px', font: '600 14px/1.3 var(--font-ui)' }}>Frais bancaires — {moisUnique}</span>
+              <span style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Relevé : <b style={{ color: 'var(--text-body)' }}>{fcfa(totFraisBanque)}</b></span>
+              <span style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Point financier : <b style={{ color: 'var(--text-body)' }}>{fcfa(totFraisPF)}</b></span>
+              <span style={{ font: '600 14px/1.3 var(--font-ui)', color: Math.abs(ecartFrais) <= TOL ? 'var(--state-ok)' : 'var(--state-alarm)' }}>
+                {Math.abs(ecartFrais) <= TOL ? '✓ cohérent' : `Écart ${ecartFrais > 0 ? '+' : ''}${fcfa(ecartFrais)}`}
               </span>
+              {Math.abs(ecartFrais) > TOL && (
+                <Button size="sm" tone="dark" disabled={busySync} onClick={synchroniserFraisPF}>
+                  {busySync ? 'Mise à jour…' : 'Mettre à jour Point financier'}
+                </Button>
+              )}
             </div>
-          ))}
+          )}
         </div>
       </Panel>
 

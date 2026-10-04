@@ -28,7 +28,9 @@ const TABS = [
 
 const N = (v) => (v ? Number(v) : 0)
 // charges saisies à la main (les récurrentes se reportent d'un mois sur l'autre)
-const MANUAL_CATS = ['LOYER','SALAIRES','PRELEVEMENT_GERANT','IMPOTS','HONORAIRES','PRESTATIONS','PERTE_VENTE_CARBURANT','SONEB','TELEPHONE','ABONNEMENT_PUMPIT','AUTRE']
+// FRAIS_BANCAIRE : alimentée automatiquement depuis Rapprochement (bouton "Mettre à jour Point
+// financier", voir BankRecon.jsx) — reste modifiable à la main comme les autres si besoin.
+const MANUAL_CATS = ['LOYER','SALAIRES','PRELEVEMENT_GERANT','IMPOTS','HONORAIRES','PRESTATIONS','PERTE_VENTE_CARBURANT','SONEB','TELEPHONE','ABONNEMENT_PUMPIT','FRAIS_BANCAIRE','AUTRE']
 const REVENU_CAT = 'AUTRES_PRODUITS'
 const CAT_OPTIONS = [...MANUAL_CATS.map(c => ({ value: c, label: c.replace(/_/g, ' ') })), { value: REVENU_CAT, label: '+ AUTRES PRODUITS (revenu)' }]
 const STATUT_OPTIONS = [{ value: 'a_payer', label: 'À payer' }, { value: 'paye', label: 'Payé' }]
@@ -63,8 +65,6 @@ export default function Finance() {
   const [editSoldeBanque, setEditSoldeBanque] = useState(false)
   const [soldeBanqueForm, setSoldeBanqueForm] = useState({ montant: '', date_solde: '', note: '' })
   const [mouvementsBanque, setMouvementsBanque] = useState([])
-  const [nm, setNm] = useState({ type: 'frais_bancaire', montant: '', date_mouvement: today(), note: '', photo_path: null })
-  const [nmPhotoBusy, setNmPhotoBusy] = useState(false)
   const [openAnnuel, setOpenAnnuel] = useState(false)
   // Par défaut, mois en cours (pas le dernier mois avec des données, qui peut être ancien).
   const [annee, setAnnee] = useState(today().slice(0, 4))
@@ -340,23 +340,6 @@ export default function Finance() {
       note: soldeBanqueForm.note || null, created_by: session.user.id, updated_at: new Date().toISOString(),
     }, { onConflict: 'station_id' })
     if (error) setErr(error.message); else { setEditSoldeBanque(false); flash('Solde bancaire initial enregistré'); load() }
-  }
-  async function handleMouvementPhoto(file) {
-    if (!file || !stationId) return
-    setNmPhotoBusy(true)
-    try {
-      const path = await uploadEvidence(supabase, BORDEREAUX_BUCKET, `${stationId}/banque/${nm.date_mouvement || today()}`, file)
-      setNm(p => ({ ...p, photo_path: path }))
-    } catch (e) { setErr(`Échec de l'envoi de la photo : ${e.message || e}. Vérifiez votre connexion et réessayez.`) }
-    finally { setNmPhotoBusy(false) }
-  }
-  async function addMouvementBanque(e) {
-    e.preventDefault(); setErr('')
-    if (!nm.montant || Number(nm.montant) <= 0) return
-    const { error } = await supabase.from('compte_bancaire_mouvements').insert({
-      station_id: stationId, date_mouvement: nm.date_mouvement, type: nm.type, montant: Number(nm.montant),
-      note: nm.note || null, photo_path: nm.photo_path || null, created_by: session.user.id })
-    if (error) setErr(error.message); else { setNm({ type: 'virement_bons', montant: '', date_mouvement: today(), note: '', photo_path: null }); flash('Mouvement enregistré'); load() }
   }
   async function delMouvementBanque(m) {
     await supabase.from('compte_bancaire_mouvements').delete().eq('id', m.id); load()
@@ -661,35 +644,15 @@ export default function Finance() {
             <Kpi label="Solde actuel" value={fcfa(soldeBancaireActuel)} status={soldeBancaireActuel < 0 ? 'alarm' : 'ok'} />
             <Kpi label="Dépôts" value={fcfa(N(compteBancaire?.total_depots))} />
             <Kpi label="Chèques commandes" value={fcfa(N(compteBancaire?.total_cheques))} />
-            <Kpi label="Virements bons reçus" value={fcfa(N(compteBancaire?.total_virements))} sub="depuis le relevé importé" />
-            <Kpi label="Frais bancaires" value={fcfa(N(compteBancaire?.total_frais))} />
+            <Kpi label="Virements bons reçus" value={fcfa(N(compteBancaire?.total_virements))} sub="relevé importé" />
+            <Kpi label="Frais bancaires" value={fcfa(N(compteBancaire?.total_frais))} sub="relevé importé" />
           </div>
           <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 var(--sp-3)' }}>
-            Les virements reçus (bons) ne se saisissent plus ici — ils viennent automatiquement du relevé importé et catégorisé dans Rapprochement (catégorie « Virement fournisseur »). Seuls les frais bancaires restent à saisir à la main.
+            Virements reçus (bons) et frais bancaires ne se saisissent plus ici — ils viennent automatiquement du relevé importé et catégorisé dans Rapprochement. Pour corriger un montant, recatégorise ou corrige la ligne concernée depuis Rapprochement.
           </p>
-          {can('manage_finance') && <form onSubmit={addMouvementBanque} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'end', marginBottom: 'var(--sp-4)' }}>
-            <Field label="Type" style={{ flex: '1 1 180px' }}>
-              <Select value={nm.type} onChange={e => setNm({ ...nm, type: e.target.value })} style={{ width: '100%' }}
-                options={[{ value: 'frais_bancaire', label: 'Frais bancaire' }]} />
-            </Field>
-            <Field label="Montant" style={{ flex: '1 1 140px' }}>
-              <Input type="number" inputMode="decimal" numeric value={nm.montant} onChange={e => setNm({ ...nm, montant: e.target.value })} />
-            </Field>
-            <Field label="Date" style={{ flex: '1 1 150px' }}>
-              <Input type="date" value={nm.date_mouvement} max={today()} onChange={e => setNm({ ...nm, date_mouvement: e.target.value })} />
-            </Field>
-            <Field label="Note (optionnel)" style={{ flex: '1 1 180px' }}>
-              <Input value={nm.note} onChange={e => setNm({ ...nm, note: e.target.value })} />
-            </Field>
-            <Field label="Justificatif (optionnel)" style={{ flex: '1 1 200px' }}>
-              <EvidenceUpload disabled={nmPhotoBusy}
-                label={nmPhotoBusy ? 'Envoi…' : nm.photo_path ? 'Photo ✓ (reprendre)' : 'Déposer la photo'}
-                multiple={false} onFiles={files => files[0] && handleMouvementPhoto(files[0])} />
-            </Field>
-            <Button type="submit" tone="dark" size="sm">Ajouter</Button>
-          </form>}
           {mouvementsBanque.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+              <p style={{ font: '500 13px/1.3 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Historique des mouvements saisis à la main avant l'automatisation (pour archive) :</p>
               {mouvementsBanque.map(m => (
                 <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-3)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', font: '400 14px/1.4 var(--font-ui)' }}>
                   <span style={{ color: 'var(--text-body)' }}>

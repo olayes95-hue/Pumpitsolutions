@@ -13,10 +13,12 @@ export function MetricTile({label,value,unit,delta,direction='flat',status,sub,s
       <span style={{font:'800 26px/1.1 var(--font-display)',letterSpacing:'-.02em',whiteSpace:'nowrap',color:status==='alarm'?'var(--state-alarm)':'var(--text-primary)',fontVariantNumeric:'tabular-nums'}}>{sep(value)}</span>
       {unit&&<span style={{font:'500 14px/1 var(--font-ui)',color:'var(--text-muted)'}}>{unit}</span>}
     </div>
-    {(delta||sub)&&<div style={{display:'flex',alignItems:'center',flexWrap:'wrap',gap:'var(--sp-3)'}}>
+    {/* Rangée toujours présente (même vide) — sinon une tuile avec sub/delta est plus haute que
+        ses voisines sans, et la grille de métriques d'une même page paraît désalignée. */}
+    <div style={{display:'flex',alignItems:'center',flexWrap:'wrap',gap:'var(--sp-3)',minHeight:18}}>
       {delta&&<span style={{display:'inline-flex',alignItems:'center',gap:4,font:'600 13px/1.2 var(--font-ui)',color:D[direction]}}>
         <Icon name={direction==='up'?'trending-up':direction==='down'?'trending-down':'minus'} size={15}/>{delta}</span>}
       {sub&&<span style={{font:'400 13px/1.35 var(--font-ui)',color:'var(--text-muted)'}}>{sub}</span>}
-    </div>}
+    </div>
   </div>;
 }
