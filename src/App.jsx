@@ -43,25 +43,30 @@ const AdminApp = lazy(() => import('./admin/AdminApp.jsx'))
 function useAccess() {
   const { profile, isAdmin, isPompiste, isVendeuse, isPlatformAdmin, can } = useAuth()
   const { has, activite } = useOffre()   // offre de la station courante
-  const op = isAdmin || profile?.role === 'gerant' || isPompiste || isVendeuse || can('manage_orders')
+  const isGerant = profile?.role === 'gerant'
+  const op = isAdmin || isGerant || isPompiste || isVendeuse || can('manage_orders')
   // Page Entreprise : code d'invitation, abonnement et factures, pour l'administrateur du
   // client. La gestion des clients est dans le back-office (/admin).
   const org = isAdmin || isPlatformAdmin
   // La page Stock suit le gaz, les lubrifiants et la supérette : sans aucune de ces
   // activités dans l'offre (carburant seul), elle n'a rien à montrer.
   const stock = op && (isVendeuse ? activite('superette') : (activite('gaz') || activite('lubrifiant') || activite('superette')))
-  return { op, can, isVendeuse, org, isPlatformAdmin, has, stock }
+  return { op, can, isVendeuse, isGerant, org, isPlatformAdmin, has, stock }
 }
 
 // Les cinq espaces de l'application. Chaque entrée n'apparaît que si le profil y a droit ;
 // un espace sans entrée disparaît de la navigation.
 function useSpaces() {
-  const { op, can, isVendeuse, org, isPlatformAdmin, has, stock } = useAccess()
+  const { op, can, isVendeuse, isGerant, org, isPlatformAdmin, has, stock } = useAccess()
   const spaces = [
     { key: 'jour', label: "Aujourd'hui", icon: 'sun', items: [
       op && { to: '/saisie', icon: 'file-pen-line', label: isVendeuse ? 'Saisie supérette' : 'Saisie du jour' },
-      (op || can('view_journal')) && { to: '/journal', icon: 'clipboard-list', label: 'Journal de bord' },
       op && { to: '/controles', icon: 'shield-check', label: 'Contrôles' },
+    ] },
+    // Son propre onglet en barre du bas (plutôt qu'un sous-onglet d'Aujourd'hui) : accès direct,
+    // pas une page de plus à chercher — demandé explicitement pour la version mobile du gérant.
+    { key: 'journal', label: 'Journal de bord', icon: 'clipboard-list', items: [
+      (op || can('view_journal')) && { to: '/journal', icon: 'clipboard-list', label: 'Journal de bord' },
     ] },
     { key: 'pilotage', label: 'Pilotage', icon: 'gauge', items: [
       can('view_dashboard') && { to: '/tableau', icon: 'layout-dashboard', label: 'Tableau de bord' },
@@ -70,8 +75,16 @@ function useSpaces() {
       can('view_prevision') && has('prevision') && { to: '/prevision', icon: 'truck', label: 'Prévision de commande' },
     ] },
     { key: 'stock', label: 'Stock', icon: 'package', items: [
-      stock && { to: '/stock', icon: isVendeuse ? 'shopping-cart' : 'package', label: isVendeuse ? 'Supérette' : 'Stock et mouvements' },
-      (op || can('validate_orders')) && { to: '/commandes', icon: 'truck', label: 'Commandes' },
+      // Gérant : Commandes en premier (accès direct au tap sur l'onglet Stock de la barre du
+      // bas, qui mène toujours au premier élément de l'espace) — c'est ce qu'il consulte le
+      // plus souvent, pas le niveau de stock lui-même.
+      ...(isGerant ? [
+        (op || can('validate_orders')) && { to: '/commandes', icon: 'truck', label: 'Commandes' },
+        stock && { to: '/stock', icon: 'package', label: 'Stock et mouvements' },
+      ] : [
+        stock && { to: '/stock', icon: isVendeuse ? 'shopping-cart' : 'package', label: isVendeuse ? 'Supérette' : 'Stock et mouvements' },
+        (op || can('validate_orders')) && { to: '/commandes', icon: 'truck', label: 'Commandes' },
+      ]),
       (can('manage_products') || can('view_price_history')) && { to: '/produits', icon: 'book-open', label: 'Produits et prix' },
       can('manage_suppliers') && { to: '/fournisseurs', icon: 'factory', label: 'Fournisseurs' },
     ] },
