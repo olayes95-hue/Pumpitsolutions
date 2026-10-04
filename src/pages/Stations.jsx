@@ -187,6 +187,7 @@ export default function Stations() {
       essence_pv: num(settings.essence_pv), gasoil_pv: num(settings.gasoil_pv), marge_unitaire: num(settings.marge_unitaire),
       essence_pa: num(settings.essence_pa), gasoil_pa: num(settings.gasoil_pa),
       taux_gaz: num(settings.taux_gaz), taux_superette: num(settings.taux_superette),
+      superette_commission_reelle: !!settings.superette_commission_reelle,
       seuil_rupture: num(settings.seuil_rupture),
       bons_utilisables_commande: !!settings.bons_utilisables_commande,
       pompe_inactive_apres: num(settings.pompe_inactive_apres) ?? 5,
@@ -426,13 +427,21 @@ export default function Stations() {
                 <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pa ?? ''} onChange={e => setSettings({ ...settings, gasoil_pa: e.target.value })} /></Field>
               </div>
             </FormSection>
-            <FormSection title="Taux de commission supérette (%)">
+            <FormSection title="Commission supérette">
               <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
                 Gaz et lubrifiant ne sont plus estimés à un taux fixe : leur commission se
                 calcule désormais réellement à partir des prix de vente/d'achat renseignés
-                dans Produits et prix et des quantités vendues déclarées chaque jour.
+                dans Produits et prix et des quantités vendues déclarées chaque jour. La
+                supérette peut désormais faire pareil (ventes par produit déjà saisies par
+                la vendeuse) — à condition que le <b>prix d'achat</b> de chaque article soit
+                renseigné dans Produits et prix (sinon la marge serait surestimée). Active le
+                calcul réel une fois ces prix d'achat à jour ; sinon le taux fixe ci-dessous
+                continue de s'appliquer.
               </p>
-              <Field label="Supérette" style={{ maxWidth: 160 }}><Input type="number" numeric value={settings.taux_superette ?? ''} onChange={e => setSettings({ ...settings, taux_superette: e.target.value })} /></Field>
+              <Checkbox label="Calculer la commission supérette réellement (PV − PA par produit vendu)" checked={!!settings.superette_commission_reelle} onChange={v => setSettings({ ...settings, superette_commission_reelle: v })} />
+              <Field label="Taux fixe (%) — utilisé tant que le calcul réel n'est pas activé" style={{ maxWidth: 260, marginTop: 'var(--sp-3)' }}>
+                <Input type="number" numeric value={settings.taux_superette ?? ''} onChange={e => setSettings({ ...settings, taux_superette: e.target.value })} />
+              </Field>
             </FormSection>
             <FormSection title="Seuil de rupture cuve (L)">
               <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>

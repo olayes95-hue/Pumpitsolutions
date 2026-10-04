@@ -109,8 +109,12 @@ export default function Submit() {
   const [expenseCategories, setExpenseCategories] = useState([])   // catalogue admin (table expense_categories), à la place de la liste figée
   const [settings, setSettings] = useState({ essence_pv: 725, gasoil_pv: 750, marge_unitaire: 25 })
   const [prods, setProds] = useState([])                 // catalogue supérette/autre (vendeuse)
-  const [sales, setSales] = useState([])                 // lignes de vente du jour : {product_id, nom, quantite, prix_vente}
-  const [pick, setPick] = useState('')                   // produit sélectionné dans la liste déroulante
+  // Saisie du jour par produit : { [product_id]: { vendu, recu, perime } } — une seule liste
+  // cherchable au lieu de choisir un produit à la fois dans une liste déroulante (plus rapide
+  // avec ~200 articles supérette). Le prix de vente est celui du catalogue (Produits & prix),
+  // plus modifiable ligne à ligne ici.
+  const [entries, setEntries] = useState({})
+  const [prodSearch, setProdSearch] = useState('')
   const [showNew, setShowNew] = useState(false)
   const [newProd, setNewProd] = useState({ nom: '', prix_achat: '', prix_vente: '' })
   const [prevMorning, setPrevMorning] = useState(null) // index compteur matin du dernier jour saisi
@@ -180,7 +184,11 @@ export default function Submit() {
   useEffect(() => {
     if (!isVendeuse || !stationId) return
     supabase.from('superette_sales').select('*').eq('station_id', stationId).eq('report_date', date).order('id')
-      .then(({ data }) => setSales((data || []).map(r => ({ product_id: r.product_id, nom: r.nom, quantite: String(r.quantite ?? ''), prix_vente: String(r.prix_vente ?? '') }))))
+      .then(({ data }) => {
+        const e = {}
+        for (const r of (data || [])) e[r.product_id] = { vendu: String(r.quantite ?? ''), recu: '', perime: '' }
+        setEntries(e)
+      })
   }, [isVendeuse, stationId, date])
 
   async function load(d) {
@@ -666,17 +674,12 @@ export default function Submit() {
     } catch (e) { fail(e.message || String(e)) } finally { setBusy(false) }
   }
 
-  // ===== VENDEUSE : ventes supérette par produit =====
-  const lineMontant = (s) => N(s.quantite) * N(s.prix_vente)
-  const salesTotal = sales.reduce((a, s) => a + lineMontant(s), 0)
-  const updLine = (i, k, v) => setSales(p => p.map((s, j) => j === i ? { ...s, [k]: v } : s))
-  const removeLine = (i) => setSales(p => p.filter((_, j) => j !== i))
-  function addLineFromPick() {
-    const p = prods.find(x => String(x.id) === String(pick))
-    if (!p) return
-    setSales(s => [...s, { product_id: p.id, nom: p.nom, quantite: '1', prix_vente: p.prix_vente != null ? String(p.prix_vente) : '' }])
-    setPick('')
-  }
+  // ===== VENDEUSE : saisie du jour par produit (vendu / reçu / périmé) =====
+  const entry = (id) => entries[id] || { vendu: '', recu: '', perime: '' }
+  const setEntry = (id, k, v) => setEntries(p => ({ ...p, [id]: { ...entry(id), [k]: v } }))
+  const touched = (id) => { const e = entry(id); return N(e.vendu) > 0 || N(e.recu) > 0 || N(e.perime) > 0 }
+  const lineMontant = (p) => N(entry(p.id).vendu) * N(p.prix_vente)
+  const salesTotal = prods.reduce((a, p) => a + lineMontant(p), 0)
   async function addNewProduct() {
     const nom = (newProd.nom || '').trim()
     if (!nom) { setErr('Donne un nom au produit.'); return }
@@ -693,31 +696,50 @@ export default function Submit() {
     } else if (error) { setErr(error.message); return }
     if (!data) { setErr('Produit introuvable après ajout.'); return }
     setProds(p => [...p.filter(x => x.id !== data.id), data])
-    setSales(s => [...s, { product_id: data.id, nom: data.nom, quantite: '1', prix_vente: data.prix_vente != null ? String(data.prix_vente) : (newProd.prix_vente || '') }])
-    setNewProd({ nom: '', prix_achat: '', prix_vente: '' }); setShowNew(false)
+    setEntry(data.id, 'vendu', '1')
+    setProdSearch(''); setNewProd({ nom: '', prix_achat: '', prix_vente: '' }); setShowNew(false)
   }
 
   async function saveVendeuse() {
     if (!stationId) { setErr('Aucune station sélectionnée.'); return }
     if (locked) { setErr(lockedMsg); return }
-    const lines = sales.filter(s => N(s.quantite) > 0)
+    const venduLines = prods.filter(p => N(entry(p.id).vendu) > 0)
+    const recuLines = prods.filter(p => N(entry(p.id).recu) > 0)
+    const perimeLines = prods.filter(p => N(entry(p.id).perime) > 0)
     setBusy(true); setErr(''); setMsg('')
     try {
       const { error } = await supabase.from('daily_reports').upsert(
         { station_id: stationId, report_date: date, superette_espece: salesTotal, created_by: session.user.id },
         { onConflict: 'station_id,report_date' })
       if (error) throw error
-      // Remplace les lignes du jour (idempotent → la vendeuse peut re-saisir/corriger)
+      // Remplace les lignes de vente du jour (idempotent → la vendeuse peut re-saisir/corriger)
       await supabase.from('superette_sales').delete().eq('station_id', stationId).eq('report_date', date)
-      if (lines.length) {
-        const { error: si } = await supabase.from('superette_sales').insert(lines.map(s => ({
-          station_id: stationId, report_date: date, product_id: s.product_id, nom: s.nom,
-          quantite: N(s.quantite), prix_vente: N(s.prix_vente), montant: lineMontant(s), created_by: session.user.id,
+      if (venduLines.length) {
+        const { error: si } = await supabase.from('superette_sales').insert(venduLines.map(p => ({
+          station_id: stationId, report_date: date, product_id: p.id, nom: p.nom,
+          quantite: N(entry(p.id).vendu), prix_vente: N(p.prix_vente), montant: lineMontant(p), created_by: session.user.id,
         })))
         if (si) throw si
       }
+      // Mouvements de stock par article (sans valeur : la valorisation globale reste celle
+      // du champ "Espèces supérette" ci-dessus — éviter un double comptage dans v_stock_valeur).
+      // Tagués par ref=saisie-vendeuse-<date> et remplacés en bloc à chaque enregistrement
+      // (idempotent, comme superette_sales) sans toucher aux mouvements saisis ailleurs (Stock).
+      const ref = `saisie-vendeuse-${date}`
+      await supabase.from('stock_movements').delete().eq('station_id', stationId).eq('categorie', 'superette').eq('ref', ref)
+      const mvts = [
+        ...venduLines.map(p => ({ type: 'sortie', source: 'vente', produit: p.nom, quantite: N(entry(p.id).vendu), note: null })),
+        ...recuLines.map(p => ({ type: 'entree', source: 'achat', produit: p.nom, quantite: N(entry(p.id).recu), note: 'Saisie vendeuse' })),
+        ...perimeLines.map(p => ({ type: 'sortie', source: 'perte', produit: p.nom, quantite: N(entry(p.id).perime), note: 'Périmé / à jeter — saisie vendeuse' })),
+      ]
+      if (mvts.length) {
+        const { error: mi } = await supabase.from('stock_movements').insert(mvts.map(m => ({
+          station_id: stationId, categorie: 'superette', date_mouvement: date, created_by: session.user.id, ref, ...m,
+        })))
+        if (mi) throw mi
+      }
       await supabase.from('submissions').insert({ report_date: date, station_id: stationId, moment: 'superette', created_by: session.user.id })
-      setMsg('Ventes supérette enregistrées')
+      setMsg('Supérette enregistrée')
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }
   }
@@ -743,33 +765,37 @@ export default function Submit() {
       {err && <AlertBanner tone="alarm" title="Erreur">{err}</AlertBanner>}
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
       {locked && <AlertBanner tone="alarm" title="Verrouillé">{lockedMsg}</AlertBanner>}
-      <Panel title="Produits vendus — supérette">
+      <Panel title="Supérette — saisie du jour">
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
-          Choisissez un produit dans la liste, indiquez la <b>quantité</b> et le <b>prix de vente</b>. Si un produit n'existe pas encore, ajoutez-le : l'administrateur le validera ensuite.
+          Recherchez un produit puis indiquez ce qui a été <b>vendu</b>, <b>reçu</b> (livraison non enregistrée ailleurs) ou <b>périmé/à jeter</b>. Chaque produit cherché reste affiché pour que vous puissiez continuer avec le suivant.
         </p>
+        <Input size="sm" value={prodSearch} onChange={e => setProdSearch(e.target.value)} placeholder="Rechercher un produit…" style={{ marginBottom: 'var(--sp-4)' }} />
 
-        {sales.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
-            {sales.map((s, i) => (
-              <div key={i} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', padding: 'var(--sp-3)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)' }}>
-                <span style={{ flex: 1, font: '400 15px/1.3 var(--font-ui)', color: 'var(--text-body)' }}>{s.nom}</span>
-                <Input size="sm" type="text" inputMode="decimal" numeric value={s.quantite} onChange={e => updLine(i, 'quantite', e.target.value)} style={{ width: 70 }} />
-                <Input size="sm" type="text" inputMode="decimal" numeric value={s.prix_vente} onChange={e => updLine(i, 'prix_vente', e.target.value)} style={{ width: 100 }} />
-                <span style={{ width: 90, textAlign: 'right', font: '500 15px/1.25 var(--font-data)' }}>{fcfa(lineMontant(s))}</span>
-                <Button size="sm" tone="danger" onClick={() => removeLine(i)}>✕</Button>
+        {(() => {
+          const visible = prods.filter(p => touched(p.id) || (prodSearch && p.nom.toLowerCase().includes(prodSearch.toLowerCase())))
+          if (!visible.length) return <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>{prodSearch ? 'Aucun produit ne correspond.' : 'Recherchez un produit ci-dessus pour commencer la saisie.'}</p>
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
+              <div style={{ display: 'flex', gap: 'var(--sp-3)', padding: '0 var(--sp-3)', font: '600 12px/1.2 var(--font-ui)', color: 'var(--text-muted)' }}>
+                <span style={{ flex: 1 }}>Produit</span>
+                <span style={{ width: 64, textAlign: 'center' }}>Vendu</span>
+                <span style={{ width: 64, textAlign: 'center' }}>Reçu</span>
+                <span style={{ width: 64, textAlign: 'center' }}>Périmé</span>
               </div>
-            ))}
-          </div>
-        )}
-        {!sales.length && <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Aucune vente saisie pour le moment.</p>}
-
-        <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'end', flexWrap: 'wrap' }}>
-          <Field label="Ajouter un produit de la liste" style={{ flex: '1 1 200px' }}>
-            <Select value={pick} onChange={e => setPick(e.target.value)} style={{ width: '100%' }}
-              options={[{ value: '', label: '— choisir —' }, ...prods.map(p => ({ value: p.id, label: `${p.nom}${p.prix_vente != null ? ` (${fcfa(p.prix_vente)})` : ''}` }))]} />
-          </Field>
-          <Button tone="dark" onClick={addLineFromPick} disabled={!pick}>+ Ajouter</Button>
-        </div>
+              {visible.map(p => {
+                const e = entry(p.id)
+                return (
+                  <div key={p.id} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', padding: 'var(--sp-3)', background: touched(p.id) ? 'var(--surface-raised)' : 'transparent', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)' }}>
+                    <span style={{ flex: 1, font: '400 15px/1.3 var(--font-ui)', color: 'var(--text-body)' }}>{p.nom}{p.prix_vente != null && <span style={{ color: 'var(--text-muted)' }}> · {fcfa(p.prix_vente)}</span>}</span>
+                    <Input size="sm" type="text" inputMode="decimal" numeric value={e.vendu} onChange={ev => setEntry(p.id, 'vendu', ev.target.value)} style={{ width: 64 }} />
+                    <Input size="sm" type="text" inputMode="decimal" numeric value={e.recu} onChange={ev => setEntry(p.id, 'recu', ev.target.value)} style={{ width: 64 }} />
+                    <Input size="sm" type="text" inputMode="decimal" numeric value={e.perime} onChange={ev => setEntry(p.id, 'perime', ev.target.value)} style={{ width: 64 }} />
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
 
         <div style={{ marginTop: 'var(--sp-4)' }}>
           {!showNew

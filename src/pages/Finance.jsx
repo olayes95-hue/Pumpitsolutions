@@ -44,6 +44,7 @@ export default function Finance() {
   const { stationId } = useStation()
   const [ventes, setVentes] = useState([])
   const [commissionReelle, setCommissionReelle] = useState([])   // v_commission_reelle_mensuelle — quantité vendue × (prix vente − prix achat), gaz + lubrifiant
+  const [commissionSuperette, setCommissionSuperette] = useState([])   // v_commission_superette_mensuelle — idem, supérette (si settings.superette_commission_reelle)
   const [charges, setCharges] = useState([])
   const [expenses, setExpenses] = useState([])
   const [pertes, setPertes] = useState([])
@@ -77,7 +78,7 @@ export default function Finance() {
 
   async function load() {
     if (!stationId) return
-    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr] = await Promise.all([
+    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs] = await Promise.all([
       supabase.from('v_ventes_mensuelles').select('*').eq('station_id', stationId).order('mois'),
       supabase.from('charges').select('*').eq('station_id', stationId),
       supabase.from('expenses').select('report_date,categorie,montant').eq('station_id', stationId),
@@ -95,8 +96,9 @@ export default function Finance() {
       supabase.from('compte_bancaire_solde_initial').select('*').eq('station_id', stationId).maybeSingle(),
       supabase.from('compte_bancaire_mouvements').select('*').eq('station_id', stationId).order('date_mouvement', { ascending: false }),
       supabase.from('v_commission_reelle_mensuelle').select('*').eq('station_id', stationId),
+      supabase.from('v_commission_superette_mensuelle').select('*').eq('station_id', stationId),
     ])
-    setVentes(v.data || []); setCharges(c.data || []); setExpenses(e.data || []); setCommissionReelle(cr.data || [])
+    setVentes(v.data || []); setCharges(c.data || []); setExpenses(e.data || []); setCommissionReelle(cr.data || []); setCommissionSuperette(cs.data || [])
     if (st.data) setSettings(st.data)
     setPertes(p.data || []); setStockVal(sv.data || [])
     setBonsRestant(N(ls.data?.bons_restant))
@@ -142,7 +144,10 @@ export default function Finance() {
   // suivie en valeur globale — hors périmètre du calcul réel).
   const CR = commissionReelle.filter(c => inPeriod(c.mois))
   const commGazLub = CR.reduce((s, c) => s + N(c.commission_gaz) + N(c.commission_lubrifiant), 0)
-  const commSuperette = sum('ventes_superette') * N(settings.taux_superette) / 100
+  // Supérette : calcul réel (PV − PA par produit vendu, comme gaz/lubrifiant) une fois activé
+  // par l'admin (Stations > Prix & marge) — sinon estimation à taux fixe comme avant.
+  const supCommReelle = (filterFn) => commissionSuperette.filter(c => filterFn(c.mois)).reduce((s, c) => s + N(c.commission_superette), 0)
+  const commSuperette = settings.superette_commission_reelle ? supCommReelle(inPeriod) : sum('ventes_superette') * N(settings.taux_superette) / 100
 
   // Rapprochement des bons : seul contrôle qui confronte le déclaratif du gérant (ventes_bon,
   // cumulé jour par jour) à une source externe — le relevé mensuel envoyé par la direction.
@@ -203,7 +208,7 @@ export default function Finance() {
   const commCarbPrev = sumPrev('commission_carburant')
   const CRprev = commissionReelle.filter(c => prevInPeriod(c.mois))
   const commGazLubPrev = CRprev.reduce((s, c) => s + N(c.commission_gaz) + N(c.commission_lubrifiant), 0)
-  const commSuperettePrev = sumPrev('ventes_superette') * N(settings.taux_superette) / 100
+  const commSuperettePrev = settings.superette_commission_reelle ? supCommReelle(prevInPeriod) : sumPrev('ventes_superette') * N(settings.taux_superette) / 100
   const autoChargesPrev = autoChargesFor(prevInPeriod)
   const totAutoPrev = Object.values(autoChargesPrev).reduce((s, v) => s + v, 0)
   const chPprev = charges.filter(c => prevInPeriod(c.mois))
@@ -369,7 +374,7 @@ export default function Finance() {
     const data = [
       { poste: 'Commission carburant', montant: Math.round(commCarb) },
       { poste: 'Commission gaz + lubrifiant (prix vente − prix achat)', montant: Math.round(commGazLub) },
-      { poste: `Commission supérette (${settings.taux_superette}%)`, montant: Math.round(commSuperette) },
+      { poste: settings.superette_commission_reelle ? 'Commission supérette (prix vente − prix achat)' : `Commission supérette (${settings.taux_superette}%)`, montant: Math.round(commSuperette) },
       { poste: 'Autres produits', montant: Math.round(autresProduits) },
       { poste: '= PRODUITS', montant: Math.round(produits) },
       { poste: 'SBEE (auto)', montant: Math.round(N(autoCharges.SBEE)) },
@@ -429,7 +434,7 @@ export default function Finance() {
     const cCarb = s('commission_carburant')
     const CRm = commissionReelle.filter(c => c.mois === m)
     const cGL = CRm.reduce((sum, c) => sum + N(c.commission_gaz) + N(c.commission_lubrifiant), 0)
-    const cSup = s('ventes_superette') * N(settings.taux_superette) / 100
+    const cSup = settings.superette_commission_reelle ? supCommReelle(em => em === m) : s('ventes_superette') * N(settings.taux_superette) / 100
     const auto = autoChargesFor(em => em === m)
     const totA = Object.values(auto).reduce((sum, v) => sum + v, 0)
     const cM = charges.filter(c => c.mois === m)
@@ -553,7 +558,7 @@ export default function Finance() {
           <LedgerHead>Produits (commissions, auto)</LedgerHead>
           <LedgerRow label="Commission carburant" value={fcfa(commCarb)} />
           <LedgerRow label="Commission gaz + lubrifiant (prix vente − prix achat)" value={fcfa(commGazLub)} />
-          <LedgerRow label={`Commission supérette (${settings.taux_superette}%)`} value={fcfa(commSuperette)} />
+          <LedgerRow label={settings.superette_commission_reelle ? 'Commission supérette (prix vente − prix achat)' : `Commission supérette (${settings.taux_superette}%)`} value={fcfa(commSuperette)} />
           {autresProduits > 0 && <LedgerRow label="Autres produits (saisis)" value={fcfa(autresProduits)} />}
           <LedgerHead>Charges</LedgerHead>
           <LedgerRow label="SBEE (auto, depuis dépenses)" value={fcfa(autoCharges.SBEE)} />
