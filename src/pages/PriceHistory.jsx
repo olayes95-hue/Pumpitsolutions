@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { fcfa } from '../lib/format'
-import { Panel } from '../ds/pumpit/components/core/Panel.jsx'
+import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
@@ -57,7 +57,7 @@ export default function PriceHistory() {
                 pageCount={Math.max(1, Math.ceil(shown.length / pageSize))} total={shown.length} pageSize={pageSize}
                 onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
             </>
-          : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Aucun changement de prix enregistré pour le moment.</p>}
+          : <PanelEmpty icon="calendar-days" label="Aucun changement de prix enregistré pour le moment." />}
       </Panel>
     </div>
   )

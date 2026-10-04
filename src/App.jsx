@@ -54,7 +54,7 @@ function useAccess() {
   return { op, can, isVendeuse, isGerant, org, isPlatformAdmin, has, stock }
 }
 
-// Les cinq espaces de l'application. Chaque entrée n'apparaît que si le profil y a droit ;
+// Les espaces de l'application (six aujourd'hui). Chaque entrée n'apparaît que si le profil y a droit ;
 // un espace sans entrée disparaît de la navigation.
 function useSpaces() {
   const { op, can, isVendeuse, isGerant, org, isPlatformAdmin, has, stock } = useAccess()
@@ -207,7 +207,7 @@ function Shell({ children }) {
             <NotifBanner /><ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary></main>
         </div>
 
-        <nav className="pi-bottom" aria-label="Espaces">
+        <nav className="pi-bottom pi-bottom-scroll" aria-label="Espaces">
           {spaces.map(s => (
             // Lien simple (pas NavLink) : l'onglet est actif pour toutes les pages de l'espace.
             <Link key={s.key} to={s.items[0].to} className={s.key === space?.key ? 'active' : undefined}

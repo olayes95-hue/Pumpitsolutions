@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
 import { numFR } from '../lib/format'
-import { Panel } from '../ds/pumpit/components/core/Panel.jsx'
+import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
@@ -132,7 +132,7 @@ export default function Products() {
       <Panel title={cat} meta={`${shown.length}`} flush>
         {shown.length
           ? <DataTable columns={columns} rows={shown} />
-          : <p style={{ padding: 'var(--gutter-panel)', font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Aucun produit.</p>}
+          : <PanelEmpty icon="book-open" label="Aucun produit." />}
         <form onSubmit={add} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'end', padding: 'var(--gutter-panel)', borderTop: '1px solid var(--border-hairline)' }}>
           <Field label="Nouveau produit" style={{ flex: '2 1 200px' }}>
             <Input value={nf.nom} onChange={e => setNf({ ...nf, nom: e.target.value })} placeholder={cat === 'superette' ? 'ex : Eau 1,5L' : 'nom'} />
