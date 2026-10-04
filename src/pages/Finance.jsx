@@ -13,6 +13,7 @@ import { IconButton } from '../ds/pumpit/components/core/IconButton.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.jsx'
@@ -387,8 +388,6 @@ export default function Finance() {
     exportRowsToCsv(`charges-fixes-${mois || annee}.csv`, columns, data)
   }
 
-  const anneeOptions = annees.map(a => ({ value: a, label: a }))
-  const moisOptions = [{ value: '', label: 'Année entière' }, ...MONTHS.map(m => ({ value: `${annee}-${m}`, label: `${annee}-${m}` }))]
 
   const chargesColumns = [
     { key: 'mois', header: 'Mois' },
@@ -506,8 +505,10 @@ export default function Finance() {
       {err && <AlertBanner tone="alarm" title="Erreur">{err}</AlertBanner>}
 
       <Panel title="Point financier" bodyStyle={{ display: 'none' }} actions={<>
-        <Select size="sm" value={annee} onChange={e => { setAnnee(e.target.value); setMois('') }} options={anneeOptions} />
-        <Select size="sm" value={mois} onChange={e => setMois(e.target.value)} options={moisOptions} />
+        <PeriodPicker multiple={false} years={[annee]} months={mois ? [mois.slice(5, 7)] : []}
+          setYears={ys => { setAnnee(ys[0] || annee); setMois('') }}
+          setMonths={ms => setMois(ms.length ? `${annee}-${ms[0]}` : '')}
+          availableYears={annees} />
         {mois && can('manage_finance') && <Button size="sm" tone={isLocked ? 'danger' : 'outline'} onClick={toggleLock}>{isLocked ? 'Déverrouiller le mois' : 'Verrouiller le mois'}</Button>}
       </>} />
 

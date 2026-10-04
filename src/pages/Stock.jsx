@@ -13,6 +13,7 @@ import { Icon } from '../ds/pumpit/components/core/Icon.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
@@ -37,7 +38,6 @@ function Pager({ page, setPage, total }) {
   )
 }
 const pageSlice = (rows, page) => { const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)); const p = Math.min(Math.max(1, page), pageCount); return rows.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE) }
-const MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12']
 const CATS = [['gaz', 'Gaz'], ['lubrifiant', 'Lubrifiant'], ['superette', 'Supérette']]
 const MOVEMENT_LABEL = { entree: 'Livraison', sortie: 'Sortie', ajustement: 'Inventaire' }
 
@@ -66,7 +66,8 @@ export default function Stock() {
   const [histProduit, setHistProduit] = useState('')
   const [action, setAction] = useState(null)   // null | 'entree' | 'ajustement'
   const [nm, setNm] = useState(blank('entree'))
-  const [fYear, setFYear] = useState('all'); const [fMonth, setFMonth] = useState('all')
+  const [fYears, setFYears] = useState([String(today().slice(0, 4))])
+  const [fMonths, setFMonths] = useState([today().slice(5, 7)])
   const [fProduit, setFProduit] = useState('')
   const [catTab, setCatTab] = useState('gaz')   // onglet de catégorie actif (Gaz / Lubrifiant / Supérette) — regroupe toutes les infos de cette catégorie
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
@@ -359,14 +360,12 @@ export default function Stock() {
           au lieu de panneaux séparés dispersés sur la page. ===== */}
       {!isVendeuse && (() => {
         const catLabel = { gaz: 'Gaz', lubrifiant: 'Lubrifiant', superette: 'Supérette' }[catTab]
-        const sortiesCat = sorties.filter(s => s.categorie === catTab
-          && (fYear === 'all' || (s.report_date || '').slice(0, 4) === fYear)
-          && (fMonth === 'all' || (s.report_date || '').slice(5, 7) === fMonth))
+        const inPeriod = (d) => (!fYears.length || fYears.includes((d || '').slice(0, 4))) && (!fMonths.length || fMonths.includes((d || '').slice(5, 7)))
+        const sortiesCat = sorties.filter(s => s.categorie === catTab && inPeriod(s.report_date))
         const mvtsCat = mvts.filter(m => m.categorie === catTab)
-        const years = [...new Set(mvtsCat.map(m => (m.date_mouvement || '').slice(0, 4)).filter(Boolean))].sort()
+        const years = [...new Set([...mvtsCat.map(m => (m.date_mouvement || '').slice(0, 4)).filter(Boolean), today().slice(0, 4)])].sort()
         const jm = mvtsCat.filter(m =>
-          (fYear === 'all' || (m.date_mouvement || '').slice(0, 4) === fYear)
-          && (fMonth === 'all' || (m.date_mouvement || '').slice(5, 7) === fMonth)
+          inPeriod(m.date_mouvement)
           && (!fProduit || (m.produit || '').toLowerCase().includes(fProduit.toLowerCase())))
         const totVal = jm.reduce((s, m) => s + (m.valeur != null ? N(m.valeur) * (m.type === 'sortie' ? -1 : 1) : 0), 0)
         const valeurCat = valeur.find(v => v.categorie === catTab)
@@ -440,9 +439,8 @@ export default function Stock() {
                   <SectionLabel>Journal des mouvements</SectionLabel>
                   <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
                     <Input size="sm" value={fProduit} onChange={e => setFProduit(e.target.value)} placeholder="Rechercher un produit…" style={{ flex: '1 1 180px' }} />
-                    <Select size="sm" value={fYear} onChange={e => setFYear(e.target.value)} options={[{ value: 'all', label: 'Toutes années' }, ...years.map(y => ({ value: y, label: y }))]} />
-                    <Select size="sm" value={fMonth} onChange={e => setFMonth(e.target.value)} options={[{ value: 'all', label: 'Tous mois' }, ...MONTHS.map(m => ({ value: m, label: m }))]} />
-                    {(fYear !== 'all' || fMonth !== 'all' || fProduit) && <Button size="sm" onClick={() => { setFYear('all'); setFMonth('all'); setFProduit('') }}>Réinit.</Button>}
+                    <PeriodPicker years={fYears} months={fMonths} setYears={setFYears} setMonths={setFMonths} availableYears={years} />
+                    {(fYears.length || fMonths.length || fProduit) && <Button size="sm" onClick={() => { setFYears([]); setFMonths([]); setFProduit('') }}>Réinit.</Button>}
                     <Tag>Solde : {fcfa(totVal)}</Tag>
                   </div>
                   {jm.length ? (<>

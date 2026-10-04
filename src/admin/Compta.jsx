@@ -12,6 +12,7 @@ import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { NumericStepper } from '../ds/pumpit/components/forms/NumericStepper.jsx'
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { MetricTile } from '../ds/pumpit/components/data/MetricTile.jsx'
@@ -144,8 +145,9 @@ export default function Compta() {
       {msg && <AlertBanner tone="ok" title="Enregistré" onDismiss={() => setMsg('')}>{msg}</AlertBanner>}
 
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
-        <Select aria-label="Année" value={annee} onChange={e => setAnnee(e.target.value)} options={annees} />
-        <Select aria-label="Mois" value={mois} onChange={e => setMois(e.target.value)} options={[{ value: '', label: 'Toute l\'année' }, ...MOIS.map((m, i) => ({ value: String(i + 1).padStart(2, '0'), label: m }))]} />
+        <PeriodPicker multiple={false} years={[annee]} months={mois ? [mois] : []}
+          setYears={ys => setAnnee(ys[0] || annee)} setMonths={ms => setMois(ms[0] || '')}
+          availableYears={annees} />
       </div>
 
       <div className="pi-bo-kpis">
