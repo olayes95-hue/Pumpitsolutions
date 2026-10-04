@@ -63,7 +63,7 @@ export default function Finance() {
   const [editSoldeBanque, setEditSoldeBanque] = useState(false)
   const [soldeBanqueForm, setSoldeBanqueForm] = useState({ montant: '', date_solde: '', note: '' })
   const [mouvementsBanque, setMouvementsBanque] = useState([])
-  const [nm, setNm] = useState({ type: 'virement_bons', montant: '', date_mouvement: today(), note: '', photo_path: null })
+  const [nm, setNm] = useState({ type: 'frais_bancaire', montant: '', date_mouvement: today(), note: '', photo_path: null })
   const [nmPhotoBusy, setNmPhotoBusy] = useState(false)
   const [openAnnuel, setOpenAnnuel] = useState(false)
   // Par défaut, mois en cours (pas le dernier mois avec des données, qui peut être ancien).
@@ -661,13 +661,16 @@ export default function Finance() {
             <Kpi label="Solde actuel" value={fcfa(soldeBancaireActuel)} status={soldeBancaireActuel < 0 ? 'alarm' : 'ok'} />
             <Kpi label="Dépôts" value={fcfa(N(compteBancaire?.total_depots))} />
             <Kpi label="Chèques commandes" value={fcfa(N(compteBancaire?.total_cheques))} />
-            <Kpi label="Virements bons reçus" value={fcfa(N(compteBancaire?.total_virements))} />
+            <Kpi label="Virements bons reçus" value={fcfa(N(compteBancaire?.total_virements))} sub="depuis le relevé importé" />
             <Kpi label="Frais bancaires" value={fcfa(N(compteBancaire?.total_frais))} />
           </div>
+          <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 var(--sp-3)' }}>
+            Les virements reçus (bons) ne se saisissent plus ici — ils viennent automatiquement du relevé importé et catégorisé dans Rapprochement (catégorie « Virement fournisseur »). Seuls les frais bancaires restent à saisir à la main.
+          </p>
           {can('manage_finance') && <form onSubmit={addMouvementBanque} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'end', marginBottom: 'var(--sp-4)' }}>
             <Field label="Type" style={{ flex: '1 1 180px' }}>
               <Select value={nm.type} onChange={e => setNm({ ...nm, type: e.target.value })} style={{ width: '100%' }}
-                options={[{ value: 'virement_bons', label: 'Virement reçu (bons)' }, { value: 'frais_bancaire', label: 'Frais bancaire' }]} />
+                options={[{ value: 'frais_bancaire', label: 'Frais bancaire' }]} />
             </Field>
             <Field label="Montant" style={{ flex: '1 1 140px' }}>
               <Input type="number" inputMode="decimal" numeric value={nm.montant} onChange={e => setNm({ ...nm, montant: e.target.value })} />
