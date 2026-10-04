@@ -7,6 +7,7 @@ import FactureSheet from '../components/FactureSheet.jsx'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
+import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 
@@ -14,15 +15,24 @@ import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 // employés, état de l'abonnement, factures. La gestion des clients elle-même est dans le
 // back-office (/admin).
 // `facturesSeules` : version réduite affichée sur l'écran « Accès suspendu ».
+// Catégorie de charge dédiée à l'abonnement PumpIT — distincte de AUTRE pour que le coût
+// ressorte clairement dans le Point financier (voir MANUAL_CATS, Finance.jsx).
+const CAT_ABONNEMENT = 'ABONNEMENT_PUMPIT'
+
 export default function Entreprise({ facturesSeules = false }) {
-  const { organisation, offre, abonnement } = useAuth()
+  const { session, organisation, offre, abonnement, isAdmin, can } = useAuth()
   const emetteur = usePlateforme()
   const [formules, setFormules] = useState([])
   const [factures, setFactures] = useState([])
   const [stations, setStations] = useState([])
+  const [facturesChargees, setFacturesChargees] = useState(new Set())  // facture_id déjà transformés en charge
+  const [targetStation, setTargetStation] = useState({})               // facture.id -> station_id choisie
+  const [busyCharge, setBusyCharge] = useState(null)
   const [aImprimer, setAImprimer] = useState(null)
   const [copied, setCopied] = useState(false)
   const [err, setErr] = useState('')
+
+  const peutGererCharges = isAdmin || can('manage_finance')
 
   useEffect(() => {
     if (!organisation?.id) return
@@ -31,6 +41,28 @@ export default function Entreprise({ facturesSeules = false }) {
     supabase.from('factures').select('*').eq('organisation_id', organisation.id).order('date_emission', { ascending: false })
       .then(({ data }) => setFactures(data || []))
   }, [organisation?.id])
+
+  useEffect(() => {
+    if (!stations.length) return
+    supabase.from('charges').select('facture_id').in('station_id', stations.map(s => s.id)).not('facture_id', 'is', null)
+      .then(({ data }) => setFacturesChargees(new Set((data || []).map(c => c.facture_id))))
+  }, [stations])
+
+  async function transformerEnCharge(f) {
+    setErr(''); setBusyCharge(f.id)
+    try {
+      const station_id = targetStation[f.id] || stations[0]?.id
+      if (!station_id) throw new Error('Aucune station disponible.')
+      const { error } = await supabase.from('charges').insert({
+        station_id, mois: f.periode_debut.slice(0, 7), categorie: CAT_ABONNEMENT, montant: f.montant_ttc,
+        note: `Facture ${f.numero} (${frDate(f.periode_debut)} → ${frDate(f.periode_fin)})`,
+        facture_id: f.id, created_by: session.user.id,
+      })
+      if (error) throw error
+      setFacturesChargees(p => new Set(p).add(f.id))
+    } catch (e) { setErr('Transformation en charge impossible : ' + (e.message || e)) }
+    finally { setBusyCharge(null) }
+  }
 
   async function copyCode() {
     try { await navigator.clipboard.writeText(organisation.code_invitation); setCopied(true); setTimeout(() => setCopied(false), 2000) }
@@ -49,6 +81,22 @@ export default function Entreprise({ facturesSeules = false }) {
     { key: 'periode', header: 'Période', optional: '1', render: f => `${frDate(f.periode_debut)} au ${frDate(f.periode_fin)}` },
     { key: 'montant_ttc', header: 'Montant', numeric: true, align: 'right', render: f => fcfa(f.montant_ttc) },
     { key: 'statut', header: 'État', render: f => { const s = STATUT_FACTURE[f.statut] || STATUT_FACTURE.emise; return <Badge tone={s.tone}>{s.label}</Badge> } },
+    { key: 'charge', header: '', render: f => {
+      if (facturesChargees.has(f.id)) return <Badge tone="ok">✓ en charge</Badge>
+      if (!peutGererCharges || facturesSeules) return null
+      return (
+        <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+          {stations.length > 1 && (
+            <Select size="sm" value={targetStation[f.id] || stations[0]?.id || ''}
+              onChange={e => setTargetStation(p => ({ ...p, [f.id]: Number(e.target.value) }))}
+              options={stations.map(s => ({ value: s.id, label: s.nom }))} />
+          )}
+          <Button size="sm" disabled={busyCharge === f.id} onClick={() => transformerEnCharge(f)}>
+            {busyCharge === f.id ? '…' : 'Transformer en charge'}
+          </Button>
+        </div>
+      )
+    } },
     { key: 'action', header: '', align: 'right', render: f => <Button size="sm" icon="printer" onClick={() => setAImprimer(f)}>Imprimer</Button> },
   ]
 
@@ -80,17 +128,19 @@ export default function Entreprise({ facturesSeules = false }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
       {err && <AlertBanner tone="alarm" title="Action impossible" onDismiss={() => setErr('')}>{err}</AlertBanner>}
 
-      <Panel title={organisation?.nom || 'Votre entreprise'}>
-        <p style={{ color: 'var(--text-muted)', margin: '0 0 var(--sp-4)' }}>
-          Donnez ce code à chaque nouvel employé. Il le saisit en créant son compte, puis vous validez le compte dans Stations et équipe.
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-4)' }}>
-          <span style={{ font: '800 32px/1.1 var(--font-display)', letterSpacing: '.06em', padding: 'var(--sp-4) var(--sp-6)', background: 'var(--brume)', borderRadius: 'var(--radius-2)', userSelect: 'all' }}>
-            {organisation?.code_invitation || '—'}
-          </span>
-          <Button tone="dark" icon={copied ? 'check' : undefined} disabled={!organisation} onClick={copyCode}>{copied ? 'Code copié' : 'Copier le code'}</Button>
-        </div>
-      </Panel>
+      {isAdmin && (
+        <Panel title={organisation?.nom || 'Votre entreprise'}>
+          <p style={{ color: 'var(--text-muted)', margin: '0 0 var(--sp-4)' }}>
+            Donnez ce code à chaque nouvel employé. Il le saisit en créant son compte, puis vous validez le compte dans Stations et équipe.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-4)' }}>
+            <span style={{ font: '800 32px/1.1 var(--font-display)', letterSpacing: '.06em', padding: 'var(--sp-4) var(--sp-6)', background: 'var(--brume)', borderRadius: 'var(--radius-2)', userSelect: 'all' }}>
+              {organisation?.code_invitation || '—'}
+            </span>
+            <Button tone="dark" icon={copied ? 'check' : undefined} disabled={!organisation} onClick={copyCode}>{copied ? 'Code copié' : 'Copier le code'}</Button>
+          </div>
+        </Panel>
+      )}
 
       {blocAbonnement}
       <FactureSheet facture={aImprimer} client={organisation} emetteur={emetteur} onDone={() => setAImprimer(null)} />

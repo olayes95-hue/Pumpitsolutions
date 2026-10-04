@@ -28,7 +28,7 @@ const TABS = [
 
 const N = (v) => (v ? Number(v) : 0)
 // charges saisies à la main (les récurrentes se reportent d'un mois sur l'autre)
-const MANUAL_CATS = ['LOYER','SALAIRES','PRELEVEMENT_GERANT','IMPOTS','HONORAIRES','PRESTATIONS','PERTE_VENTE_CARBURANT','SONEB','TELEPHONE','AUTRE']
+const MANUAL_CATS = ['LOYER','SALAIRES','PRELEVEMENT_GERANT','IMPOTS','HONORAIRES','PRESTATIONS','PERTE_VENTE_CARBURANT','SONEB','TELEPHONE','ABONNEMENT_PUMPIT','AUTRE']
 const REVENU_CAT = 'AUTRES_PRODUITS'
 const CAT_OPTIONS = [...MANUAL_CATS.map(c => ({ value: c, label: c.replace(/_/g, ' ') })), { value: REVENU_CAT, label: '+ AUTRES PRODUITS (revenu)' }]
 const STATUT_OPTIONS = [{ value: 'a_payer', label: 'À payer' }, { value: 'paye', label: 'Payé' }]

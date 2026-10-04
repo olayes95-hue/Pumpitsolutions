@@ -82,7 +82,7 @@ function useSpaces() {
     ] },
     { key: 'reglages', label: 'Réglages', icon: 'settings', items: [
       (can('manage_stations_config') || can('manage_team')) && { to: '/stations', icon: 'building-2', label: 'Stations et équipe' },
-      org && { to: '/entreprise', icon: 'landmark', label: 'Entreprise' },
+      (org || can('view_finance')) && { to: '/entreprise', icon: 'landmark', label: 'Entreprise' },
       can('view_audit_log') && has('audit') && { to: '/audit', icon: 'search', label: "Journal d'audit" },
       { to: '/aide', icon: 'circle-question-mark', label: 'Aide' },
       { to: '/assistance', icon: 'life-buoy', label: 'Assistance' },
@@ -292,7 +292,7 @@ function AppRoutes() {
           <Route path="/rapprochement" element={guard(can('view_bank_recon') && has('finance'), <BankRecon />)} />
           <Route path="/verif-photos" element={guard(can('view_ocr_check') && has('bordereaux'), <OcrCheck />)} />
           <Route path="/stations" element={guard(can('manage_stations_config') || can('manage_team'), <Stations />)} />
-          <Route path="/entreprise" element={guard(org, <Entreprise />)} />
+          <Route path="/entreprise" element={guard(org || can('view_finance'), <Entreprise />)} />
           <Route path="/audit" element={guard(can('view_audit_log') && has('audit'), <AuditLog />)} />
           <Route path="/aide" element={<Aide />} />
           <Route path="/assistance" element={<Assistance />} />
