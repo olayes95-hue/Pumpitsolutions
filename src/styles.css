@@ -20,6 +20,7 @@ a:hover{color:var(--text-link-hover);text-decoration:underline;text-underline-of
 button,input,select,textarea{font-family:inherit}
 input,select,textarea{min-width:0}
 input[type=date],input[type=month]{-webkit-appearance:none;appearance:none;max-width:100%}
+input[type=date]::-webkit-calendar-picker-indicator,input[type=month]::-webkit-calendar-picker-indicator{margin:0 0 0 4px;padding:2px}
 .num{font-variant-numeric:tabular-nums}
 ::selection{background:var(--vert-fond);color:var(--nuit)}
 :focus-visible{outline:none;box-shadow:var(--focus-ring)}
