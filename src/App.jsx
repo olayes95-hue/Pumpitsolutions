@@ -134,7 +134,7 @@ function Shell({ children }) {
 
   // Pastille « réponse de l'assistance non lue ».
   useEffect(() => {
-    const compter = () => supabase.from('assistance_demandes').select('id', { count: 'exact', head: true }).eq('non_lu_client', true)
+    const compter = () => supabase.from('assistance_demandes').select('id', { count: 'exact', head: true }).eq('non_lu_client', true).neq('statut', 'resolue')
       .then(({ count }) => setReponses(count || 0))
     compter()
     const t = setInterval(compter, 60000)
