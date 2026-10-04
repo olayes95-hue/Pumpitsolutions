@@ -5,6 +5,7 @@ import { Panel } from '../ds/pumpit/components/core/Panel.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 
 const CHAMP_LABEL = { prix_achat: "Prix d'achat", prix_vente: 'Prix de vente' }
 const frDateTime = (iso) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
@@ -12,11 +13,14 @@ const frDateTime = (iso) => new Date(iso).toLocaleString('fr-FR', { dateStyle: '
 export default function PriceHistory() {
   const [rows, setRows] = useState([])
   const [produitFilter, setProduitFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   useEffect(() => {
     supabase.from('v_price_history').select('*').order('changed_at', { ascending: false }).limit(500)
       .then(({ data }) => setRows(data || []))
   }, [])
+  useEffect(() => { setPage(1) }, [produitFilter])
 
   const produits = [...new Set(rows.map(r => r.produit))].sort()
   const shown = produitFilter ? rows.filter(r => r.produit === produitFilter) : rows
@@ -47,7 +51,12 @@ export default function PriceHistory() {
           Chaque changement de prix d'achat ou de vente — carburant, gaz, lubrifiant, supérette — est enregistré automatiquement, avec l'ancien et le nouveau montant, qui l'a fait et quand. Les 500 derniers changements.
         </p>
         {shown.length
-          ? <DataTable columns={columns} rows={shown} />
+          ? <>
+              <DataTable columns={columns} rows={shown.slice((page - 1) * pageSize, page * pageSize)} />
+              <Pagination page={Math.min(page, Math.max(1, Math.ceil(shown.length / pageSize)))}
+                pageCount={Math.max(1, Math.ceil(shown.length / pageSize))} total={shown.length} pageSize={pageSize}
+                onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
+            </>
           : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Aucun changement de prix enregistré pour le moment.</p>}
       </Panel>
     </div>

@@ -10,6 +10,7 @@ import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 
 // Page « Entreprise » de l'administrateur d'un client : code d'invitation à donner aux
 // employés, état de l'abonnement, factures. La gestion des clients elle-même est dans le
@@ -30,6 +31,8 @@ export default function Entreprise({ facturesSeules = false }) {
   const [busyCharge, setBusyCharge] = useState(null)
   const [aImprimer, setAImprimer] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [err, setErr] = useState('')
 
   const peutGererCharges = isAdmin || can('manage_finance')
@@ -118,7 +121,12 @@ export default function Entreprise({ facturesSeules = false }) {
           <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Pour changer l'offre d'une station, contactez PumpIT depuis la page Assistance.</span>
         </div>
       )}
-      {factures.length ? <DataTable columns={cols} rows={factures} zebra={false} /> : <PanelEmpty icon="receipt" label="Aucune facture pour le moment." />}
+      {factures.length ? <>
+        <DataTable columns={cols} rows={factures.slice((page - 1) * pageSize, page * pageSize)} zebra={false} />
+        <Pagination page={Math.min(page, Math.max(1, Math.ceil(factures.length / pageSize)))}
+          pageCount={Math.max(1, Math.ceil(factures.length / pageSize))} total={factures.length} pageSize={pageSize}
+          onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
+      </> : <PanelEmpty icon="receipt" label="Aucune facture pour le moment." />}
     </Panel>
   )
 

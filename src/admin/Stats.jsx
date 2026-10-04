@@ -9,6 +9,7 @@ import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { MetricTile } from '../ds/pumpit/components/data/MetricTile.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 
 const ETAT_STATION = {
@@ -25,8 +26,11 @@ export default function Stats() {
   const [activite, setActivite] = useState([])
   const [formules, setFormules] = useState([])
   const [filtre, setFiltre] = useState('toutes')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [err, setErr] = useState('')
 
+  useEffect(() => { setPage(1) }, [filtre])
   useEffect(() => {
     Promise.all([supabase.rpc('bo_supervision'), supabase.rpc('bo_stations'), supabase.rpc('bo_activite', { p_jours: 30 }), supabase.from('formules').select('*').order('ordre')])
       .then(([c, s, a, f]) => {
@@ -112,14 +116,19 @@ export default function Stats() {
             { value: 'toutes', label: 'Toutes', count: stations.length }, { value: 'a_jour', label: 'À jour', count: parEtat('a_jour') },
             { value: 'en_retard', label: 'En retard', count: parEtat('en_retard') }, { value: 'inactive', label: 'Inactives', count: parEtat('inactive') }]} />
         </div>
-        {liste.length ? <DataTable zebra={false} rows={liste.map(s => ({ ...s, id: s.station_id }))} rowStatus={s => s.etat === 'inactive' ? 'alarm' : s.etat === 'en_retard' ? 'warn' : null} columns={[
-          { key: 'station', header: 'Station', render: s => <b style={{ fontWeight: 600 }}>{s.station}</b> },
-          { key: 'client', header: 'Client' },
-          { key: 'formule', header: 'Offre', optional: '1', render: s => formules.find(f => f.key === s.formule)?.label || s.formule },
-          { key: 'etat', header: 'État', render: s => { const e = ETAT_STATION[s.etat] || ETAT_STATION.inactive; return <Badge tone={e.tone} title={e.aide}>{e.label}</Badge> } },
-          { key: 'derniere_saisie', header: 'Dernière saisie', muted: true, optional: '1', render: s => il_y_a(s.derniere_saisie) },
-          { key: 'saisies_7j', header: 'Saisies sur 7 j', numeric: true, align: 'right', optional: '1' },
-        ]} /> : <PanelEmpty icon="fuel" label="Aucune station dans cet état." />}
+        {liste.length ? <>
+          <DataTable zebra={false} rows={liste.slice((page - 1) * pageSize, page * pageSize).map(s => ({ ...s, id: s.station_id }))} rowStatus={s => s.etat === 'inactive' ? 'alarm' : s.etat === 'en_retard' ? 'warn' : null} columns={[
+            { key: 'station', header: 'Station', render: s => <b style={{ fontWeight: 600 }}>{s.station}</b> },
+            { key: 'client', header: 'Client' },
+            { key: 'formule', header: 'Offre', optional: '1', render: s => formules.find(f => f.key === s.formule)?.label || s.formule },
+            { key: 'etat', header: 'État', render: s => { const e = ETAT_STATION[s.etat] || ETAT_STATION.inactive; return <Badge tone={e.tone} title={e.aide}>{e.label}</Badge> } },
+            { key: 'derniere_saisie', header: 'Dernière saisie', muted: true, optional: '1', render: s => il_y_a(s.derniere_saisie) },
+            { key: 'saisies_7j', header: 'Saisies sur 7 j', numeric: true, align: 'right', optional: '1' },
+          ]} />
+          <Pagination page={Math.min(page, Math.max(1, Math.ceil(liste.length / pageSize)))}
+            pageCount={Math.max(1, Math.ceil(liste.length / pageSize))} total={liste.length} pageSize={pageSize}
+            onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
+        </> : <PanelEmpty icon="fuel" label="Aucune station dans cet état." />}
         <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: 0, padding: 'var(--sp-4) var(--gutter-panel)' }}>
           À jour : saisie envoyée aujourd'hui. En retard : dernière saisie il y a moins de 7 jours. Inactive : aucune saisie depuis plus de 7 jours.
         </p>

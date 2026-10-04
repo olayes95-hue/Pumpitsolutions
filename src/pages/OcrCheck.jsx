@@ -10,6 +10,7 @@ import { Tag } from '../ds/pumpit/components/core/Tag.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
@@ -23,6 +24,8 @@ export default function OcrCheck() {
   // Par défaut on ne montre que ce qui reste à vérifier — l'essentiel est déjà couvert par le
   // rapprochement bancaire (verifie_source='rapprochement'), cet écran ne sert plus qu'au reste.
   const [onlyUnverified, setOnlyUnverified] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   async function load() {
     if (!stationId) return
@@ -31,6 +34,7 @@ export default function OcrCheck() {
     setRows(data || [])
   }
   useEffect(() => { load() }, [stationId])
+  useEffect(() => { setPage(1) }, [onlyUnverified])
 
   // Validation visuelle manuelle : l'admin/comptable regarde la photo à l'œil et confirme que le
   // montant déclaré correspond — pour les versements pas encore rapprochés avec la banque (ceux-là
@@ -99,7 +103,12 @@ export default function OcrCheck() {
         </div>
         <div style={{ marginTop: 'var(--sp-4)' }}>
           {rows.length
-            ? <DataTable columns={columns} rows={shownRows} selectable selectedIds={selectedIds} onSelectionChange={setSelectedIds} />
+            ? <>
+                <DataTable columns={columns} rows={shownRows.slice((page - 1) * pageSize, page * pageSize)} selectable selectedIds={selectedIds} onSelectionChange={setSelectedIds} />
+                <Pagination page={Math.min(page, Math.max(1, Math.ceil(shownRows.length / pageSize)))}
+                  pageCount={Math.max(1, Math.ceil(shownRows.length / pageSize))} total={shownRows.length} pageSize={pageSize}
+                  onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
+              </>
             : <PanelEmpty icon="camera" label="Aucun bordereau avec photo pour cette station" />}
         </div>
       </Panel>

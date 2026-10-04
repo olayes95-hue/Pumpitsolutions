@@ -15,6 +15,7 @@ import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { NumericStepper } from '../ds/pumpit/components/forms/NumericStepper.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 import { Drawer } from '../ds/pumpit/components/feedback/Drawer.jsx'
 
 const lendemain = (iso) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10) }
@@ -25,6 +26,8 @@ export default function Clients() {
   const peutFacturer = agentCan('facturation')
   const emetteur = usePlateforme()
   const [orgs, setOrgs] = useState([])
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [formules, setFormules] = useState([])
   const [orphans, setOrphans] = useState([])
   const [stations, setStations] = useState([])     // toutes les stations, avec leur offre et son prix (bo_stations)
@@ -174,8 +177,12 @@ export default function Clients() {
       {!ficheId && msg && <AlertBanner tone="ok" title="Enregistré" onDismiss={() => setMsg('')}>{msg}</AlertBanner>}
 
       <Panel title="Clients" meta={`${orgs.length}`} flush>
-        {orgs.length ? <DataTable columns={cols} rows={orgs} zebra={false} rowStatus={o => etatClient(o, emetteur).rang} onRowClick={ouvrirFiche} />
-          : <PanelEmpty icon="users" label="Aucun client." />}
+        {orgs.length ? <>
+          <DataTable columns={cols} rows={orgs.slice((page - 1) * pageSize, page * pageSize)} zebra={false} rowStatus={o => etatClient(o, emetteur).rang} onRowClick={ouvrirFiche} />
+          <Pagination page={Math.min(page, Math.max(1, Math.ceil(orgs.length / pageSize)))}
+            pageCount={Math.max(1, Math.ceil(orgs.length / pageSize))} total={orgs.length} pageSize={pageSize}
+            onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
+        </> : <PanelEmpty icon="users" label="Aucun client." />}
       </Panel>
 
       <Panel title="Nouveau client">

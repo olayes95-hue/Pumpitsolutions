@@ -17,6 +17,7 @@ import { NumericStepper } from '../ds/pumpit/components/forms/NumericStepper.jsx
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { MetricTile } from '../ds/pumpit/components/data/MetricTile.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { Drawer } from '../ds/pumpit/components/feedback/Drawer.jsx'
 
@@ -35,6 +36,8 @@ export default function Compta() {
   const [annee, setAnnee] = useState(today().slice(0, 4))
   const [mois, setMois] = useState(today().slice(5, 7))        // '' = toute l'année
   const [filtre, setFiltre] = useState('toutes')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [emission, setEmission] = useState({ org: '', debut: today().slice(0, 8) + '01', mois: 1 })
   const [encaisse, setEncaisse] = useState(null)
   const [aImprimer, setAImprimer] = useState(null)
@@ -56,6 +59,7 @@ export default function Compta() {
     setStations(st.data || [])
   }
   useEffect(() => { load() }, [])
+  useEffect(() => { setPage(1) }, [filtre, annee, mois])
 
   const nomClient = useMemo(() => Object.fromEntries(orgs.map(o => [o.id, o.nom])), [orgs])
   const dansPeriode = (iso) => !!iso && iso.startsWith(annee) && (!mois || iso.slice(5, 7) === mois)
@@ -210,7 +214,12 @@ export default function Compta() {
         <div style={{ padding: '0 var(--gutter-panel) var(--sp-4)' }}>
           <Tabs value={filtre} onChange={setFiltre} items={[{ value: 'toutes', label: 'Toutes' }, { value: 'emise', label: 'À régler' }, { value: 'payee', label: 'Payées' }, { value: 'annulee', label: 'Annulées' }]} style={{ background: 'var(--brume)', borderRadius: 'var(--radius-full)', display: 'inline-flex' }} />
         </div>
-        {journal.length ? <DataTable columns={cols} rows={journal} zebra={false} /> : <PanelEmpty icon="receipt" label="Aucune facture sur cette période." />}
+        {journal.length ? <>
+          <DataTable columns={cols} rows={journal.slice((page - 1) * pageSize, page * pageSize)} zebra={false} />
+          <Pagination page={Math.min(page, Math.max(1, Math.ceil(journal.length / pageSize)))}
+            pageCount={Math.max(1, Math.ceil(journal.length / pageSize))} total={journal.length} pageSize={pageSize}
+            onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
+        </> : <PanelEmpty icon="receipt" label="Aucune facture sur cette période." />}
       </Panel>
 
       <Drawer open={!!encaisse} title="Encaisser" meta={encaisse ? `${encaisse.numero} · ${fcfa(encaisse.montant)}` : ''} width={420} onClose={() => setEncaisse(null)}>

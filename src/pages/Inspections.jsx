@@ -16,6 +16,7 @@ import { Textarea } from '../ds/pumpit/components/forms/Textarea.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { Drawer, DrawerRow } from '../ds/pumpit/components/feedback/Drawer.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
@@ -50,6 +51,8 @@ export default function Inspections() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
   const [fYear, setFYear] = useState('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   // Le formulaire reste caché par défaut : on arrive directement sur l'historique, le
   // formulaire ne s'ouvre qu'à la demande (bouton "+ Enregistrer un nouveau contrôle").
   const [formOpen, setFormOpen] = useState(false)
@@ -66,6 +69,7 @@ export default function Inspections() {
     setList((await supabase.from('inspections').select('*').eq('station_id', stationId).order('date_controle', { ascending: false })).data || [])
   }
   useEffect(() => { load() }, [stationId])
+  useEffect(() => { setPage(1) }, [fYear])
 
   function togglePompe(key, checked) {
     setPompesSel(p => {
@@ -295,9 +299,12 @@ export default function Inspections() {
                 { key: 'action', header: 'Action', render: c => c.a_adresser_direction ? <Badge tone={c.traite ? 'ok' : 'warn'}>{c.traite ? 'Traité' : 'Action requise'}</Badge> : '—' },
                 { key: 'photo', header: 'Photo', render: c => c.fiche_photo_path ? <PhotoImage path={c.fiche_photo_path} alt="" size={32} /> : '—' },
               ]}
-              rows={shownList}
+              rows={shownList.slice((page - 1) * pageSize, page * pageSize)}
               onRowClick={c => setDetailId(c.id)}
             />}
+        <Pagination page={Math.min(page, Math.max(1, Math.ceil(shownList.length / pageSize)))}
+          pageCount={Math.max(1, Math.ceil(shownList.length / pageSize))} total={shownList.length} pageSize={pageSize}
+          onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
       </Panel>
 
       {/* Détail d'un contrôle : lecture seule pour le gérant — ni modification ni suppression

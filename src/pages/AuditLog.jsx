@@ -5,6 +5,7 @@ import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 
 const TABLE_LABELS = {
   daily_reports: 'Point journalier', deposits: 'Versement', expenses: 'Dépense',
@@ -29,6 +30,8 @@ export default function AuditLog() {
   const [table, setTable] = useState('all')
   const [action, setAction] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   useEffect(() => { if (!stationId) return; (async () => {
     setLoading(true)
@@ -39,6 +42,7 @@ export default function AuditLog() {
 
   const shown = useMemo(() => rows.filter(r =>
     (table === 'all' || r.table_name === table) && (action === 'all' || r.action === action)), [rows, table, action])
+  useEffect(() => { setPage(1) }, [table, action])
 
   const columns = [
     { key: 'changed_at', header: 'Quand', render: r => fmt(r.changed_at) },
@@ -64,7 +68,12 @@ export default function AuditLog() {
       {loading
         ? <div style={{ padding: 'var(--sp-6)', font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>Chargement…</div>
         : shown.length
-          ? <DataTable columns={columns} rows={shown} />
+          ? <>
+              <DataTable columns={columns} rows={shown.slice((page - 1) * pageSize, page * pageSize)} />
+              <Pagination page={Math.min(page, Math.max(1, Math.ceil(shown.length / pageSize)))}
+                pageCount={Math.max(1, Math.ceil(shown.length / pageSize))} total={shown.length} pageSize={pageSize}
+                onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
+            </>
           : <PanelEmpty icon="search" label="Aucun événement" />}
     </Panel>
   )

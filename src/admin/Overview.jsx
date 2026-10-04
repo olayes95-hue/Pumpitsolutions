@@ -10,6 +10,7 @@ import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { MetricTile } from '../ds/pumpit/components/data/MetricTile.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
+import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 
 // Supervision : l'état de chaque client en une ligne, sans avoir à l'ouvrir.
@@ -20,6 +21,8 @@ export default function Overview() {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   async function load() {
     const { data, error } = await supabase.rpc('bo_supervision')
@@ -65,8 +68,12 @@ export default function Overview() {
       </div>
       <Panel title="Clients" meta={rows ? `${liste.length}` : 'chargement…'} flush
         actions={<Button size="sm" icon="rotate-ccw" onClick={load}>Actualiser</Button>}>
-        {liste.length ? <DataTable columns={cols} rows={liste} zebra={false} rowStatus={o => etatClient(o, reglages).rang} />
-          : <PanelEmpty icon="users" label={rows ? 'Aucun client.' : 'Chargement…'} />}
+        {liste.length ? <>
+          <DataTable columns={cols} rows={liste.slice((page - 1) * pageSize, page * pageSize)} zebra={false} rowStatus={o => etatClient(o, reglages).rang} />
+          <Pagination page={Math.min(page, Math.max(1, Math.ceil(liste.length / pageSize)))}
+            pageCount={Math.max(1, Math.ceil(liste.length / pageSize))} total={liste.length} pageSize={pageSize}
+            onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
+        </> : <PanelEmpty icon="users" label={rows ? 'Aucun client.' : 'Chargement…'} />}
       </Panel>
     </div>
   )
