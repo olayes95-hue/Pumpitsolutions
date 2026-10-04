@@ -70,9 +70,16 @@ async function envoyer(ruleId: number, triggerKey: string, email: string, sujet:
 }
 
 // ---------- Curseurs (jusqu'où chaque trigger a déjà été traité) ----------
+// Premier passage d'un déclencheur (aucun curseur en base) : on amorce le curseur à MAINTENANT
+// plutôt qu'à une date ancienne — sinon activer une règle traite tout l'historique depuis
+// toujours en un seul passage (des centaines d'envois d'un coup, voir l'incident de quota Brevo).
+// Seuls les événements APRÈS l'activation sont donc notifiés, jamais le passé.
 async function getCursor(trigger: string): Promise<string> {
   const { data } = await sb.from("notification_cursors").select("dernier_at").eq("trigger_key", trigger).maybeSingle()
-  return data?.dernier_at || "2000-01-01T00:00:00Z"
+  if (data?.dernier_at) return data.dernier_at
+  const maintenant = new Date().toISOString()
+  await sb.from("notification_cursors").insert({ trigger_key: trigger, dernier_at: maintenant })
+  return maintenant
 }
 async function setCursor(trigger: string, at: string) {
   await sb.from("notification_cursors").upsert({ trigger_key: trigger, dernier_at: at })
