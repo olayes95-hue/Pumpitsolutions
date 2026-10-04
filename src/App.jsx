@@ -65,7 +65,7 @@ function useSpaces() {
     ] },
     // Son propre onglet en barre du bas (plutôt qu'un sous-onglet d'Aujourd'hui) : accès direct,
     // pas une page de plus à chercher — demandé explicitement pour la version mobile du gérant.
-    { key: 'journal', label: 'Journal de bord', icon: 'clipboard-list', items: [
+    { key: 'journal', label: 'Journal de bord', court: 'Journal', icon: 'clipboard-list', items: [
       (op || can('view_journal')) && { to: '/journal', icon: 'clipboard-list', label: 'Journal de bord' },
     ] },
     { key: 'pilotage', label: 'Pilotage', icon: 'gauge', items: [
@@ -212,7 +212,7 @@ function Shell({ children }) {
             // Lien simple (pas NavLink) : l'onglet est actif pour toutes les pages de l'espace.
             <Link key={s.key} to={s.items[0].to} className={s.key === space?.key ? 'active' : undefined}
               aria-current={s.key === space?.key ? 'page' : undefined}>
-              <Icon name={s.icon} size={22} />{s.label}
+              <Icon name={s.icon} size={22} />{s.court || s.label}
               {s.key === 'reglages' && reponses > 0 && <span className="pi-dot" />}
             </Link>
           ))}

@@ -71,17 +71,27 @@ export default function Notifications() {
   const [filtreActif, setFiltreActif] = useState('tous')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
+  const [logPage, setLogPage] = useState(1)
+  const [logPageSize, setLogPageSize] = useState(25)
+  const [logTotal, setLogTotal] = useState(0)
   const formRef = useRef(null)
 
-  async function load() {
-    const [r, l] = await Promise.all([
-      supabase.from('notification_rules').select('*').order('id', { ascending: false }),
-      supabase.from('notification_log').select('*').order('envoye_at', { ascending: false }).limit(100),
-    ])
-    setRegles(r.data || []); setLog(l.data || [])
+  async function loadRegles() {
+    const { data } = await supabase.from('notification_rules').select('*').order('id', { ascending: false })
+    setRegles(data || [])
   }
+  // Pagination côté serveur — ce journal peut grandir sans limite avec le temps (19
+  // déclencheurs désormais), inutile de rapatrier plus que la page affichée.
+  async function loadLog(p = logPage, size = logPageSize) {
+    const from = (p - 1) * size
+    const { data, count } = await supabase.from('notification_log').select('*', { count: 'exact' })
+      .order('envoye_at', { ascending: false }).range(from, from + size - 1)
+    setLog(data || []); setLogTotal(count || 0)
+  }
+  async function load() { await Promise.all([loadRegles(), loadLog()]) }
   useEffect(() => { load() }, [])
   useEffect(() => { setPage(1) }, [filtreTrigger, filtreActif])
+  useEffect(() => { loadLog() }, [logPage, logPageSize])
 
   const fail = (e) => { setMsg(''); setErr(e?.message || String(e)) }
   const ok = (m) => { setErr(''); setMsg(m) }
@@ -265,8 +275,10 @@ export default function Notifications() {
         </form>
       </Panel>}
 
-      <Panel title="Historique d'envoi" meta={`${log.length} (100 derniers)`} flush>
+      <Panel title="Historique d'envoi" meta={`${logTotal}`} flush>
         {log.length ? <DataTable columns={logCols} rows={log} zebra={false} /> : <PanelEmpty icon="bell" label="Aucun envoi pour le moment." />}
+        <Pagination page={logPage} pageCount={Math.max(1, Math.ceil(logTotal / logPageSize))} total={logTotal} pageSize={logPageSize}
+          onPage={setLogPage} onPageSize={s => { setLogPageSize(s); setLogPage(1) }} />
       </Panel>
     </div>
   )
