@@ -932,17 +932,8 @@ export default function Submit() {
           <AlertBanner tone="ok" title="Marge" style={{ marginTop: 'var(--sp-4)' }}>Marge carburant estimée : <b>{fcfa(marge)}</b> ({settings.marge_unitaire} F/L)</AlertBanner>
         </Panel>}
 
-        <Panel sectionRef={apresmidiMetersRef}>
-          <StepHead n="3" title="Relevés 16 h — obligatoire" />
-          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Index de chaque pompe à 16 h — <b>obligatoire</b>. Photo recommandée si possible, mais pas bloquante.</p>
-          {err && errTarget === 'meters-16h' && <AlertBanner tone="alarm" title="Erreur" style={{ marginBottom: 'var(--sp-4)' }}>{err}</AlertBanner>}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
-            {machineNums(nombreMachines).map(n => meterMachine(n, `e${n}`, `Pompe E${n}`, `g${n}`, `Pompe G${n}`))}
-          </div>
-        </Panel>
-
         {!isPompiste && <Panel>
-          <StepHead n="4" title={activite('gaz') ? 'Gaz et autres ventes' : 'Autres ventes'} />
+          <StepHead n="3" title={activite('gaz') ? 'Gaz et autres ventes' : 'Autres ventes'} />
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>
             {showVenduLubGaz ? 'Bouteilles et quantités vendues aujourd\'hui, et recettes en espèces des autres pôles.' : 'Recettes en espèces des autres pôles.'}
           </p>
@@ -1016,6 +1007,15 @@ export default function Submit() {
           )}
           <Field label="Total des bons en cours (cumul)" style={{ marginTop: 'var(--sp-3)' }}><Input type="text" inputMode="decimal" numeric {...numProps('total_bon_cumul')} /></Field>
         </Panel>}
+
+        <Panel sectionRef={apresmidiMetersRef}>
+          <StepHead n="4" title="Relevés 16 h — obligatoire" />
+          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Index de chaque pompe à 16 h — <b>obligatoire</b>. Photo recommandée si possible, mais pas bloquante.</p>
+          {err && errTarget === 'meters-16h' && <AlertBanner tone="alarm" title="Erreur" style={{ marginBottom: 'var(--sp-4)' }}>{err}</AlertBanner>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
+            {machineNums(nombreMachines).map(n => meterMachine(n, `e${n}`, `Pompe E${n}`, `g${n}`, `Pompe G${n}`))}
+          </div>
+        </Panel>
       </>)}
 
       {/* ---- RÉCEPTION COMMANDES : affichage PARTAGÉ avec « Commandes », à tout moment ---- */}

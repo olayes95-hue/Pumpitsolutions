@@ -16,7 +16,6 @@ import { GaugeBar } from '../ds/pumpit/components/data/GaugeBar.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
 const N = (v) => (v ? Number(v) : 0)
-const AUTONOMIE_TONE = (d) => d == null ? undefined : d < 3 ? 'alarm' : d < 6 ? 'warn' : 'ok'
 // Jusqu'à 10 machines par station (stations.nombre_machines, réglable dans Stations & équipe).
 const MAX_MACHINES = 10
 const machineNums = (n) => Array.from({ length: n }, (_, i) => i + 1)
@@ -165,8 +164,6 @@ export default function Journal() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
       {/* ===== MÉTRIQUES ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
-        <Kpi label="Autonomie essence" value={forecast?.jours_essence != null ? forecast.jours_essence : '—'} unit={forecast?.jours_essence != null ? 'j' : ''} status={AUTONOMIE_TONE(forecast?.jours_essence)} sub={forecast?.ess_stock != null ? `${Math.round(forecast.ess_stock)} L en cuve` : ''} />
-        <Kpi label="Autonomie gasoil" value={forecast?.jours_gasoil != null ? forecast.jours_gasoil : '—'} unit={forecast?.jours_gasoil != null ? 'j' : ''} status={AUTONOMIE_TONE(forecast?.jours_gasoil)} sub={forecast?.gas_stock != null ? `${Math.round(forecast.gas_stock)} L en cuve` : ''} />
         <Kpi label="Manque à verser (mois)" value={fcfa(manqueTotal)} status={manqueTotal > 0 ? 'alarm' : 'ok'} />
         <Kpi label="Pertes carburant (mois)" value={pertes?.perte_na_montant ? fcfa(pertes.perte_na_montant) : fcfa(0)} status={N(pertes?.perte_na_montant) > 0 ? 'alarm' : 'ok'} sub={pertes?.perte_na_litres ? `${Math.round(N(pertes.perte_na_litres)).toLocaleString('fr-FR')} L hors seuil` : ''} />
         <Kpi label="Pompes actives" value={`${nbActives}/${pumps.length * 2}`} status={nbInactives > 0 ? 'alarm' : 'ok'} sub={nbInactives > 0 ? `${nbInactives} hors service` : ''} />
