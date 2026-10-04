@@ -123,6 +123,10 @@ export default function Finance() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'charges', filter: `station_id=eq.${stationId}` }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `station_id=eq.${stationId}` }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deposits', filter: `station_id=eq.${stationId}` }, load)
+      // Trésorerie (virements/frais) vient directement du relevé importé depuis la v111/v112 —
+      // sans cet abonnement, une recatégorisation ou un import dans Rapprochement ne rafraîchissait
+      // jamais cette page si elle était déjà ouverte (il fallait la recharger à la main).
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bank_lines', filter: `station_id=eq.${stationId}` }, load)
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [stationId])

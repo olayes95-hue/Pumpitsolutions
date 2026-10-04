@@ -11,15 +11,13 @@ import { Panel } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Drawer } from '../ds/pumpit/components/feedback/Drawer.jsx'
 import { EvidenceThumb } from '../ds/pumpit/components/evidence/EvidenceThumb.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
 const N = (v) => (v ? Number(v) : 0)
-const MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12']
-const ML = { '01':'Janv','02':'Févr','03':'Mars','04':'Avril','05':'Mai','06':'Juin','07':'Juil','08':'Août','09':'Sept','10':'Oct','11':'Nov','12':'Déc' }
-const MONTH_OPTIONS = [{ value: 'all', label: 'Tous mois' }, ...MONTHS.map(m => ({ value: m, label: ML[m] }))]
 const POLE_FILTER_OPTIONS = [
   { value: 'tous', label: 'Tous les pôles' },
   { value: 'carburant', label: 'Carburant' },
@@ -101,7 +99,6 @@ export default function History() {
   }, [detailDate, stationId])
 
   const years = useMemo(() => [...new Set([...rows.map(r => r.report_date.slice(0, 4)), today.slice(0, 4)])].sort(), [rows])
-  const yearOptions = [{ value: 'all', label: 'Toutes années' }, ...years.map(y => ({ value: y, label: y }))]
   const frows = useMemo(() => rows.filter(r =>
     (year === 'all' || r.report_date.slice(0, 4) === year) &&
     (month === 'all' || r.report_date.slice(5, 7) === month)), [rows, year, month])
@@ -231,8 +228,8 @@ export default function History() {
       flush
       actions={<>
         <Select size="sm" value={poleFilter} onChange={e => setPoleFilter(e.target.value)} options={POLE_FILTER_OPTIONS} />
-        <Select size="sm" value={year} onChange={e => setYear(e.target.value)} options={yearOptions} />
-        <Select size="sm" value={month} onChange={e => setMonth(e.target.value)} options={MONTH_OPTIONS} />
+        <PeriodPicker multiple={false} years={year === 'all' ? [] : [year]} months={month === 'all' ? [] : [month]}
+          setYears={ys => setYear(ys[0] || 'all')} setMonths={ms => setMonth(ms[0] || 'all')} availableYears={years} />
         {(year !== 'all' || month !== 'all') && <Button size="sm" onClick={() => { setYear('all'); setMonth('all') }}>Réinitialiser</Button>}
         {has('export') && <Button size="sm" onClick={exportCsv} disabled={!frows.length}>Exporter (CSV)</Button>}
       </>}

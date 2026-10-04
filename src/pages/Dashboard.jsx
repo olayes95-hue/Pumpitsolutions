@@ -13,13 +13,12 @@ import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { IconButton } from '../ds/pumpit/components/core/IconButton.jsx'
 import { Tag } from '../ds/pumpit/components/core/Tag.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
 const N = (v) => (v ? Number(v) : 0)
-const MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12']
-const ML = { '01':'Janv','02':'Févr','03':'Mars','04':'Avril','05':'Mai','06':'Juin','07':'Juil','08':'Août','09':'Sept','10':'Oct','11':'Nov','12':'Déc' }
 const YEAR_TONE = (d) => d == null ? undefined : d < 3 ? 'alarm' : d < 6 ? 'warn' : 'ok'
 const YEAR_COLOR = (d) => d == null ? 'var(--text-primary)' : d < 3 ? 'var(--state-alarm)' : d < 6 ? 'var(--state-warn)' : 'var(--state-ok)'
 // Couleurs des activités (charte PumpIT) : toujours dans l'ordre Carburants, Lubrifiants, Gaz, Supérette.
@@ -331,9 +330,6 @@ export default function Dashboard() {
     ? fm.map(m => ({ mois: m.mois.slice(2), value: Math.round(N(m.litres_carburant)) }))
     : poleUniteSeries.map(r => ({ mois: r.mois.slice(2), value: Math.round(r.value) })))
 
-  const yearOptions = [{ value: 'all', label: 'Toutes années' }, ...years.map(y => ({ value: y, label: y }))]
-  const monthOptions = [{ value: 'all', label: 'Tous mois' }, ...MONTHS.map(m => ({ value: m, label: ML[m] }))]
-
   const reconColumns = [
     { key: 'mois', header: 'Mois' },
     { key: 'esp', header: 'Espèces', numeric: true, align: 'right', render: m => fcfa(N(m.recettes_especes)) },
@@ -359,8 +355,8 @@ export default function Dashboard() {
       </Panel>
 
       <Panel bodyStyle={{ display: 'none' }} actions={<>
-        <Select size="sm" value={year} onChange={e => setYear(e.target.value)} options={yearOptions} />
-        <Select size="sm" value={month} onChange={e => setMonth(e.target.value)} options={monthOptions} />
+        <PeriodPicker multiple={false} years={year === 'all' ? [] : [year]} months={month === 'all' ? [] : [month]}
+          setYears={ys => setYear(ys[0] || 'all')} setMonths={ms => setMonth(ms[0] || 'all')} availableYears={years} />
         {(year !== 'all' || month !== 'all') && <Button size="sm" onClick={() => { setYear('all'); setMonth('all') }}>Réinitialiser</Button>}
         <Tag>{sum('jours')} jour(s)</Tag>
       </>} />

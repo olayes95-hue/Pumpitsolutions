@@ -12,11 +12,10 @@ import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Tag } from '../ds/pumpit/components/core/Tag.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 
-const MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12']
-const ML = { '01':'Janv','02':'Févr','03':'Mars','04':'Avril','05':'Mai','06':'Juin','07':'Juil','08':'Août','09':'Sept','10':'Oct','11':'Nov','12':'Déc' }
 const key = (a) => `${a.report_date}|${a.type}`
 
 export default function AlertsPage() {
@@ -83,8 +82,6 @@ export default function AlertsPage() {
     // Gravité haute en tête, à date égale de filtre — les urgentes ne se perdent pas dans la liste.
     .sort((a, b) => (a.gravite === 'haute' ? -1 : 1) - (b.gravite === 'haute' ? -1 : 1))
 
-  const yearOptions = [{ value: 'all', label: 'Toutes années' }, ...years.map(y => ({ value: y, label: y }))]
-  const monthOptions = [{ value: 'all', label: 'Tous mois' }, ...MONTHS.map(m => ({ value: m, label: ML[m] }))]
   const typeOptions = [{ value: 'all', label: 'Tous types' }, ...types.map(t => ({ value: t, label: ALERT_TONES[t]?.label || t }))]
 
   return (
@@ -93,8 +90,8 @@ export default function AlertsPage() {
       meta={`${nbActive} active(s) · ${dismissed.size} traitée(s)`}
       flush
       actions={<>
-        <Select size="sm" value={year} onChange={e => setYear(e.target.value)} options={yearOptions} />
-        <Select size="sm" value={month} onChange={e => setMonth(e.target.value)} options={monthOptions} />
+        <PeriodPicker multiple={false} years={year === 'all' ? [] : [year]} months={month === 'all' ? [] : [month]}
+          setYears={ys => setYear(ys[0] || 'all')} setMonths={ms => setMonth(ms[0] || 'all')} availableYears={years} />
         <Select size="sm" value={type} onChange={e => setType(e.target.value)} options={typeOptions} />
         <Checkbox label="Voir les traitées" checked={showDismissed} onChange={v => setShowDismissed(v)} />
       </>}

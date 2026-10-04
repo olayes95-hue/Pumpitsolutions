@@ -351,9 +351,15 @@ export default function BankRecon() {
     if (!moisUnique) return
     setBusySync(true); setErr('')
     try {
+      // .select() après l'écriture : sans ça, une ligne bloquée par RLS (mois verrouillé dans
+      // Point financier) renvoie 0 ligne modifiée SANS erreur — le message de succès s'afficherait
+      // à tort alors que rien n'a changé. En vérifiant data.length on détecte ce cas et on prévient.
       if (chargeFraisMois) {
-        const { error } = await supabase.from('charges').update({ montant: totFraisBanque, note: `Synchronisé depuis Rapprochement le ${frDate(today())}` }).eq('id', chargeFraisMois.id)
+        const { data, error } = await supabase.from('charges')
+          .update({ montant: totFraisBanque, note: `Synchronisé depuis Rapprochement le ${frDate(today())}` })
+          .eq('id', chargeFraisMois.id).select('id')
         if (error) throw error
+        if (!data?.length) throw new Error(`Aucune ligne modifiée — le mois ${moisUnique} est peut-être verrouillé dans Point financier (déverrouille-le puis réessaie).`)
       } else if (totFraisBanque > 0) {
         const { error } = await supabase.from('charges').insert({
           station_id: stationId, mois: moisUnique, categorie: CAT_FRAIS_BANCAIRE, montant: totFraisBanque,
