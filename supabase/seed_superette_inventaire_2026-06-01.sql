@@ -258,8 +258,14 @@ on conflict (organisation_id, categorie, nom) do update set
 -- Rejouable : on efface d'abord tout mouvement déjà posé sous ce ref.
 delete from stock_movements where ref = 'inventaire-wezon-2026-06-01';
 
-insert into stock_movements (station_id, categorie, produit, type, quantite, source, ref, note, date_mouvement)
+-- `valeur` alimente v_stock_valeur (KPI "Valeur stock supérette" dans Stock.jsx) : dérivée du
+-- prix_vente déjà upserté ci-dessus pour chaque article (jointure), pas retapée à la main.
+-- Note : contrairement au gaz/lubrifiant (valorisés à prix_achat, le coût), la supérette est
+-- ici valorisée à prix_vente faute de prix d'achat connu depuis ce PDF — les deux KPI ne sont
+-- donc pas sur la même base tant que prix_achat n'est pas renseigné article par article.
+insert into stock_movements (station_id, categorie, produit, type, quantite, valeur, source, ref, note, date_mouvement)
 select (select id from stations where nom = 'Beaurivage'), 'superette', v.nom, 'ajustement', v.stock,
+  v.stock * pr.prix_vente,
   'inventaire', 'inventaire-wezon-2026-06-01', v.note, date '2026-06-01'
 from (values
 ('BALLON MULTI-COLORE-CRF SACHETS 20 PCS',3,null),
@@ -474,4 +480,5 @@ from (values
 ('YAOURT DÊGUÊ TROPICAL-1 LITRE',5,null),
 ('YAOURT DÊGUÊ TROPICAL-0,33 LITRE',3,null),
 ('CIGARETTES-ORIS',22,null)
-) as v(nom, stock, note);
+) as v(nom, stock, note)
+left join products pr on pr.organisation_id = 1 and pr.categorie = 'superette' and pr.nom = v.nom;
