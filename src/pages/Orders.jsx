@@ -28,7 +28,7 @@ import { Kpi } from '../lib/Kpi.jsx'
 const CATS = [['carburant', 'Carburant'], ['gaz', 'Gaz'], ['lubrifiant', 'Lubrifiant'], ['superette', 'Supérette']]
 // Lignes carburant par défaut (essence + gasoil commandés simultanément).
 const carbRows = () => [{ produit: 'essence', qte: '', bons: '', cheque: '', ref: '' }, { produit: 'gasoil', qte: '', bons: '', cheque: '', ref: '' }]
-const blankNf = () => ({ categorie: 'carburant', mode_paiement: 'cheque', rows: carbRows(), lignes: [{ article: '', qte: '' }], montant_paiement: '', date_proposition: today(), note: '' })
+const blankNf = () => ({ categorie: 'carburant', mode_paiement: 'cheque', rows: carbRows(), lignes: [{ article: '', mode: 'detail', qte: '' }], montant_paiement: '', date_proposition: today(), note: '' })
 
 export default function Orders() {
   const { session, isAdmin, isPompiste, can } = useAuth()
@@ -191,6 +191,9 @@ export default function Orders() {
     const qte = quantite_recue || ''
     return { ...next, qte, montant: N(qte) > 0 ? String(N(qte) * pxAchat(cat, r.produit)) : '' }
   }) }))
+  const setLigne = (i, patch) => setNf(p => ({ ...p, lignes: p.lignes.map((l, j) => j === i ? { ...l, ...patch } : l) }))
+  // Prix d'achat supérette au détail (unité) ou au gros (carton), selon le choix de la ligne.
+  const puLigne = (l) => { const pr = prodOf('superette').find(p => p.nom === l.article); return l.mode === 'gros' ? N(pr?.prix_achat_gros) : N(pr?.prix_achat) }
 
   async function propose(e) {
     e.preventDefault(); setErr('')
@@ -212,10 +215,16 @@ export default function Orders() {
         mode_paiement: bonsOn ? nf.mode_paiement : (nf.mode_paiement === 'bons' ? 'cheque' : nf.mode_paiement),
         montant_paiement: r.montant ? numFR(r.montant) : null }))
       if (!toInsert.length) { setErr('Renseignez au moins une quantité.'); return }
-    } else { // superette : une seule commande, plusieurs articles (déjà simultané)
-      const lignes = nf.lignes.filter(l => l.article && l.qte).map(l => ({ article: l.article, qte: numFR(l.qte) }))
+    } else { // superette : une seule commande, plusieurs articles — prix au détail ou au gros, calculé depuis le catalogue
+      const lignes = nf.lignes.filter(l => l.article && N(l.qte) > 0).map(l => {
+        const pr = prodOf('superette').find(p => p.nom === l.article)
+        const qte = numFR(l.qte)
+        const unite = l.mode === 'gros' ? (pr?.conditionnement_nom || 'carton') : (pr?.unite || 'unité')
+        return { article: l.article, product_id: pr?.id || null, mode: l.mode, qte, unite, detail: `${qte} ${unite}${qte > 1 ? 's' : ''}`, montant: qte * puLigne(l) }
+      })
       if (!lignes.length) { setErr('Ajoutez au moins un article avec sa quantité.'); return }
-      toInsert = [{ ...base, produit: 'supérette', lignes, mode_paiement: nf.mode_paiement, montant_paiement: nf.montant_paiement ? numFR(nf.montant_paiement) : null }]
+      const montantTotal = lignes.reduce((s, l) => s + N(l.montant), 0)
+      toInsert = [{ ...base, produit: 'supérette', lignes, mode_paiement: nf.mode_paiement, montant_paiement: montantTotal || null }]
     }
     const { error } = await supabase.from('fuel_orders').insert(toInsert)
     if (error) setErr(error.message); else { setNf(blankNf()); setShowPropose(false); flash(toInsert.length > 1 ? `${toInsert.length} commandes proposées` : 'Commande proposée'); load() }
@@ -405,7 +414,7 @@ export default function Orders() {
     ) },
     { key: 'categorie', header: 'Catégorie', render: o => (CATS.find(c => c[0] === (o.categorie || 'carburant')) || [, o.categorie])[1] },
     { key: 'produit', header: 'Produit / détail', render: o => (o.categorie || 'carburant') === 'superette'
-      ? <span title={(o.lignes || []).map(l => `${l.article} ×${l.qte}`).join(' · ')}>{(o.lignes || []).length} article(s)</span>
+      ? <span title={(o.lignes || []).map(l => `${l.article} ${l.detail ? '('+l.detail+')' : '×'+l.qte}`).join(' · ')}>{(o.lignes || []).length} article(s)</span>
       : o.produit },
     { key: 'qte', header: 'Qté', numeric: true, align: 'right', render: o => (o.categorie || 'carburant') !== 'superette' && N(o.quantite_commandee) ? N(o.quantite_commandee).toLocaleString('fr-FR') : '—' },
     { key: 'statut', header: 'Statut', render: o => { const st = ORDER_STATUS_TONES[o.statut] || { label: o.statut, tone: 'idle' }; return <Badge tone={st.tone}>{st.label}</Badge> } },
@@ -637,22 +646,36 @@ export default function Orders() {
 
             {nf.categorie === 'superette' && <>
               <div style={{ font: 'var(--fw-semibold) 13px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>Articles</div>
-              {nf.lignes.map((l, i) => (
-                <div key={i} style={{ display: 'flex', gap: 'var(--sp-3)' }}>
-                  <Input list="prod-sup" value={l.article} placeholder="article" onChange={e => setNf({ ...nf, lignes: nf.lignes.map((x, j) => j === i ? { ...x, article: e.target.value } : x) })} style={{ flex: 2 }} />
-                  <Input type="text" inputMode="decimal" numeric value={l.qte} placeholder="qté" onChange={e => setNf({ ...nf, lignes: nf.lignes.map((x, j) => j === i ? { ...x, qte: e.target.value } : x) })} style={{ flex: 1 }} />
-                </div>
-              ))}
-              <datalist id="prod-sup">{prodOf('superette').map(p => <option key={p.id} value={p.nom} />)}</datalist>
-              <Button type="button" onClick={() => setNf({ ...nf, lignes: [...nf.lignes, { article: '', qte: '' }] })} style={{ alignSelf: 'flex-start' }}>+ Article</Button>
-              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label="Paiement" style={{ flex: '1 1 160px' }}>
-                  <Select value={nf.mode_paiement} onChange={e => setNf({ ...nf, mode_paiement: e.target.value })} options={[{ value: 'cheque', label: 'Chèque' }, { value: 'especes', label: 'Espèces' }]} style={{ width: '100%' }} />
-                </Field>
-                <Field label="Montant total (F)" style={{ flex: '1 1 160px' }}>
-                  <Input type="text" inputMode="decimal" numeric value={nf.montant_paiement} onChange={e => setNf({ ...nf, montant_paiement: e.target.value })} />
-                </Field>
-              </div>
+              {!prodOf('superette').length && <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Aucun produit « supérette » dans le catalogue. Ajoutez-les d'abord dans « Produits et prix ».</p>}
+              {nf.lignes.map((l, i) => {
+                const pr = prodOf('superette').find(p => p.nom === l.article)
+                const hasGros = pr && N(pr.conditionnement_qte) > 0 && N(pr.prix_achat_gros) > 0
+                const pu = puLigne(l)
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'end' }}>
+                    <Field label="Article" style={{ flex: '2 1 180px' }}>
+                      <Select value={l.article} onChange={e => setLigne(i, { article: e.target.value, mode: 'detail' })}
+                        options={[{ value: '', label: 'Choisir…' }, ...prodOf('superette').map(p => ({ value: p.nom, label: p.nom }))]} style={{ width: '100%' }} />
+                    </Field>
+                    {hasGros && <Field label="Prix" style={{ flex: '1 1 160px' }}>
+                      <Select value={l.mode} onChange={e => setLigne(i, { mode: e.target.value })}
+                        options={[{ value: 'detail', label: `Détail (${fcfa(N(pr.prix_achat))})` }, { value: 'gros', label: `${pr.conditionnement_nom || 'Carton'} (${fcfa(N(pr.prix_achat_gros))})` }]} style={{ width: '100%' }} />
+                    </Field>}
+                    <Field label={l.mode === 'gros' ? `Qté (${pr?.conditionnement_nom || 'carton'})` : 'Quantité'} style={{ flex: '1 1 90px' }}>
+                      <Input type="text" inputMode="decimal" numeric value={l.qte} placeholder="qté" onChange={e => setLigne(i, { qte: e.target.value })} />
+                    </Field>
+                    {N(l.qte) > 0 && (pu > 0
+                      ? <span style={{ color: 'var(--state-ok)', font: '400 14px/1.3 var(--font-ui)' }}>{fcfa(N(l.qte) * pu)}</span>
+                      : <span style={{ color: 'var(--state-alarm)', font: '400 13px/1.3 var(--font-ui)' }}>prix manquant</span>)}
+                    {nf.lignes.length > 1 && <Button type="button" size="sm" tone="ghost" onClick={() => setNf({ ...nf, lignes: nf.lignes.filter((_, j) => j !== i) })}>✕</Button>}
+                  </div>
+                )
+              })}
+              <Button type="button" onClick={() => setNf({ ...nf, lignes: [...nf.lignes, { article: '', mode: 'detail', qte: '' }] })} style={{ alignSelf: 'flex-start' }}>+ Article</Button>
+              <Field label="Paiement" style={{ maxWidth: 220 }}>
+                <Select value={nf.mode_paiement} onChange={e => setNf({ ...nf, mode_paiement: e.target.value })} options={[{ value: 'cheque', label: 'Chèque' }, { value: 'especes', label: 'Espèces' }]} style={{ width: '100%' }} />
+              </Field>
+              {(() => { const t = nf.lignes.reduce((s, l) => s + N(l.qte) * puLigne(l), 0); return t > 0 ? <div style={{ color: 'var(--state-ok)', font: '400 15px/1.3 var(--font-ui)' }}>Total à payer : <b>{fcfa(t)}</b></div> : null })()}
             </>}
 
             <Field label="Note"><Input value={nf.note} onChange={e => setNf({ ...nf, note: e.target.value })} /></Field>
@@ -741,7 +764,7 @@ export default function Orders() {
                 )}
                 {o.statut === 'recue' && cat !== 'carburant' && <DrawerRow label="Avancement" value={`reçu ${deja.toLocaleString('fr-FR')}/${N(o.quantite_commandee).toLocaleString('fr-FR')}`} />}
                 {o.note && <DrawerRow label="Note" mono={false} value={o.note} />}
-                {cat === 'superette' && o.lignes && <DrawerRow label="Articles" mono={false} value={o.lignes.map(l => `${l.article} ×${l.qte}`).join(' · ')} />}
+                {cat === 'superette' && o.lignes && <DrawerRow label="Articles" mono={false} value={o.lignes.map(l => `${l.article} ${l.detail ? '('+l.detail+')' : '×'+l.qte}`).join(' · ')} />}
               </div>
 
               {receptions.length > 0 && (

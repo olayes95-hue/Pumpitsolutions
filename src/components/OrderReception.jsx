@@ -98,7 +98,7 @@ export default function OrderReception({ stationId, date, settings = {}, onDone,
                 </b>
                 <Badge tone={st.tone}>{st.label}</Badge>
               </div>
-              {cat === 'superette' && o.lignes && <div style={{ font: '400 15px/1.4 var(--font-ui)', color: 'var(--text-body)', marginTop: 'var(--sp-2)' }}>{o.lignes.map(l => `${l.article} ×${l.qte}`).join(' · ')}</div>}
+              {cat === 'superette' && o.lignes && <div style={{ font: '400 15px/1.4 var(--font-ui)', color: 'var(--text-body)', marginTop: 'var(--sp-2)' }}>{o.lignes.map(l => `${l.article} ${l.detail ? '('+l.detail+')' : '×'+l.qte}`).join(' · ')}</div>}
               {deja > 0 && <div style={{ marginTop: 'var(--sp-3)' }}><Tag>Reçu {deja.toLocaleString('fr-FR')} / {N(o.quantite_commandee).toLocaleString('fr-FR')} · reste {reste.toLocaleString('fr-FR')}</Tag></div>}
               {!r
                 ? <Button size="sm" style={{ marginTop: 'var(--sp-3)' }} onClick={() => setRecv(p => ({ ...p, [o.id]: { cuve_avant: '', cuve_apres: '', date: date || today(), quantite_recue: reste ? String(reste) : '' } }))}>Réceptionner{deja > 0 ? ' (suite)' : ''}</Button>

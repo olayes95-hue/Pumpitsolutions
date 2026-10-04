@@ -35,7 +35,18 @@ export default function Products() {
   async function load() { setList((await supabase.from('products').select('*').order('categorie').order('ordre')).data || []) }
   useEffect(() => { load() }, [])
   const flash = (m) => { setMsg(m); setErr(''); setTimeout(() => setMsg(''), 2000) }
-  const up = (id, k, v) => setList(p => p.map(x => x.id === id ? { ...x, [k]: v } : x))
+  // Prix du gros (carton) renseigné + conditionnement connu => le prix d'achat unité se déduit
+  // (gros ÷ qté/condit.) au lieu d'être tapé à la main ; reste modifiable ensuite si besoin.
+  const up = (id, k, v) => setList(p => p.map(x => {
+    if (x.id !== id) return x
+    const next = { ...x, [k]: v }
+    if (k === 'prix_achat_gros' || k === 'conditionnement_qte') {
+      const gros = numFR(k === 'prix_achat_gros' ? v : next.prix_achat_gros)
+      const qte = numFR(k === 'conditionnement_qte' ? v : next.conditionnement_qte)
+      if (gros && qte) next.prix_achat = String(Math.round(gros / qte))
+    }
+    return next
+  }))
 
   async function add(e) {
     e.preventDefault(); setErr(''); if (!nf.nom) return
@@ -50,7 +61,7 @@ export default function Products() {
       nom: p.nom, unite: p.unite, prix_achat: numFR(p.prix_achat), prix_vente: numFR(p.prix_vente),
       seuil: numFR(p.seuil) ?? 0, actif: p.actif, ordre: numFR(p.ordre),
       unite_stock: p.unite_stock || null, conditionnement_nom: p.conditionnement_nom || null,
-      conditionnement_qte: numFR(p.conditionnement_qte) }).eq('id', p.id)
+      conditionnement_qte: numFR(p.conditionnement_qte), prix_achat_gros: numFR(p.prix_achat_gros) }).eq('id', p.id)
     error ? setErr(error.message) : flash('Enregistré')
   }
   async function del(id) { await supabase.from('products').delete().eq('id', id); load() }
@@ -85,11 +96,12 @@ export default function Products() {
   const columns = [
     { key: 'nom', header: 'Nom', render: p => <Input size="sm" value={p.nom || ''} onChange={e => up(p.id, 'nom', e.target.value)} /> },
     { key: 'unite', header: 'Unité', render: p => <Select size="sm" value={p.unite || 'unité'} onChange={e => up(p.id, 'unite', e.target.value)} options={UNITE_OPTIONS} style={{ width: '100%' }} /> },
-    ...(cat === 'lubrifiant' ? [
+    ...(cat === 'lubrifiant' || cat === 'superette' ? [
       { key: 'conditionnement_nom', header: 'Conditionnement', render: p => <Input size="sm" value={p.conditionnement_nom || ''} onChange={e => up(p.id, 'conditionnement_nom', e.target.value)} placeholder="ex : carton" style={{ width: 100 }} /> },
       { key: 'conditionnement_qte', header: 'Qté/condit.', align: 'right', render: p => <Input size="sm" numeric value={p.conditionnement_qte ?? ''} onChange={e => up(p.id, 'conditionnement_qte', e.target.value)} placeholder="ex : 12" style={{ width: 70 }} /> },
+      { key: 'prix_achat_gros', header: 'Prix du gros', align: 'right', render: p => <Input size="sm" numeric value={p.prix_achat_gros ?? ''} onChange={e => up(p.id, 'prix_achat_gros', e.target.value)} placeholder="carton" style={{ width: 90 }} /> },
     ] : []),
-    { key: 'prix_achat', header: 'Prix achat', align: 'right', render: p => <Input size="sm" numeric value={p.prix_achat ?? ''} onChange={e => up(p.id, 'prix_achat', e.target.value)} style={{ width: 90 }} /> },
+    { key: 'prix_achat', header: 'Prix achat (unité)', align: 'right', render: p => <Input size="sm" numeric value={p.prix_achat ?? ''} onChange={e => up(p.id, 'prix_achat', e.target.value)} style={{ width: 90 }} /> },
     { key: 'prix_vente', header: 'Prix vente', align: 'right', render: p => <Input size="sm" numeric value={p.prix_vente ?? ''} onChange={e => up(p.id, 'prix_vente', e.target.value)} style={{ width: 90 }} /> },
     { key: 'seuil', header: 'Seuil', align: 'right', render: p => <Input size="sm" numeric value={p.seuil ?? ''} onChange={e => up(p.id, 'seuil', e.target.value)} style={{ width: 70 }} /> },
     { key: 'actif', header: 'Actif', render: p => <Checkbox checked={!!p.actif} onChange={v => up(p.id, 'actif', v)} /> },
