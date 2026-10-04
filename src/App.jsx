@@ -255,7 +255,13 @@ function Suspended() {
 }
 
 function Loading() {
-  return <div className="center" style={{ minHeight: '50dvh' }}>Chargement…</div>
+  return (
+    <div className="pi-loading" style={{ minHeight: '50dvh' }}>
+      <Icon name="fuel" size={32} className="pi-loading-icon" />
+      <div className="pi-loading-bar" />
+      <span>Chargement…</span>
+    </div>
+  )
 }
 
 function AppRoutes() {
