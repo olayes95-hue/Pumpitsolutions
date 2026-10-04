@@ -11,7 +11,7 @@ import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
-import { MultiSelectPopover } from '../ds/pumpit/components/forms/MultiSelectPopover.jsx'
+import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
@@ -20,7 +20,6 @@ import { Kpi } from '../lib/Kpi.jsx'
 const N = (v) => (v ? Number(v) : 0)
 const TOL = 200        // tolérance FCFA (timbre) pour l'appariement
 const WIN = 35         // fenêtre en jours — couvre un versement crédité le mois suivant (retard banque)
-const MONTHS = [['01','Janv'],['02','Févr'],['03','Mars'],['04','Avril'],['05','Mai'],['06','Juin'],['07','Juil'],['08','Août'],['09','Sept'],['10','Oct'],['11','Nov'],['12','Déc']]
 const PAGE_DEFAULT = 25
 
 // Catégories pour lesquelles un rapprochement ligne-à-ligne a un sens — versement_gerant est
@@ -59,12 +58,10 @@ export default function BankRecon() {
   const [importBusy, setImportBusy] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showManual, setShowManual] = useState(false)
-  // Filtre période — plusieurs mois/années possibles, comme Commandes (voir MultiSelectPopover).
+  // Filtre période — un seul sélecteur (PeriodPicker), année(s) + mois ensemble.
   // Par défaut : année + mois en cours (pas "toutes périodes"), pour ouvrir sur les lignes récentes.
   const [years, setYears] = useState([String(today().slice(0, 4))])
   const [months, setMonths] = useState([today().slice(5, 7)])
-  const [yearsOpen, setYearsOpen] = useState(false)
-  const [monthsOpen, setMonthsOpen] = useState(false)
   // Le tableau "Rapprochés" ne s'affiche qu'au clic sur la tuile Kpi correspondante — sinon il
   // prend de la place à chaque chargement alors que c'est le moins souvent consulté des 3.
   const [showMatched, setShowMatched] = useState(false)
@@ -93,7 +90,6 @@ export default function BankRecon() {
   useEffect(() => { load() }, [stationId])
   useEffect(() => { setPageMatched(1); setPageUnBank(1); setPageUnDep(1); setPageFlat(1); setPageDoublons(1); setShowMatched(false) }, [catTab, years, months])
 
-  const toggleVal = (list, setList, v) => setList(list.includes(v) ? list.filter(x => x !== v) : [...list, v])
   const inPeriod = (d) => {
     if (!d) return true
     if (years.length && !years.includes(d.slice(0, 4))) return false
@@ -460,12 +456,7 @@ export default function BankRecon() {
       )}
 
       <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
-        <MultiSelectPopover label="Années" allLabel="Toutes années" options={availableYears.map(y => [y, y])}
-          selected={years} onToggle={v => toggleVal(years, setYears, v)}
-          open={yearsOpen} onToggleOpen={() => { setYearsOpen(v => !v); setMonthsOpen(false) }} />
-        <MultiSelectPopover label="Mois" allLabel="Tous mois" options={MONTHS}
-          selected={months} onToggle={v => toggleVal(months, setMonths, v)}
-          open={monthsOpen} onToggleOpen={() => { setMonthsOpen(v => !v); setYearsOpen(false) }} />
+        <PeriodPicker years={years} months={months} setYears={setYears} setMonths={setMonths} availableYears={availableYears} />
       </div>
 
       {doublons.length > 0 && (

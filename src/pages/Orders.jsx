@@ -16,7 +16,7 @@ import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
-import { MultiSelectPopover } from '../ds/pumpit/components/forms/MultiSelectPopover.jsx'
+import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { Drawer, DrawerRow } from '../ds/pumpit/components/feedback/Drawer.jsx'
 import { IconButton } from '../ds/pumpit/components/core/IconButton.jsx'
@@ -26,7 +26,6 @@ import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 const CATS = [['carburant', 'Carburant'], ['gaz', 'Gaz'], ['lubrifiant', 'Lubrifiant'], ['superette', 'Supérette']]
-const MONTHS = [['01','Janv'],['02','Févr'],['03','Mars'],['04','Avril'],['05','Mai'],['06','Juin'],['07','Juil'],['08','Août'],['09','Sept'],['10','Oct'],['11','Nov'],['12','Déc']]
 // Lignes carburant par défaut (essence + gasoil commandés simultanément).
 const carbRows = () => [{ produit: 'essence', qte: '', bons: '', cheque: '', ref: '' }, { produit: 'gasoil', qte: '', bons: '', cheque: '', ref: '' }]
 const blankNf = () => ({ categorie: 'carburant', mode_paiement: 'cheque', rows: carbRows(), lignes: [{ article: '', qte: '' }], montant_paiement: '', date_proposition: today(), note: '' })
@@ -57,8 +56,6 @@ export default function Orders() {
   const now = new Date()
   const [years, setYears] = useState([String(now.getFullYear())])
   const [months, setMonths] = useState([String(now.getMonth() + 1).padStart(2, '0')])
-  const [yearsOpen, setYearsOpen] = useState(false)
-  const [monthsOpen, setMonthsOpen] = useState(false)
   const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
   const [matinWarn, setMatinWarn] = useState('')
   const [bonsRestant, setBonsRestant] = useState(0)
@@ -337,7 +334,6 @@ export default function Orders() {
     if (months.length && !months.includes(d.slice(5, 7))) return false
     return true
   }
-  const toggleVal = (list, setList, v) => setList(list.includes(v) ? list.filter(x => x !== v) : [...list, v])
   const resetFilters = () => { setYears([]); setMonths([]); setFCat('tous'); setFStatut('tous') }
   const filtersActive = years.length > 0 || months.length > 0 || fCat !== 'tous' || fStatut !== 'tous'
 
@@ -660,12 +656,7 @@ export default function Orders() {
           <div style={{ padding: 'var(--gutter-panel)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
             <div style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>{shown.length} commande(s) · total {fcfa(totalMontant)}</div>
             <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
-              <MultiSelectPopover label="Années" allLabel="Toutes années" options={orderYears.map(y => [y, y])}
-                selected={years} onToggle={v => toggleVal(years, setYears, v)}
-                open={yearsOpen} onToggleOpen={() => { setYearsOpen(v => !v); setMonthsOpen(false) }} />
-              <MultiSelectPopover label="Mois" allLabel="Tous mois" options={MONTHS}
-                selected={months} onToggle={v => toggleVal(months, setMonths, v)}
-                open={monthsOpen} onToggleOpen={() => { setMonthsOpen(v => !v); setYearsOpen(false) }} />
+              <PeriodPicker years={years} months={months} setYears={setYears} setMonths={setMonths} availableYears={orderYears} />
               <Select size="sm" value={fCat} onChange={e => setFCat(e.target.value)}
                 options={[{ value: 'tous', label: 'Toutes catégories' }, ...cats.map(([k, l]) => ({ value: k, label: l }))]} />
               <Select size="sm" value={fStatut} onChange={e => setFStatut(e.target.value)}
