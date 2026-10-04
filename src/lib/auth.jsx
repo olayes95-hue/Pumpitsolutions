@@ -73,7 +73,13 @@ export function AuthProvider({ children }) {
       await loadProfile(data.session?.user?.id)
       setLoading(false)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
+    // Callback SYNCHRONE, sans await direct : le SDK Supabase invoque onAuthStateChange depuis
+    // l'intérieur de son verrou interne (rafraîchissement de jeton) — y attendre un appel réseau
+    // (même un simple .from().select()) peut geler tout appel Supabase concurrent le temps que
+    // la promesse se résolve (deadlock documenté, cf. checklist Go-Live A1 et le commentaire sur
+    // le verrou dans lib/supabase.js). Le travail réseau (loadProfile) est repoussé hors du tick
+    // courant via setTimeout, après que le SDK a relâché son verrou.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       // Silencieux dès que c'est TOUJOURS la même personne connectée qu'avant — peu importe le
       // nom exact de l'événement (TOKEN_REFRESHED, ou même SIGNED_IN si le SDK resynchronise la
       // session depuis le stockage au retour sur l'onglet après une mise en arrière-plan) : ce
@@ -84,9 +90,9 @@ export function AuthProvider({ children }) {
       const silent = !!newUserId && newUserId === lastUserIdRef.current
       lastUserIdRef.current = newUserId
       setSession(s)
-      await loadProfile(newUserId, { silent })
       if (event === 'SIGNED_IN') localStorage.setItem(SIGNIN_KEY, String(Date.now()))
       if (event === 'SIGNED_OUT') localStorage.removeItem(SIGNIN_KEY)
+      setTimeout(() => { loadProfile(newUserId, { silent }) }, 0)
     })
     return () => { clearTimeout(timeout); sub.subscription.unsubscribe() }
   }, [])
