@@ -52,7 +52,10 @@
 --bg-void:#FFFFFF;
 --bg-canvas:var(--brume);
 --surface-panel:#FFFFFF;
---surface-raised:var(--brume);
+/* Distinct du fond de page (--bg-canvas) : sinon un bloc "raised" posé à l'intérieur d'un
+   Panel blanc a exactement la couleur de la page derrière, et ressemble à un trou découpé
+   dans la carte plutôt qu'à une zone en relief à l'intérieur. */
+--surface-raised:#EDF1EE;
 --surface-sunken:var(--gris-fond);
 --surface-field:#FFFFFF;
 --surface-row-hover:var(--brume);
@@ -167,6 +170,10 @@
 
 --shadow-pop:0 20px 50px -20px rgba(11,31,23,.28);
 --lift:var(--shadow-pop);
+/* Élévation discrète d'un Panel par rapport au fond de page — sans elle, une carte blanche
+   posée sur un fond quasi-identique (--bg-canvas) n'a aucune séparation visuelle autre que
+   la couleur, et la page paraît découpée en rectangles plutôt que continue. */
+--shadow-panel:0 1px 2px rgba(11,31,23,.04),0 6px 16px -4px rgba(11,31,23,.06);
 --focus-ring:0 0 0 3px rgba(0,194,106,.32);
 --well:none;
 --edge-top:none;

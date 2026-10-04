@@ -5,7 +5,7 @@ const DOT={none:null,ok:'var(--state-ok-fill)',warn:'var(--state-warn-fill)',ala
 export function Panel({title,meta,actions,children,status='none',flush,scroll,style,bodyStyle,sectionRef,...rest}){
   const dot=DOT[status];
   return <section ref={sectionRef} style={{display:'flex',flexDirection:'column',minHeight:0,minWidth:0,background:'var(--surface-panel)',borderRadius:'var(--radius-card)',
-      overflow:flush?'hidden':'visible',...style}} {...rest}>
+      boxShadow:'var(--shadow-panel)',overflow:flush?'hidden':'visible',...style}} {...rest}>
     {(title||actions)&&<header style={{display:'flex',alignItems:'center',flexWrap:'wrap',gap:'var(--sp-3)',flex:'0 0 auto',padding:'var(--gutter-panel) var(--gutter-panel) 0',
       paddingBottom:flush?'var(--sp-4)':0}}>
       {dot&&<span aria-hidden="true" style={{width:10,height:10,borderRadius:'var(--radius-full)',background:dot,flex:'0 0 auto'}}/>}
