@@ -106,31 +106,29 @@ export default function Stock() {
     e.preventDefault(); setErr('')
     if (action === 'correction' && !nm.note.trim()) { setErr("Motif obligatoire pour une correction d'inventaire."); return }
     const row = { station_id: stationId, categorie: nm.categorie, type: nm.type, source: nm.source || null, note: nm.note || null, date_mouvement: nm.date_mouvement, created_by: session.user.id }
-    if (nm.categorie === 'superette') {
-      if (!nm.valeur) { setErr('Renseignez le montant (F).'); return }
-      row.valeur = numFR(nm.valeur)
+    if (!nm.produit) { setErr('Choisissez un produit.'); return }
+    const pr = products.find(p => p.categorie === nm.categorie && p.nom === nm.produit)
+    const hasCondit = pr && N(pr.conditionnement_qte) > 0
+    row.produit = nm.produit
+    if (hasCondit) {
+      const cartons = N(nm.qteCartons), unites = N(nm.qteUnites)
+      const total = cartons * N(pr.conditionnement_qte) + unites
+      if (!total) { setErr('Renseignez une quantité.'); return }
+      row.quantite = total
+      row.facteur_conversion = N(pr.conditionnement_qte)
+      if (cartons && unites) {
+        row.unite_saisie = 'mixte'; row.qte_saisie = total
+        row.detail_saisie = `${cartons} ${pr.conditionnement_nom || 'carton'}${cartons > 1 ? 's' : ''} + ${unites} ${pr.unite || 'unité'}${unites > 1 ? 's' : ''}`
+      } else if (cartons) { row.unite_saisie = pr.conditionnement_nom || 'carton'; row.qte_saisie = cartons }
+      else { row.unite_saisie = pr.unite || 'unite'; row.qte_saisie = unites }
     } else {
-      if (!nm.produit) { setErr('Choisissez un produit.'); return }
-      const pr = products.find(p => p.categorie === nm.categorie && p.nom === nm.produit)
-      const hasCondit = pr && N(pr.conditionnement_qte) > 0
-      row.produit = nm.produit
-      if (hasCondit) {
-        const cartons = N(nm.qteCartons), unites = N(nm.qteUnites)
-        const total = cartons * N(pr.conditionnement_qte) + unites
-        if (!total) { setErr('Renseignez une quantité.'); return }
-        row.quantite = total
-        row.facteur_conversion = N(pr.conditionnement_qte)
-        if (cartons && unites) {
-          row.unite_saisie = 'mixte'; row.qte_saisie = total
-          row.detail_saisie = `${cartons} ${pr.conditionnement_nom || 'carton'}${cartons > 1 ? 's' : ''} + ${unites} ${pr.unite || 'unité'}${unites > 1 ? 's' : ''}`
-        } else if (cartons) { row.unite_saisie = pr.conditionnement_nom || 'carton'; row.qte_saisie = cartons }
-        else { row.unite_saisie = pr.unite || 'unite'; row.qte_saisie = unites }
-      } else {
-        if (!nm.quantite) { setErr('Renseignez une quantité.'); return }
-        row.quantite = numFR(nm.quantite)
-        row.unite_saisie = pr?.unite || 'unite'; row.qte_saisie = row.quantite
-      }
+      if (!nm.quantite) { setErr('Renseignez une quantité.'); return }
+      row.quantite = numFR(nm.quantite)
+      row.unite_saisie = pr?.unite || 'unite'; row.qte_saisie = row.quantite
     }
+    // Supérette : suivie en valeur en plus de la quantité (valorisation existante, v_stock_valeur) —
+    // le montant se déduit du prix catalogue plutôt que d'être tapé à la main.
+    if (nm.categorie === 'superette') row.valeur = row.quantite * N(pr?.prix_achat)
     const { error } = await supabase.from('stock_movements').insert(row)
     if (error) setErr(error.message)
     else {
@@ -148,8 +146,7 @@ export default function Stock() {
   const premiereCat = cats[0]?.[0]
   useEffect(() => { if (premiereCat && !cats.some(([k]) => k === catTab)) setCatTab(premiereCat) }, [premiereCat, catTab])
 
-  // Produits sous seuil, toutes catégories comptées confondues (gaz + lubrifiant) — la
-  // supérette est suivie en valeur, pas en quantité par produit, donc pas de seuil ici.
+  // Produits sous seuil, toutes catégories confondues (gaz, lubrifiant, supérette).
   const lowStockItems = useMemo(() => stock
     .map(s => ({ ...s, pr: products.find(p => p.categorie === s.categorie && p.nom === s.produit) }))
     .filter(s => s.pr && N(s.stock) < N(s.pr.seuil)), [stock, products])
@@ -268,7 +265,7 @@ export default function Stock() {
               {{
                 entree: 'Livraison reçue — indique ce qui est entré en stock.',
                 sortie: 'Choisissez la raison : le sens (+/-) est appliqué automatiquement.',
-                ajustement: "Correction d'inventaire — indique la quantité (ou le montant) réellement constaté.",
+                ajustement: "Correction d'inventaire — indique l'écart constaté (positif si trouvé en plus, négatif si manquant).",
                 correction: "Dernier recours si l'écart ne s'explique par aucun mouvement normal — motif obligatoire, mouvement identifié distinctement.",
               }[action]}
             </AlertBanner>
@@ -285,51 +282,40 @@ export default function Stock() {
                 }} options={AUTRE_MOUVEMENT_SOURCES.map(s => ({ value: s.source, label: STOCK_SOURCE_TONES[s.source]?.label || s.source }))} style={{ width: '100%' }} />
               </Field>
             )}
-            {nm.categorie === 'superette' ? (
-              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label={`Montant (F)${action === 'ajustement' ? ' — stock réel' : ''}`} style={{ flex: '1 1 180px' }}>
-                  <Input type="text" inputMode="decimal" numeric autoFocus value={nm.valeur} onChange={e => setNm({ ...nm, valeur: e.target.value })} />
-                </Field>
-                <Field label="Date" style={{ flex: '1 1 160px' }}>
-                  <Input type="date" value={nm.date_mouvement} max={today()} onChange={e => setNm({ ...nm, date_mouvement: e.target.value })} />
-                </Field>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label="Produit" style={{ flex: '2 1 200px' }}>
-                  <Select value={nm.produit} onChange={e => setNm({ ...nm, produit: e.target.value, quantite: '', qteCartons: '', qteUnites: '' })}
-                    options={[{ value: '', label: '— choisir —' }, ...products.filter(p => p.categorie === nm.categorie).map(p => ({ value: p.nom, label: p.nom }))]} style={{ width: '100%' }} />
-                </Field>
-                {(() => {
-                  const pr = products.find(p => p.categorie === nm.categorie && p.nom === nm.produit)
-                  const hasCondit = pr && N(pr.conditionnement_qte) > 0
-                  if (!hasCondit) {
-                    return (
-                      <Field label={`Quantité${action === 'ajustement' ? ' (écart)' : ''}`} style={{ flex: '1 1 140px' }}>
-                        <Input type="text" inputMode="decimal" numeric value={nm.quantite} onChange={e => setNm({ ...nm, quantite: e.target.value })} />
-                      </Field>
-                    )
-                  }
-                  const total = N(nm.qteCartons) * N(pr.conditionnement_qte) + N(nm.qteUnites)
+            <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+              <Field label="Produit" style={{ flex: '2 1 200px' }}>
+                <Select value={nm.produit} onChange={e => setNm({ ...nm, produit: e.target.value, quantite: '', qteCartons: '', qteUnites: '' })}
+                  options={[{ value: '', label: '— choisir —' }, ...products.filter(p => p.categorie === nm.categorie).map(p => ({ value: p.nom, label: p.nom }))]} style={{ width: '100%' }} />
+              </Field>
+              {(() => {
+                const pr = products.find(p => p.categorie === nm.categorie && p.nom === nm.produit)
+                const hasCondit = pr && N(pr.conditionnement_qte) > 0
+                if (!hasCondit) {
                   return (
-                    <>
-                      <Field label={`Nb. ${pr.conditionnement_nom || 'carton'}s`} style={{ flex: '1 1 120px' }}>
-                        <Input type="text" inputMode="decimal" numeric value={nm.qteCartons} onChange={e => setNm({ ...nm, qteCartons: e.target.value })} />
-                      </Field>
-                      <Field label={`Nb. ${pr.unite || 'unité'}s`} style={{ flex: '1 1 120px' }}>
-                        <Input type="text" inputMode="decimal" numeric value={nm.qteUnites} onChange={e => setNm({ ...nm, qteUnites: e.target.value })} />
-                      </Field>
-                      <div style={{ flex: '1 1 140px', display: 'flex', alignItems: 'flex-end', paddingBottom: 6 }}>
-                        <Tag>= {total} {pr.unite || 'unité'}{total > 1 ? 's' : ''}</Tag>
-                      </div>
-                    </>
+                    <Field label={`Quantité${action === 'ajustement' ? ' (écart)' : ''}`} style={{ flex: '1 1 140px' }}>
+                      <Input type="text" inputMode="decimal" numeric value={nm.quantite} onChange={e => setNm({ ...nm, quantite: e.target.value })} />
+                    </Field>
                   )
-                })()}
-                <Field label="Date" style={{ flex: '1 1 160px' }}>
-                  <Input type="date" value={nm.date_mouvement} max={today()} onChange={e => setNm({ ...nm, date_mouvement: e.target.value })} />
-                </Field>
-              </div>
-            )}
+                }
+                const total = N(nm.qteCartons) * N(pr.conditionnement_qte) + N(nm.qteUnites)
+                return (
+                  <>
+                    <Field label={`Nb. ${pr.conditionnement_nom || 'carton'}s`} style={{ flex: '1 1 120px' }}>
+                      <Input type="text" inputMode="decimal" numeric value={nm.qteCartons} onChange={e => setNm({ ...nm, qteCartons: e.target.value })} />
+                    </Field>
+                    <Field label={`Nb. ${pr.unite || 'unité'}s`} style={{ flex: '1 1 120px' }}>
+                      <Input type="text" inputMode="decimal" numeric value={nm.qteUnites} onChange={e => setNm({ ...nm, qteUnites: e.target.value })} />
+                    </Field>
+                    <div style={{ flex: '1 1 140px', display: 'flex', alignItems: 'flex-end', paddingBottom: 6 }}>
+                      <Tag>= {total} {pr.unite || 'unité'}{total > 1 ? 's' : ''}</Tag>
+                    </div>
+                  </>
+                )
+              })()}
+              <Field label="Date" style={{ flex: '1 1 160px' }}>
+                <Input type="date" value={nm.date_mouvement} max={today()} onChange={e => setNm({ ...nm, date_mouvement: e.target.value })} />
+              </Field>
+            </div>
             <Field label={action === 'correction' ? 'Motif (obligatoire)' : 'Note (facultatif)'}>
               <Input value={nm.note} onChange={e => setNm({ ...nm, note: e.target.value })} placeholder={action === 'entree' ? 'ex. bon de livraison n°…' : action === 'correction' ? "ex. écart d'inventaire du 18/08/2026" : 'ex. casse, écart constaté…'} />
             </Field>
@@ -379,17 +365,19 @@ export default function Stock() {
             <Tabs items={cats.map(([value, label]) => ({ value, label }))} value={catTab} onChange={setCatTab} />
             <div style={{ padding: 'var(--gutter-panel)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
 
-              {catTab !== 'superette' ? (
-                <div>
-                  <SectionLabel>Stock restant</SectionLabel>
-                  <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
-                    Ce qu'il reste, d'après le <b>dernier comptage déclaré dans la Saisie du jour</b>. Ici, vous n'ajoutez que les <b>entrées</b> (livraisons) — les sorties/ventes sont calculées toutes seules.
-                  </p>
-                  {(stockByCat[catTab] || []).length
-                    ? <DataTable columns={productColumns(catTab)} rows={(stockByCat[catTab] || []).map(s => ({ ...s, id: s.produit }))} />
-                    : <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Aucun comptage encore.</p>}
-                </div>
-              ) : isAdmin && (
+              <div>
+                <SectionLabel>Stock restant</SectionLabel>
+                <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
+                  {catTab !== 'superette'
+                    ? <>Ce qu'il reste, d'après le <b>dernier comptage déclaré dans la Saisie du jour</b>. Ici, vous n'ajoutez que les <b>entrées</b> (livraisons) — les sorties/ventes sont calculées toutes seules.</>
+                    : <>Ce qu'il reste, calculé depuis les livraisons, sorties et corrections enregistrées ici — pas de déclaration quotidienne à faire, contrairement au gaz et au lubrifiant.</>}
+                </p>
+                {(stockByCat[catTab] || []).length
+                  ? <DataTable columns={productColumns(catTab)} rows={(stockByCat[catTab] || []).map(s => ({ ...s, id: s.produit }))} />
+                  : <p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>{catTab !== 'superette' ? 'Aucun comptage encore.' : 'Aucun mouvement encore.'}</p>}
+              </div>
+
+              {catTab === 'superette' && isAdmin && (
                 <div>
                   <SectionLabel>Valorisation</SectionLabel>
                   <Kpi label="Valeur stock supérette" value={fcfa(N(valeurCat?.valeur))} />
