@@ -8,3 +8,8 @@ dist
 !.env.example
 __pycache__/
 *.pyc
+
+# Secrets locaux (jamais commités) — jetons staging, mots de passe DB
+.secrets/
+
+supabase/.temp/
