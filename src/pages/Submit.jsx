@@ -367,6 +367,10 @@ export default function Submit() {
     const cat = expCats.find(c => c.key === categorie)
     return cat ? cat.non_cash : (categorie || '').toUpperCase() === 'CARBURANT'
   }
+  // Pôle pré-sélectionné à l'ajout d'une ligne de dépense — reproduit le comportement implicite
+  // d'avant (toute dépense cash supposée carburant, sauf SUPERETTE) pour que le cas courant
+  // (1 seul pôle) ne coûte aucun clic supplémentaire ; le gérant peut toujours changer.
+  const defaultPoleForCategorie = (categorie) => (categorie || '').toUpperCase() === 'SUPERETTE' ? 'superette' : 'carburant'
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   // valeur brute pendant la frappe, reformatée avec séparateurs de milliers à la sortie du champ
   const numProps = (k) => ({ value: f[k], onChange: e => set(k, e.target.value), onBlur: () => set(k, formatThousands(f[k])) })
@@ -508,6 +512,13 @@ export default function Submit() {
       if (expenses.some(e => N(e.montant) > 0 && !nonCashCat(e.categorie) && !e.photo_path)) {
         fail('Photo obligatoire : ajoutez le justificatif de chaque dépense avant d\'envoyer.', 'expenses', expensesRef); return
       }
+      if (expenses.some(e => N(e.montant) > 0 && !nonCashCat(e.categorie) && !(e.poles || []).length)) {
+        fail('Choisissez au moins un pôle (carburant, gaz…) pour chaque dépense en espèces.', 'expenses', expensesRef); return
+      }
+      if (expenses.some(e => N(e.montant) > 0 && !nonCashCat(e.categorie) && (e.poles || []).length > 1
+          && Math.abs(e.poles.reduce((s, po) => s + N(po.montant), 0) - N(e.montant)) > 1)) {
+        fail('La répartition par pôle ne correspond pas au montant total de la dépense.', 'expenses', expensesRef); return
+      }
       if (deposits.some(d => N(d.montant) > 0 && !d.photo_path)) {
         fail('Photo obligatoire : ajoutez la photo du bordereau pour chaque versement avant d\'envoyer.', 'deposits', depositsRef); return
       }
@@ -597,9 +608,15 @@ export default function Submit() {
 
       const exRows = expenses.filter(e => N(e.montant) > 0).map(e => {
         const isCarb = nonCashCat(e.categorie)
+        // Pôle(s) : non-cash (prélèvement propriétaire) n'en a jamais — ne sort d'aucune caisse
+        // réelle. 1 seul pôle sélectionné -> son montant est implicite (= le montant total de
+        // la ligne, pas besoin de le ressaisir). Plusieurs -> montants déjà saisis par pôle.
+        const poles = isCarb ? [] : (e.poles || []).length === 1
+          ? [{ pole: e.poles[0].pole, montant: numFR(e.montant) }]
+          : (e.poles || []).filter(po => N(po.montant) > 0).map(po => ({ pole: po.pole, montant: numFR(po.montant) }))
         return { categorie: e.categorie || 'AUTRE', montant: numFR(e.montant),
           motif: e.motif || (isCarb ? 'Carburant / déplacement propriétaire' : null),
-          photo_path: e.photo_path || null, non_cash: isCarb }
+          photo_path: e.photo_path || null, non_cash: isCarb, poles }
       })
 
       const lvRows = deliveries.filter(d => N(d.quantite) > 0 || N(d.montant) > 0).map(d => ({
@@ -721,6 +738,16 @@ export default function Submit() {
     activite('gaz') && activite('lubrifiant') && { value: 'gaz_lubrifiant', label: 'Gaz + Lubrifiant' },
     activite('gaz') && { value: 'gaz', label: 'Gaz seul' },
     activite('lubrifiant') && { value: 'lubrifiant', label: 'Lubrifiant seul' },
+    activite('superette') && { value: 'superette', label: 'Supérette' },
+  ].filter(Boolean)
+  // Portefeuille(s) d'où sort une dépense cash — checkboxes (pas de fusion gaz+lubrifiant comme
+  // pour les versements) : une dépense peut sortir d'1 à 4 caisses à la fois (ex. facture
+  // téléphone partagée carburant + supérette), chacune avec son propre montant si plusieurs
+  // sont cochées. Mêmes valeurs que deposits.pole, même filtrage par offre active.
+  const EXPENSE_POLES = [
+    { value: 'carburant', label: 'Carburant' },
+    activite('gaz') && { value: 'gaz', label: 'Gaz' },
+    activite('lubrifiant') && { value: 'lubrifiant', label: 'Lubrifiant' },
     activite('superette') && { value: 'superette', label: 'Supérette' },
   ].filter(Boolean)
 
@@ -1070,7 +1097,13 @@ export default function Submit() {
                 <div key={i} style={{ padding: 'var(--sp-4)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
                   <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
                     <Field label="Type" style={{ flex: '1 1 200px' }}>
-                      <Select value={e.categorie || expCats[0]?.key || 'SBEE'} onChange={ev => upd(setExpenses, i, 'categorie', ev.target.value)} style={{ width: '100%' }}
+                      <Select value={e.categorie || expCats[0]?.key || 'SBEE'} onChange={ev => setExpenses(prev => prev.map((x, j) => j !== i ? x : {
+                        ...x, categorie: ev.target.value,
+                        // Re-pré-sélectionne le pôle par défaut uniquement si le gérant n'a pas
+                        // encore touché la sélection (1 seul pôle, celui proposé par défaut) —
+                        // ne jamais écraser un choix déjà fait manuellement.
+                        poles: (!x.poles || x.poles.length <= 1) ? [{ pole: defaultPoleForCategorie(ev.target.value) }] : x.poles,
+                      }))} style={{ width: '100%' }}
                         options={expCats.map(c => ({ value: c.key, label: c.label }))} />
                     </Field>
                     <Field label="Montant" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric value={e.montant || ''} onChange={ev => upd(setExpenses, i, 'montant', ev.target.value)} /></Field>
@@ -1081,6 +1114,35 @@ export default function Submit() {
                       ? <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Prélèvement carburant du propriétaire : <b>charge non-cash</b> (aucun paiement en espèces). Pas de reçu requis ; remonte chaque mois au Point financier sous « Carburant / déplacement (auto) » et n'est pas décompté du cash à verser.</p>
                       : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}><b>Charge non-cash</b> (aucun paiement en espèces) — pas de justificatif requis.</p>
                   ) : (<>
+                    <Field label="Pôle(s) payé(s) depuis la caisse de…">
+                      <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+                        {EXPENSE_POLES.map(po => (
+                          <Checkbox key={po.value} label={po.label}
+                            checked={(e.poles || []).some(x => x.pole === po.value)}
+                            onChange={checked => setExpenses(prev => prev.map((x, j) => j !== i ? x : {
+                              ...x,
+                              poles: checked
+                                ? [...(x.poles || []), { pole: po.value, montant: '' }]
+                                : (x.poles || []).filter(y => y.pole !== po.value),
+                            }))} />
+                        ))}
+                      </div>
+                    </Field>
+                    {(e.poles || []).length > 1 && (
+                      <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                        {e.poles.map((po, pi) => (
+                          <Field key={po.pole} label={`Montant — ${EXPENSE_POLES.find(x => x.value === po.pole)?.label}`} style={{ flex: '1 1 140px' }}>
+                            <Input type="text" inputMode="decimal" numeric value={po.montant || ''}
+                              onChange={ev => setExpenses(prev => prev.map((x, j) => j !== i ? x : {
+                                ...x, poles: x.poles.map((y, yi) => yi !== pi ? y : { ...y, montant: ev.target.value }),
+                              }))} />
+                          </Field>
+                        ))}
+                        <p style={{ font: '400 13px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 var(--sp-2)' }}>
+                          Reste à répartir : {fcfa(N(e.montant) - e.poles.reduce((s, po) => s + N(po.montant), 0))}
+                        </p>
+                      </div>
+                    )}
                     <Field label="Photo du justificatif (recommandée)">
                       <Input type="file" accept="image/*" disabled={!!expPhotoBusy[i]}
                         onChange={ev => { const file = ev.target.files[0]; ev.target.value = ''; if (file) handleExpensePhoto(i, file) }} />
@@ -1097,7 +1159,10 @@ export default function Submit() {
                 </div>
               ))}
             </div>
-            <Button onClick={() => setExpenses(p => [...p, { categorie: expCats[0]?.key || 'SBEE', montant: '' }])} style={{ marginTop: 'var(--sp-4)' }}>+ Ajouter une dépense</Button>
+            <Button onClick={() => {
+              const cat = expCats[0]?.key || 'SBEE'
+              setExpenses(p => [...p, { categorie: cat, montant: '', poles: [{ pole: defaultPoleForCategorie(cat) }] }])
+            }} style={{ marginTop: 'var(--sp-4)' }}>+ Ajouter une dépense</Button>
           </>}
         </Panel>
 
