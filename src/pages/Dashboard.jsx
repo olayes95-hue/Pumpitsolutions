@@ -180,31 +180,26 @@ export default function Dashboard() {
 
   // Manque à verser par pôle (bâtons) — même calcul que le Journal de bord du gérant, attribué
   // période par période via v_pole_recon_jour (pas de simple découpage calendaire) : un jour qui
-  // clôture une période compte le cumul réel de CETTE période (recette_cloture − verse, quelle
-  // que soit sa durée, même à cheval sur deux mois) ; un jour encore couvert par une période en
-  // cours ne compte rien (résolu à la clôture) ; un jour non couvert par aucune période compte sa
-  // recette brute. Sans ça, un versement à cheval sur deux mois comptait son montant entier dans
-  // le mois de clôture alors que la recette qu'il couvre restait pour partie dans l'autre mois.
+  // clôture une période compte le cumul réel NET de CETTE période (g.ecart = recette − dépense −
+  // verse, quelle que soit sa durée, même à cheval sur deux mois) ; un jour encore couvert par une
+  // période en cours ne compte rien (résolu à la clôture) ; un jour non couvert par aucune période
+  // compte sa recette nette de ses propres dépenses cash du jour (g.espece − g.depense). Avant, ce
+  // calcul resommait en plus toutes les dépenses SBEE/AUTRE du mois calendaire et les déduisait une
+  // seconde fois du carburant — déduction en double pour celles déjà couvertes par une période
+  // close (g.ecart les a déjà nettées), et déduction à tort pour celles tombées un jour non couvert
+  // par aucune période. Constaté en prod (Beaurivage, sept. 2026) : −100 000 F affiché au lieu de
+  // 0 F sur le carburant à cause d'une 3ᵉ facture SBEE hors de toute période close.
   const manquePole = (() => {
     const manqueByPole = { carburant: 0, gaz_lub: 0, superette: 0 }
     for (const g of polePeriod.recon) {
       if (!(g.pole_groupe in manqueByPole)) continue
-      if (N(g.nb_cloture) > 0 && g.recette_cloture != null) manqueByPole[g.pole_groupe] += N(g.recette_cloture) - N(g.verse)
-      else if (!g.couvert) manqueByPole[g.pole_groupe] += N(g.espece)
-    }
-    // SBEE/AUTRE sont payées en pratique depuis la caisse carburant (c'est elle qui encaisse le
-    // plus de cash au quotidien) — les déduire du bâton Carburant, sinon il affiche un manque qui
-    // ignore une charge réellement sortie de cette caisse.
-    let depSuperette = 0, depGeneral = 0
-    for (const e of polePeriod.exp) {
-      if (e.non_cash) continue
-      if (e.categorie === 'SUPERETTE') depSuperette += N(e.montant)
-      else if (e.categorie !== 'CARBURANT') depGeneral += N(e.montant)
+      if (N(g.nb_cloture) > 0) manqueByPole[g.pole_groupe] += N(g.ecart)
+      else if (!g.couvert) manqueByPole[g.pole_groupe] += N(g.espece) - N(g.depense)
     }
     return [
-      { name: 'Carburant', value: manqueByPole.carburant - depGeneral },
+      { name: 'Carburant', value: manqueByPole.carburant },
       { name: 'Gaz + Lubrifiant', value: manqueByPole.gaz_lub },
-      { name: 'Supérette', value: manqueByPole.superette - depSuperette },
+      { name: 'Supérette', value: manqueByPole.superette },
     ]
   })()
   // "Cash non tracé" doit être la MÊME notion que "Manque à verser par pôle" juste en dessous —
