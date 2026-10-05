@@ -371,8 +371,11 @@ function poleState(g, espece) {
 function caCell(g, dayVal) {
   return fcfa(dayVal)
 }
+// 0 F explicite plutôt qu'un tiret quand rien n'a été versé ce jour-là — un tiret se lit comme
+// "pas concerné" et peut passer inaperçu à côté d'une colonne CA non nulle ; un "0 F" bien visible
+// ne laisse aucune ambiguïté sur le fait qu'aucun versement n'a encore été fait.
 function verseCell(g) {
-  return g && N(g.verse) ? fcfa(g.verse) : '—'
+  return fcfa(N(g?.verse))
 }
 // dayVal (la même valeur que celle passée à caCell pour la colonne CA/Espèce voisine) sert de
 // filet : si la caisse déclarée du jour est non nulle, le jour est "en attente" même si g.espece
@@ -396,7 +399,7 @@ function ecartCell(g, dayVal) {
 function caVal(g, dayVal) {
   return Math.round(N(dayVal))
 }
-function verseVal(g) { return g && N(g.verse) ? Math.round(N(g.verse)) : '' }
+function verseVal(g) { return Math.round(N(g?.verse)) }
 function ecartVal(g, dayVal) {
   if (!g) return N(dayVal) > 0 ? 'en attente' : ''
   if (N(g.nb_cloture) > 0) return Math.round(N(g.ecart))
