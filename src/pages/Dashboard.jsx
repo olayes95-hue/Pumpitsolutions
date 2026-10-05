@@ -36,13 +36,6 @@ function periodBounds(year, month) {
   // graphiques par pôle...) dès qu'un mois de moins de 31 jours était sélectionné.
   return { from: `${year}-${month}-01`, to: lastDayOfMonth(`${year}-${month}`) }
 }
-// Bornes "mois" (YYYY-MM, pas de jour) pour interroger v_pole_mois_calendaire, qui est déjà
-// agrégée au mois — distinct de periodBounds (jour par jour) utilisé par les autres requêtes.
-function moisBounds(year, month) {
-  if (year === 'all') return { fromMois: '2000-01', toMois: '2100-12' }
-  if (month === 'all') return { fromMois: `${year}-01`, toMois: `${year}-12` }
-  return { fromMois: `${year}-${month}`, toMois: `${year}-${month}` }
-}
 
 export default function Dashboard() {
   const { stationId } = useStation()
@@ -116,14 +109,12 @@ export default function Dashboard() {
   useEffect(() => {
     if (!stationId) return
     const { from, to } = periodBounds(year, month)
-    const { fromMois, toMois } = moisBounds(year, month)
     ;(async () => {
       const [dr, recon, exp, sup, lub] = await Promise.all([
         supabase.from('daily_reports').select('ess_litres,ess_pu,gas_litres,gas_pu,gaz_vendu_3,gaz_vendu_6,gaz_vendu_12,gaz_vendu_38').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
-        // Manque à verser par pôle : CALENDAIRE (v_pole_mois_calendaire, migration_v126), pas
-        // le système par période utilisé par Historique/Alertes — voir le commentaire détaillé
-        // sur manquePole plus bas.
-        supabase.from('v_pole_mois_calendaire').select('*').eq('station_id', stationId).gte('mois', fromMois).lte('mois', toMois),
+        // 3 lignes/jour (une par pôle) : sur "Toutes années", sans tri+limite explicites, la
+        // limite par défaut de l'API (1000 lignes) tronque arbitrairement (cf. bug Historique).
+        supabase.from('v_pole_recon_jour').select('*').eq('station_id', stationId).gte('report_date', from).lte('report_date', to).order('report_date', { ascending: false }).limit(5000),
         supabase.from('expenses').select('categorie,montant,non_cash').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
         supabase.from('superette_sales').select('nom,montant,quantite').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
         supabase.from('v_sorties_deduites').select('produit,sortie_deduite').eq('station_id', stationId).eq('categorie', 'lubrifiant').gte('report_date', from).lte('report_date', to),
@@ -187,25 +178,33 @@ export default function Dashboard() {
   const pctEsp = caTotal ? Math.round(100 * totCash / caTotal) : null
   const totDep = sum('total_depense'), totMarge = sum('commission_carburant'), totLivr = sum('total_livraisons')
 
-  // Manque à verser par pôle (bâtons) — même calcul que le Journal de bord du gérant : CALENDAIRE
-  // (v_pole_mois_calendaire, migration_v126), pas le système par période utilisé par
-  // Historique/Alertes (v_pole_recon_jour/v_verse_recon, inchangés). Demande explicite : toute
-  // charge déclarée un mois donné doit réduire le manque à verser DE CE MOIS, même si aucun
-  // bordereau ne s'est encore clôturé pour la couvrir — un pôle peut donc afficher une valeur
-  // négative un mois donné (ex. −100 000 F) sans que ce soit un bug : ça signifie que la caisse
-  // de ce pôle s'est vidée de plus que ce que les ventes moins les versements DE CE MOIS
-  // expliquent (charge payée depuis du cash accumulé un mois précédent). Conséquence assumée :
-  // Historique/Alertes peuvent désormais afficher un montant différent pour le même mois —
-  // volontaire, documenté (voir migration_v126).
+  // Manque à verser par pôle (bâtons) — même calcul que le Journal de bord du gérant, attribué
+  // période par période via v_pole_recon_jour (pas de simple découpage calendaire) : un jour qui
+  // clôture une période compte le cumul réel de CETTE période (recette_cloture − verse, quelle
+  // que soit sa durée, même à cheval sur deux mois) ; un jour encore couvert par une période en
+  // cours ne compte rien (résolu à la clôture) ; un jour non couvert par aucune période compte sa
+  // recette brute. Sans ça, un versement à cheval sur deux mois comptait son montant entier dans
+  // le mois de clôture alors que la recette qu'il couvre restait pour partie dans l'autre mois.
   const manquePole = (() => {
     const manqueByPole = { carburant: 0, gaz_lub: 0, superette: 0 }
     for (const g of polePeriod.recon) {
-      if (g.pole_groupe in manqueByPole) manqueByPole[g.pole_groupe] += N(g.solde)
+      if (!(g.pole_groupe in manqueByPole)) continue
+      if (N(g.nb_cloture) > 0 && g.recette_cloture != null) manqueByPole[g.pole_groupe] += N(g.recette_cloture) - N(g.verse)
+      else if (!g.couvert) manqueByPole[g.pole_groupe] += N(g.espece)
+    }
+    // SBEE/AUTRE sont payées en pratique depuis la caisse carburant (c'est elle qui encaisse le
+    // plus de cash au quotidien) — les déduire du bâton Carburant, sinon il affiche un manque qui
+    // ignore une charge réellement sortie de cette caisse.
+    let depSuperette = 0, depGeneral = 0
+    for (const e of polePeriod.exp) {
+      if (e.non_cash) continue
+      if (e.categorie === 'SUPERETTE') depSuperette += N(e.montant)
+      else if (e.categorie !== 'CARBURANT') depGeneral += N(e.montant)
     }
     return [
-      { name: 'Carburant', value: manqueByPole.carburant },
+      { name: 'Carburant', value: manqueByPole.carburant - depGeneral },
       { name: 'Gaz + Lubrifiant', value: manqueByPole.gaz_lub },
-      { name: 'Supérette', value: manqueByPole.superette },
+      { name: 'Supérette', value: manqueByPole.superette - depSuperette },
     ]
   })()
   // "Cash non tracé" doit être la MÊME notion que "Manque à verser par pôle" juste en dessous —

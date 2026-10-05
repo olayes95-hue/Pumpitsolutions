@@ -1,56 +1,34 @@
 -- ============================================================
---  MIGRATION v126 — Choix du portefeuille (pôle) pour les dépenses + système
---  CALENDAIRE de "manque à verser" pour Journal de bord / Tableau de bord.
+--  MIGRATION v127 — ANNULE la v126 (choix du portefeuille + système calendaire
+--  de "manque à verser").
 --
---  Contexte : toute dépense cash est aujourd'hui supposée sortir de la caisse
---  carburant (câblé en dur depuis la migration v36, v_recette_groupe_jour) —
---  gaz_lub et supérette n'ont jamais aucune dépense déduite. Le gérant choisit
---  désormais explicitement de quel(s) pôle(s) une dépense sort.
+--  Rollback demandé explicitement — après coup, le "mauvais montant" signalé
+--  au départ n'en était pas un (149 780 F par période était déjà correct ;
+--  voir l'historique de session pour le détail). On revient donc entièrement
+--  à l'état d'avant toute cette investigation : Journal de bord et Tableau
+--  de bord repassent sur le seul système par période déjà vérifié, et
+--  Submit.jsx reperd le choix du portefeuille (code JS déjà revert via git —
+--  ce fichier annule uniquement la partie base de données).
 --
---  Par ailleurs, Journal.jsx/Dashboard.jsx passent d'un calcul PAR PÉRIODE
---  (bordereau de versement, qui peut repousser une dépense au mois où SON
---  bordereau se clôture) à un calcul CALENDAIRE (recette − dépense − versé du
---  mois civil, pôle par pôle) — demande explicite : voir toutes les charges
---  déclarées un mois donné reflétées ce même mois, même sans bordereau clos.
+--  Annule, dans l'ordre inverse de la création :
+--  1) Les 2 nouvelles vues calendaires (v_pole_mois_calendaire,
+--     v_depense_pole_jour_calendaire) — plus aucun écran ne les lit après
+--     le revert du code front.
+--  2) enregistrer_saisie_jour restauré À L'IDENTIQUE de migration_v122
+--     (sans le paramètre/traitement "poles").
+--  3) La colonne expenses.poles — supprimée (aucune dépendance restante,
+--     aucune vue ni fonction ne la lit après les étapes 1 et 2 ci-dessus).
 --
---  ATTENTION — précédent (migration_v124, annulée par v125) : cette tentative
---  avait échoué car elle avait réécrit v_alerts lui-même et ne déduisait aucune
---  dépense. Cette fois-ci, AUCUNE vue existante n'est modifiée : v_alerts,
---  v_verse_recon, v_pole_recon_jour, v_verse_groupe, v_recette_groupe_jour
---  restent À L'IDENTIQUE — Historique.jsx et Alerts.jsx continuent de lire
---  exactement les mêmes vues, donc d'afficher le chiffre par période déjà
---  vérifié. Seuls Journal.jsx et Dashboard.jsx basculent sur les 2 nouvelles
---  vues ci-dessous, suffixées "_calendaire" pour qu'il n'y ait jamais
---  d'ambiguïté sur quel système une requête utilise. Conséquence assumée :
---  Historique/Alertes et Journal/Tableau de bord peuvent désormais afficher
---  des montants différents pour le même mois — volontaire, documenté.
+--  v_alerts, v_verse_recon, v_pole_recon_jour, v_verse_groupe,
+--  v_recette_groupe_jour : jamais touchés par v126, donc rien à restaurer ici.
 -- ============================================================
 
--- ── 1. Colonne poles sur expenses ───────────────────────────
--- [{"pole":"carburant","montant":30000}, ...] — mêmes valeurs que
--- deposits.pole (carburant/gaz/lubrifiant/gaz_lubrifiant/superette), même
--- règle de regroupement en pole_groupe que les versements. '[]' (toute ligne
--- antérieure à cette migration) = non taguée : repli géré par la vue
--- v_depense_pole_jour_calendaire (section 3), jamais par un UPDATE en masse —
--- réversible, l'historique n'est jamais touché physiquement.
-alter table public.expenses
-  add column if not exists poles jsonb not null default '[]'::jsonb;
+drop view if exists v_pole_mois_calendaire;
+drop view if exists v_depense_pole_jour_calendaire;
 
-comment on column public.expenses.poles is
-  'Répartition de la dépense cash entre pôles : [{"pole":"carburant","montant":30000}, ...]. '
-  'pole ∈ mêmes valeurs que deposits.pole. poles=''[]'' = non tagué (tout l''historique '
-  'avant migration v126) : repli dans v_depense_pole_jour_calendaire (SUPERETTE -> superette, '
-  'sinon -> carburant), identique au hardcode historique de v_recette_groupe_jour (v36). '
-  'Les vues PAR PÉRIODE (v_recette_groupe_jour, v_verse_recon, v_pole_recon_jour, v_alerts) '
-  'ne lisent jamais cette colonne et restent inchangées.';
-
--- ── 2. RPC enregistrer_saisie_jour : accepte le champ poles ──
--- Pas de changement de signature (poles voyage dans p_expenses, déjà jsonb ;
--- la signature des paramètres de la fonction reste identique à migration_v122
--- — p_superette_cogs numeric, pas jsonb — sinon "create or replace" crée une
--- 2e fonction en surcharge au lieu de remplacer l'existante). Corps recopié
--- À L'IDENTIQUE de migration_v122 — seul le bloc "expenses" change (ajout de
--- la colonne poles à l'insert, 2 lignes).
+-- enregistrer_saisie_jour : restauré à l'identique de migration_v122 (copie
+-- intégrale de son corps, sans le paramètre "poles" ni la colonne poles à
+-- l'insert expenses).
 create or replace function public.enregistrer_saisie_jour(
   p_station_id bigint, p_report_date date, p_moment text, p_payload jsonb, p_set_matin boolean,
   p_snapshot jsonb default '[]'::jsonb, p_expenses jsonb default '[]'::jsonb,
@@ -118,12 +96,10 @@ begin
     stock_declare = excluded.stock_declare,
     ecart_initial = excluded.ecart_initial;
 
-  -- Dépenses : delete + insert, AVEC poles (SEUL changement de ce bloc vs v122)
   delete from public.expenses where report_date = p_report_date and station_id = p_station_id;
-  insert into public.expenses (report_date, station_id, categorie, montant, motif, justificatif, photo_path, non_cash, poles, created_by)
-  select p_report_date, p_station_id, coalesce(x.categorie, 'AUTRE'), x.montant, x.motif, true, x.photo_path,
-    coalesce(x.non_cash, false), coalesce(x.poles, '[]'::jsonb), auth.uid()
-  from jsonb_to_recordset(p_expenses) as x(categorie text, montant numeric, motif text, photo_path text, non_cash boolean, poles jsonb);
+  insert into public.expenses (report_date, station_id, categorie, montant, motif, justificatif, photo_path, non_cash, created_by)
+  select p_report_date, p_station_id, coalesce(x.categorie, 'AUTRE'), x.montant, x.motif, true, x.photo_path, coalesce(x.non_cash, false), auth.uid()
+  from jsonb_to_recordset(p_expenses) as x(categorie text, montant numeric, motif text, photo_path text, non_cash boolean);
 
   delete from public.deliveries where report_date = p_report_date and station_id = p_station_id;
   insert into public.deliveries (report_date, station_id, type, quantite, unite, pu_achat, montant, fournisseur, supplier_id, note, created_by)
@@ -152,70 +128,4 @@ $$;
 
 revoke execute on function public.enregistrer_saisie_jour(bigint, date, text, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, numeric) from anon;
 
--- ── 3. Vues CALENDAIRES (nouvelles, distinctes du système par période) ──
-
--- Dépense cash par jour et par pole_groupe, répartie selon expenses.poles.
--- Repli pour les lignes sans tag (poles='[]') : categorie='SUPERETTE' ->
--- superette, sinon -> carburant — identique au hardcode actuel de
--- v_recette_groupe_jour (migration_v36), pour que les mois passés ne changent
--- pas de valeur tant qu'aucune dépense n'est explicitement taguée.
-create or replace view v_depense_pole_jour_calendaire as
-with tagged as (
-  select e.station_id, e.report_date,
-    case when x.pole = 'carburant' then 'carburant'
-         when x.pole in ('gaz', 'lubrifiant', 'gaz_lubrifiant') then 'gaz_lub'
-         else 'superette' end as pole_groupe,
-    x.montant
-  from public.expenses e
-  cross join lateral jsonb_to_recordset(e.poles) as x(pole text, montant numeric)
-  where coalesce(e.non_cash, false) = false
-),
-fallback as (
-  select e.station_id, e.report_date,
-    case when upper(coalesce(e.categorie, '')) = 'SUPERETTE' then 'superette' else 'carburant' end as pole_groupe,
-    e.montant
-  from public.expenses e
-  where coalesce(e.non_cash, false) = false
-    and (e.poles is null or jsonb_array_length(e.poles) = 0)
-)
-select station_id, report_date, pole_groupe, sum(montant) as depense
-from (select * from tagged union all select * from fallback) u
-group by 1, 2, 3;
-
-grant select on v_depense_pole_jour_calendaire to authenticated, anon;
-
--- Vue mensuelle calendaire par pôle : recette (v_recette_groupe_jour,
--- INCHANGÉE), dépense (vue ci-dessus, tag-aware), versé (deposits, attribué
--- au mois réel du versement — même chaîne de repli que v_ventes_mensuelles et
--- v_report_metrics : coalesce(periode_fin, deposit_date, report_date)).
--- solde = recette - dépense - versé, peut être négatif un mois donné sans
--- que ce soit un bug (cash payé ce mois-ci depuis une caisse accumulée un
--- mois précédent) — voir le commentaire en tête de fichier.
-create or replace view v_pole_mois_calendaire as
-select r.station_id, r.mois, r.pole_groupe,
-  r.recette,
-  coalesce(d.depense, 0) as depense,
-  coalesce(v.verse, 0) as verse,
-  r.recette - coalesce(d.depense, 0) - coalesce(v.verse, 0) as solde
-from (
-  select station_id, to_char(report_date, 'YYYY-MM') as mois, pole_groupe, sum(espece) as recette
-  from public.v_recette_groupe_jour
-  group by 1, 2, 3
-) r
-left join (
-  select station_id, to_char(report_date, 'YYYY-MM') as mois, pole_groupe, sum(depense) as depense
-  from v_depense_pole_jour_calendaire
-  group by 1, 2, 3
-) d on d.station_id = r.station_id and d.mois = r.mois and d.pole_groupe = r.pole_groupe
-left join (
-  select station_id,
-    to_char(coalesce(periode_fin, deposit_date, report_date), 'YYYY-MM') as mois,
-    case when pole = 'carburant' then 'carburant'
-         when pole in ('gaz', 'lubrifiant', 'gaz_lubrifiant') then 'gaz_lub'
-         else 'superette' end as pole_groupe,
-    sum(montant) as verse
-  from public.deposits
-  group by 1, 2, 3
-) v on v.station_id = r.station_id and v.mois = r.mois and v.pole_groupe = r.pole_groupe;
-
-grant select on v_pole_mois_calendaire to authenticated, anon;
+alter table public.expenses drop column if exists poles;
