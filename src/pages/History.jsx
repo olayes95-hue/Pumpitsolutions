@@ -18,6 +18,12 @@ import { EvidenceThumb } from '../ds/pumpit/components/evidence/EvidenceThumb.js
 import { Kpi } from '../lib/Kpi.jsx'
 
 const N = (v) => (v ? Number(v) : 0)
+// Dépenses payées en espèces ce jour-là (hors non-cash, ex. carburant du propriétaire) — c'est
+// exactement ce que v_recette_groupe_jour déduit de la recette carburant pour calculer l'écart
+// (voir migration_v31_v40 : "dépense carburant = ESPÈCES uniquement"). Affiché en colonne pour
+// qu'un gros écart se comprenne d'un coup d'œil (ex. 200 000 F dépensés sur place un jour donné)
+// sans avoir à ouvrir le détail de chaque journée une par une.
+const depenseCashJour = (exps) => (exps || []).filter(e => !e.non_cash).reduce((s, e) => s + N(e.montant), 0)
 const POLE_FILTER_OPTIONS = [
   { value: 'tous', label: 'Tous les pôles' },
   { value: 'carburant', label: 'Carburant' },
@@ -151,7 +157,7 @@ export default function History() {
       ['Date', 'date'], ['CA Carbu.', 'ca_carb'], ['Espèce carbu.', 'esp_carb'], ['Versé carbu.', 'ver_carb'], ['Écart carbu.', 'ec_carb'],
       ['CA Gaz+Lub.', 'ca_gl'], ['Versé Gaz+Lub.', 'ver_gl'], ['Écart Gaz+Lub.', 'ec_gl'],
       ['CA Supérette', 'ca_sup'], ['Versé Sup.', 'ver_sup'], ['Écart Sup.', 'ec_sup'],
-      ['Bon', 'bon'], ['Photos', 'photos'],
+      ['Bon', 'bon'], ['Dépenses (cash)', 'dep'], ['Photos', 'photos'],
     ]
     const data = frows.map(r => {
       const g = recon[r.report_date] || {}
@@ -162,12 +168,27 @@ export default function History() {
         ca_carb: Math.round(N(r.ca_carburant)), esp_carb: caVal(carb, carb?.espece), ver_carb: verseVal(carb), ec_carb: ecartVal(carb, carb?.espece),
         ca_gl: caVal(gl, caGL), ver_gl: verseVal(gl), ec_gl: ecartVal(gl, caGL),
         ca_sup: caVal(sup, r.superette_espece), ver_sup: verseVal(sup), ec_sup: ecartVal(sup, r.superette_espece),
-        bon: Math.round(N(r.ventes_bon)), photos: photosOk(r) ? 'Complet' : 'Incomplet',
+        bon: Math.round(N(r.ventes_bon)), dep: Math.round(depenseCashJour(expByDate[r.report_date])), photos: photosOk(r) ? 'Complet' : 'Incomplet',
       }
     })
+    // Ligne de total, jusqu'ici absente du CSV alors qu'elle existe déjà à l'écran (pied du
+    // tableau) — sans elle, il fallait rouvrir l'app ou refaire la somme à la main pour avoir
+    // le total du mois une fois le fichier exporté.
+    const total = {
+      date: `TOTAL (${frows.length} j)`,
+      ca_carb: Math.round(frows.reduce((s, r) => s + N(r.ca_carburant), 0)),
+      esp_carb: Math.round(frows.reduce((s, r) => s + N(recon[r.report_date]?.carburant?.espece), 0)),
+      ver_carb: Math.round(frows.reduce((s, r) => s + N(recon[r.report_date]?.carburant?.verse), 0)),
+      ca_gl: Math.round(frows.reduce((s, r) => s + N(r.gaz_espece) + N(r.lubrifiant_espece), 0)),
+      ver_gl: Math.round(frows.reduce((s, r) => s + N(recon[r.report_date]?.gaz_lub?.verse), 0)),
+      ca_sup: Math.round(frows.reduce((s, r) => s + N(r.superette_espece), 0)),
+      ver_sup: Math.round(frows.reduce((s, r) => s + N(recon[r.report_date]?.superette?.verse), 0)),
+      bon: Math.round(frows.reduce((s, r) => s + N(r.ventes_bon), 0)),
+      dep: Math.round(frows.reduce((s, r) => s + depenseCashJour(expByDate[r.report_date]), 0)),
+    }
     const label = (year === 'all' ? 'tout' : year) + (month !== 'all' ? '-' + month : '')
     const station = (current?.nom || 'station').toLowerCase().replace(/[^a-z0-9]+/g, '-')
-    exportRowsToCsv(`historique-${station}-${label}.csv`, columns, data)
+    exportRowsToCsv(`historique-${station}-${label}.csv`, columns, [...data, total])
   }
 
   // Colonnes détaillées par pôle (CA/Espèce/Versé/Écart), comme l'ancien tableau — poleFilter
@@ -194,6 +215,7 @@ export default function History() {
       { key: 'ec_sup', header: 'Écart Sup.', numeric: true, align: 'right', render: r => ecartCell(recon[r.report_date]?.superette, r.superette_espece) },
     ] : []),
     ...(showCarb ? [{ key: 'bon', header: 'Bon', numeric: true, align: 'right', render: r => fcfa(r.ventes_bon) }] : []),
+    { key: 'dep', header: 'Dépenses', numeric: true, align: 'right', render: r => fcfa(depenseCashJour(expByDate[r.report_date])) },
     { key: 'photos', header: 'Photos', render: r => photosOk(r) ? <Badge tone="ok">Complet</Badge> : <Badge tone="alarm">Incomplet</Badge> },
   ]
 
@@ -212,6 +234,7 @@ export default function History() {
     footer.ca_sup = fcfa(shownRows.reduce((s, r) => s + N(r.superette_espece), 0))
     footer.ver_sup = fcfa(shownRows.reduce((s, r) => s + N(recon[r.report_date]?.superette?.verse), 0))
   }
+  footer.dep = fcfa(shownRows.reduce((s, r) => s + depenseCashJour(expByDate[r.report_date]), 0))
 
   const detailRow = frows.find(r => r.report_date === detailDate) || null
   const machineNums = Array.from({ length: nombreMachines }, (_, i) => i + 1)
