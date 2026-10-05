@@ -50,7 +50,7 @@ export default function History() {
   const today = new Date().toISOString().slice(0, 10)
   const [year, setYear] = useState(today.slice(0, 4))
   const [month, setMonth] = useState(today.slice(5, 7))
-  const [quickFilter, setQuickFilter] = useState('tous')   // tous | ecarts | attente | photos (filtre les LIGNES)
+  const [quickFilter, setQuickFilter] = useState('tous')   // tous | ecarts | photos (filtre les LIGNES)
   const [poleFilter, setPoleFilter] = useState('tous')      // tous | carburant | gaz_lub | superette (filtre les COLONNES)
   const [detailDate, setDetailDate] = useState(null)
   const [detailExtra, setDetailExtra] = useState({ at: [], dep: [], exp: [] })   // chargé à la demande, pour le seul jour ouvert
@@ -119,7 +119,6 @@ export default function History() {
       poleState(g.superette, r.superette_espece),
     ]
     if (states.includes('ecart')) return 'ecart'
-    if (states.includes('attente')) return 'attente'
     return 'ok'
   }
   // Complet = TOUTES les preuves exigées sont là (une photo par compteur rempli, un justificatif
@@ -145,11 +144,9 @@ export default function History() {
     return true
   }
   const nbEcarts = frows.filter(r => dayStatus(r) === 'ecart').length
-  const nbAttente = frows.filter(r => dayStatus(r) === 'attente').length
   const nbPhotosManquantes = frows.filter(r => !photosOk(r)).length
   const shownRows = frows.filter(r =>
     quickFilter === 'ecarts' ? dayStatus(r) === 'ecart' :
-    quickFilter === 'attente' ? dayStatus(r) === 'attente' :
     quickFilter === 'photos' ? !photosOk(r) : true)
 
   function exportCsv() {
@@ -261,7 +258,6 @@ export default function History() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--sp-4)' }}>
           <div onClick={() => setQuickFilter('tous')} style={{ cursor: 'pointer' }}><Kpi label="Jours saisis" value={frows.length} status={quickFilter === 'tous' ? 'info' : undefined} /></div>
           <div onClick={() => setQuickFilter('ecarts')} style={{ cursor: 'pointer' }}><Kpi label="Jours avec écart" value={nbEcarts} status={nbEcarts > 0 ? 'alarm' : 'ok'} /></div>
-          <div onClick={() => setQuickFilter('attente')} style={{ cursor: 'pointer' }}><Kpi label="Jours en attente" value={nbAttente} status={nbAttente > 0 ? 'warn' : 'ok'} /></div>
           <div onClick={() => setQuickFilter('photos')} style={{ cursor: 'pointer' }}><Kpi label="Photos manquantes" value={nbPhotosManquantes} status={nbPhotosManquantes > 0 ? 'warn' : 'ok'} /></div>
         </div>
         {quickFilter !== 'tous' && <Button size="sm" onClick={() => setQuickFilter('tous')} style={{ alignSelf: 'flex-start' }}>Réinitialiser le filtre rapide</Button>}
@@ -360,7 +356,11 @@ function poleState(g, espece) {
   // un vrai manque de quelques centaines de francs.
   if (g && N(g.nb_cloture) > 0 && g.ecart != null) return N(g.ecart) > 0.5 ? 'ecart' : 'ok'
   if (g?.couvert) return 'ok'
-  if (N(espece) > 0) return 'attente'
+  // Pas de statut "en attente" neutre : un jour non couvert par aucune période, avec de la
+  // caisse déclarée, N'A PAS ENCORE été versé — c'est un écart réel (= toute la caisse), pas
+  // une situation d'attente à part. Il pourra redescendre à 0 plus tard si une période vient
+  // le couvrir et se clôture sans manque.
+  if (N(espece) > 0) return 'ecart'
   return null
 }
 
@@ -378,12 +378,16 @@ function verseCell(g) {
   return fcfa(N(g?.verse))
 }
 // dayVal (la même valeur que celle passée à caCell pour la colonne CA/Espèce voisine) sert de
-// filet : si la caisse déclarée du jour est non nulle, le jour est "en attente" même si g.espece
-// est absent/à 0 pour une raison quelconque — la colonne Écart ne doit jamais afficher un tiret
-// à côté d'une colonne CA/Espèce qui montre un montant réel, ça n'a pas de sens pour le gérant.
+// filet : si la caisse déclarée du jour est non nulle, l'écart affiché est cette caisse elle-même
+// même si g.espece est absent/à 0 pour une raison quelconque — jamais un tiret à côté d'une
+// colonne CA/Espèce qui montre un montant réel, ça n'a pas de sens pour le gérant.
+//
+// Pas de statut "en attente" : un jour non couvert par aucune période n'a, par définition, PAS
+// ENCORE été versé — l'écart affiché est donc la caisse non versée elle-même (en rouge, comme un
+// vrai écart), pas un texte neutre qui peut passer inaperçu. Il redescendra à 0 de lui-même si une
+// période vient couvrir ce jour et se clôture sans manque.
 function ecartCell(g, dayVal) {
-  if (!g) return N(dayVal) > 0 ? <span style={{ color: 'var(--text-muted)' }}>en attente</span> : '—'
-  if (N(g.nb_cloture) > 0) {
+  if (N(g?.nb_cloture) > 0) {
     const e = N(g.ecart)
     // écart > 0 = il manque du versé (rouge) ; écart < 0 = surplus versé (vert) ; ≈0 = ok (vert).
     // Tout manque compte, même petit — 0.5 F n'est qu'un épsilon anti-bruit d'arrondi, pas une
@@ -391,8 +395,9 @@ function ecartCell(g, dayVal) {
     const title = g.recette_cloture != null ? `Basé sur la recette cumulée de la période versée (clôturée ce jour) : ${fcfa(g.recette_cloture)}` : undefined
     return <span title={title} style={{ fontWeight: 600, color: e > 0.5 ? 'var(--state-alarm)' : 'var(--state-ok)', borderBottom: title ? '1px dotted currentColor' : undefined, cursor: title ? 'help' : undefined }}>{fcfa(e)}{e < -0.5 ? ' (surplus)' : ''}</span>
   }
-  if (g.couvert) return <span style={{ color: 'var(--state-ok)' }} title="Jour inclus dans une période versée ; l'écart sera calculé au dernier jour de la période.">✓ inclus</span>
-  if (N(g.espece) > 0 || N(dayVal) > 0) return <span style={{ color: 'var(--text-muted)' }}>en attente</span>
+  if (g?.couvert) return <span style={{ color: 'var(--state-ok)' }} title="Jour inclus dans une période versée ; l'écart sera calculé au dernier jour de la période.">✓ inclus</span>
+  const e = N(g?.espece) || N(dayVal)
+  if (e > 0) return <span title="Aucun versement ne couvre encore ce jour — toute la caisse déclarée compte comme manquante tant qu'elle n'est pas versée." style={{ fontWeight: 600, color: 'var(--state-alarm)', borderBottom: '1px dotted currentColor', cursor: 'help' }}>{fcfa(e)}</span>
   return '—'
 }
 // Équivalents en VALEUR BRUTE (nombres/texte, pas de JSX) — pour l'export CSV, miroir de caCell/verseCell/ecartCell.
@@ -401,11 +406,10 @@ function caVal(g, dayVal) {
 }
 function verseVal(g) { return Math.round(N(g?.verse)) }
 function ecartVal(g, dayVal) {
-  if (!g) return N(dayVal) > 0 ? 'en attente' : ''
-  if (N(g.nb_cloture) > 0) return Math.round(N(g.ecart))
-  if (g.couvert) return 'inclus'
-  if (N(g.espece) > 0 || N(dayVal) > 0) return 'en attente'
-  return ''
+  if (N(g?.nb_cloture) > 0) return Math.round(N(g.ecart))
+  if (g?.couvert) return 'inclus'
+  const e = N(g?.espece) || N(dayVal)
+  return e > 0 ? Math.round(e) : ''
 }
 
 function Section({ title, children }) {
