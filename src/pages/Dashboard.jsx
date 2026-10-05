@@ -183,18 +183,22 @@ export default function Dashboard() {
   // clôture une période compte le cumul réel NET de CETTE période (g.ecart = recette − dépense −
   // verse, quelle que soit sa durée, même à cheval sur deux mois) ; un jour encore couvert par une
   // période en cours ne compte rien (résolu à la clôture) ; un jour non couvert par aucune période
-  // compte sa recette nette de ses propres dépenses cash du jour (g.espece − g.depense). Avant, ce
-  // calcul resommait en plus toutes les dépenses SBEE/AUTRE du mois calendaire et les déduisait une
-  // seconde fois du carburant — déduction en double pour celles déjà couvertes par une période
-  // close (g.ecart les a déjà nettées), et déduction à tort pour celles tombées un jour non couvert
-  // par aucune période. Constaté en prod (Beaurivage, sept. 2026) : −100 000 F affiché au lieu de
-  // 0 F sur le carburant à cause d'une 3ᵉ facture SBEE hors de toute période close.
+  // compte sa recette BRUTE (g.espece seul) — surtout PAS g.espece − g.depense : une dépense peut
+  // sortir d'un cash accumulé sur des jours précédents, sans lien avec la recette du jour même ;
+  // elle sera nettée plus tard par la période qui finira par couvrir ce jour (g.ecart à ce moment).
+  // Avant, ce calcul resommait en plus toutes les dépenses SBEE/AUTRE du mois calendaire et les
+  // déduisait une seconde fois du carburant — déduction en double pour celles déjà couvertes par
+  // une période close (g.ecart les a déjà nettées), et déduction à tort pour celles tombées un
+  // jour non couvert par aucune période. Constaté en prod (Beaurivage, sept. 2026) : −100 000 F
+  // affiché au lieu de 0 F sur le carburant à cause d'une 3ᵉ facture SBEE (29 sept., espece=0 ce
+  // jour-là) hors de toute période close — un g.espece − g.depense aurait reproduit EXACTEMENT
+  // le même bug par une autre branche (constaté en prod après un premier correctif incomplet).
   const manquePole = (() => {
     const manqueByPole = { carburant: 0, gaz_lub: 0, superette: 0 }
     for (const g of polePeriod.recon) {
       if (!(g.pole_groupe in manqueByPole)) continue
       if (N(g.nb_cloture) > 0) manqueByPole[g.pole_groupe] += N(g.ecart)
-      else if (!g.couvert) manqueByPole[g.pole_groupe] += N(g.espece) - N(g.depense)
+      else if (!g.couvert) manqueByPole[g.pole_groupe] += N(g.espece)
     }
     return [
       { name: 'Carburant', value: manqueByPole.carburant },

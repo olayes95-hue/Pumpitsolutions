@@ -106,7 +106,8 @@ export default function Journal() {
     // simple découpage calendaire : un versement à cheval sur deux mois compte son cumul réel sur
     // le mois de clôture, où qu'il tombe ; un jour encore couvert par une période en cours ne
     // compte rien (résolu à la clôture) ; un jour non couvert par aucune période compte sa recette
-    // nette de ses propres dépenses cash du jour.
+    // BRUTE (sa/ses dépense(s) du jour, si elle(s) existe(nt), sera(ont) nettée(s) plus tard par
+    // la période qui finira par couvrir ce jour — jamais ici, cf. note plus bas).
     //
     // La dépense est déjà déduite PAR PÉRIODE côté SQL (ecart = recette_periode − depense_periode
     // − verse, et depense_periode couvre déjà tout cash dépensé dans les dates de LA période
@@ -118,7 +119,14 @@ export default function Journal() {
     // de la période SUIVANTE, pas être soustraite d'un manque qu'elle ne concerne pas encore).
     // Constaté en prod (Beaurivage, sept. 2026) : −100 000 F affiché au lieu de 0 F sur le
     // carburant, parce qu'une 3ᵉ facture SBEE (29 sept., hors de toute période close) était
-    // déduite en plus des deux déjà right-déduites par leurs périodes respectives.
+    // déduite en plus des deux déjà déduites par leurs périodes respectives.
+    //
+    // Pour un jour NON couvert, ne JAMAIS soustraire sa dépense de sa recette : les deux sont
+    // indépendantes (la dépense peut sortir d'un cash accumulé sur des jours précédents, sans
+    // lien avec la recette du jour même) — seule la recette brute du jour compte, la dépense sera
+    // nettée plus tard par la période qui finira par couvrir ce jour, via depense_cloture/ecart.
+    // Un bug similaire au premier (reproduit via cette branche-ci) : le 29 sept. (espece=0,
+    // depense=100000, non couvert) donnait 0−100000=−100000 au lieu de 0.
     const manqueByPole = { carburant: 0, gaz_lub: 0, superette: 0 }
     let depCloture = 0   // charges déjà déduites (pour l'affichage "dont X F déjà déduites")
     for (const g of (recon || [])) {
@@ -127,8 +135,7 @@ export default function Journal() {
         manqueByPole[g.pole_groupe] += N(g.ecart)
         if (g.pole_groupe === 'carburant') depCloture += N(g.depense_cloture)
       } else if (!g.couvert) {
-        manqueByPole[g.pole_groupe] += N(g.espece) - N(g.depense)
-        if (g.pole_groupe === 'carburant') depCloture += N(g.depense)
+        manqueByPole[g.pole_groupe] += N(g.espece)
       }
     }
 
