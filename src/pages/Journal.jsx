@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useOffre } from '../lib/offre.jsx'
 import { filtrerAlertes } from '../lib/formules'
 import { useStation } from '../lib/station.jsx'
-import { fcfa, frDate, today } from '../lib/format'
+import { fcfa, frDate, today, lastDayOfMonth } from '../lib/format'
 import { ALERT_TONES } from '../lib/tones'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
@@ -47,6 +47,7 @@ export default function Journal() {
   const [moments, setMoments] = useState(new Set())
   const [forecast, setForecast] = useState(null)
   const [manque, setManque] = useState({ carburant: 0, gaz_lub: 0, superette: 0 })
+  const [depGeneral, setDepGeneral] = useState(0)
   const [pertes, setPertes] = useState(null)
   const [alerts, setAlerts] = useState([])
   const [pendingCount, setPendingCount] = useState(0)
@@ -94,25 +95,54 @@ export default function Journal() {
 
   // "Manque à verser" : chargé séparément, dépend du mois SÉLECTIONNÉ (moisManque), pas de
   // "aujourd'hui" — permet de consulter un mois passé sans changer de page.
-  //
-  // Même formule que le Tableau de bord et Historique (v_pole_recon_mois, migration_v124) :
-  // espèces du mois civil moins versé du mois civil, par pôle, SANS déduire aucune dépense —
-  // les 3 écrans affichent toujours le même chiffre. Avant, ce calcul attribuait chaque
-  // versement à sa PÉRIODE réelle (plus précis pour une période à cheval sur deux mois, cf.
-  // ancien commentaire ici) et déduisait en plus les charges SBEE/AUTRE/supérette — choix
-  // explicite de cohérence inter-écrans au prix de cette précision-là (voir conversation).
   useEffect(() => { if (!stationId) return; (async () => {
-    const { data } = await supabase.from('v_pole_recon_mois').select('*').eq('station_id', stationId).eq('mois', moisManque)
+    const monthStart = moisManque + '-01'
+    // Bug réel repéré : '-31' codé en dur est une date invalide en septembre (30 jours) — la
+    // requête report_date<=... échouait silencieusement (data jamais vérifié) et affichait 0.
+    const monthEnd = lastDayOfMonth(moisManque)
+    const [recon, exp] = await Promise.all([
+      supabase.from('v_pole_recon_jour').select('*').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
+      supabase.from('expenses').select('categorie,montant,non_cash').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
+    ])
+    // Même décomposition que « Cash non tracé » du Tableau de bord admin (recettes − versé,
+    // éclatée par pôle), MAIS attribuée période par période (via v_pole_recon_jour) et non plus
+    // par simple découpage calendaire : un versement à cheval sur deux mois comptait son montant
+    // ENTIER dans le mois de clôture alors que la recette qu'il couvre restait pour partie dans
+    // le mois précédent (via report_date) — ça faisait apparaître un manque négatif/trop bas ce
+    // mois-ci pendant que les vraies alertes (qui suivent chaque période, pas le mois calendaire)
+    // continuaient de signaler un manque réel sur une autre période/pôle. Ici : un jour qui clôture
+    // une période compte le cumul réel de CETTE période (recette_cloture − verse, quelle que soit
+    // sa durée) ; un jour encore ouvert/couvert par une période en cours ne compte rien (résolu au
+    // jour de clôture, où qu'il tombe) ; un jour non couvert par aucune période compte sa recette brute.
     const manqueByPole = { carburant: 0, gaz_lub: 0, superette: 0 }
-    for (const g of (data || [])) {
+    for (const g of (recon.data || [])) {
       if (!(g.pole_groupe in manqueByPole)) continue
-      manqueByPole[g.pole_groupe] = N(g.espece) - N(g.verse)
+      if (N(g.nb_cloture) > 0 && g.recette_cloture != null) manqueByPole[g.pole_groupe] += N(g.recette_cloture) - N(g.verse)
+      else if (!g.couvert) manqueByPole[g.pole_groupe] += N(g.espece)
     }
-    setManque(manqueByPole)
+
+    // SBEE/AUTRE sont payées en pratique depuis la caisse carburant (c'est elle qui encaisse le
+    // plus de cash au quotidien) — les déduire du carburant, pas seulement du total, sinon le
+    // bâton "Carburant" affiche un manque qui ignore une charge réellement sortie de cette caisse.
+    let depSuperette = 0, depGen = 0
+    for (const e of (exp.data || [])) {
+      if (e.non_cash) continue // prélèvement carburant propriétaire : non-cash, jamais décompté
+      if (e.categorie === 'SUPERETTE') depSuperette += N(e.montant)
+      else if (e.categorie !== 'CARBURANT') depGen += N(e.montant) // SBEE, AUTRE
+    }
+
+    setManque({
+      carburant: manqueByPole.carburant - depGen,
+      gaz_lub: manqueByPole.gaz_lub,
+      superette: manqueByPole.superette - depSuperette,
+    })
+    setDepGeneral(depGen)
   })() }, [stationId, moisManque])
 
   if (loading) return <Panel><p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Chargement…</p></Panel>
 
+  // depGeneral (SBEE/AUTRE) est déjà déduit de manque.carburant (voir le chargement des données) —
+  // ne pas le soustraire une seconde fois ici.
   const manqueTotal = manque.carburant + manque.gaz_lub + manque.superette
   // Jours passés sans aucune saisie — mis en avant séparément (pas juste noyés dans la liste
   // d'alertes) : c'est précisément ce que le gérant ne voit pas spontanément autrement.
@@ -179,6 +209,7 @@ export default function Journal() {
         actions={<Input type="month" size="sm" value={moisManque} max={today().slice(0, 7)} onChange={e => e.target.value && setMoisManque(e.target.value)} style={{ width: 160 }} />}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
           <PoleLine label="Carburant" value={manque.carburant} />
+          {depGeneral > 0 && <p style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 0 var(--sp-4)' }}>dont {fcfa(depGeneral)} de charges générales (SBEE, autre) déjà déduites</p>}
           <PoleLine label="Gaz + Lubrifiant" value={manque.gaz_lub} />
           <PoleLine label="Supérette" value={manque.superette} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--sp-3) var(--sp-4)', borderTop: '1px solid var(--border-default)', marginTop: 'var(--sp-2)' }}>
