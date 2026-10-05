@@ -571,7 +571,7 @@ export default function Submit() {
     }
     const sid = stationId
     try {
-      const payload = { report_date: date, station_id: sid, created_by: session.user.id, lubrifiant_stock: Object.keys(lub).length ? lub : null, lubrifiant_vendu: Object.keys(lubVendu).length ? lubVendu : null }
+      const payload = { lubrifiant_stock: Object.keys(lub).length ? lub : null, lubrifiant_vendu: Object.keys(lubVendu).length ? lubVendu : null }
       NUMFIELDS.forEach(k => payload[k] = f[k] === '' ? null : numFR(f[k]))
       payload.note = f.note || null
       // Relevé du matin FIGÉ, distinct de ess_stock/gas_stock (qui continuent de refléter le
@@ -579,61 +579,60 @@ export default function Submit() {
       // soir). Sans cette copie séparée, une livraison reçue le même jour après le relevé du
       // matin écrase ess_stock — et la réconciliation anti-coulage, qui compare le relevé du
       // matin d'un jour à l'autre, comptait alors la livraison une seconde fois par-dessus une
-      // valeur qui la contenait déjà. Écrit UNIQUEMENT lors d'une saisie du pas "Matin".
-      if (moment === 'matin' || showAll) {
+      // valeur qui la contenait déjà. Écrit UNIQUEMENT lors d'une saisie du pas "Matin" — la
+      // fonction RPC ne touche ess_stock_matin/gas_stock_matin QUE quand p_set_matin est vrai.
+      const setMatin = moment === 'matin' || showAll
+      if (setMatin) {
         payload.ess_stock_matin = payload.ess_stock
         payload.gas_stock_matin = payload.gas_stock
       }
-      const { error: e1 } = await supabase.from('daily_reports').upsert(payload, { onConflict: 'station_id,report_date' })
-      if (e1) throw e1
 
       // Fige théorique + écart au moment de la déclaration (sinon "écart initial" n'est plus
       // reconstructible une fois que des mouvements de régularisation sont ajoutés ensuite).
-      if (moment === 'matin' || showAll) {
-        const snapRows = Object.keys(lub)
-          .filter(t => lub[t] != null && lubTheorique[t] != null)
-          .map(t => ({
-            station_id: sid, categorie: 'lubrifiant', produit: t, report_date: date,
-            stock_theorique_a_la_declaration: lubTheorique[t], stock_declare: N(lub[t]), ecart_initial: N(lub[t]) - lubTheorique[t],
+      const snapRows = setMatin
+        ? Object.keys(lub).filter(t => lub[t] != null && lubTheorique[t] != null).map(t => ({
+            produit: t, stock_theorique_a_la_declaration: lubTheorique[t], stock_declare: N(lub[t]), ecart_initial: N(lub[t]) - lubTheorique[t],
           }))
-        if (snapRows.length) await supabase.from('stock_declarations_snapshot').upsert(snapRows, { onConflict: 'station_id,categorie,produit,report_date' })
-      }
+        : []
 
-      await supabase.from('expenses').delete().eq('report_date', date).eq('station_id', sid)
-      const exRows = []
-      for (const e of expenses) {
-        if (N(e.montant) <= 0) continue
+      const exRows = expenses.filter(e => N(e.montant) > 0).map(e => {
         const isCarb = nonCashCat(e.categorie)
-        const row = { report_date: date, station_id: sid, categorie: e.categorie || "AUTRE", montant: numFR(e.montant),
+        return { categorie: e.categorie || 'AUTRE', montant: numFR(e.montant),
           motif: e.motif || (isCarb ? 'Carburant / déplacement propriétaire' : null),
-          justificatif: true, photo_path: e.photo_path || null, created_by: session.user.id,
-          // Toujours explicite (jamais omis) : un insert groupé où certaines lignes ont
-          // non_cash et d'autres non fait envoyer NULL (pas le DEFAULT false) sur les lignes
-          // qui l'omettent — violait la contrainte NOT NULL dès qu'un lot mélangeait une
-          // dépense carburant (non-cash) avec une autre catégorie.
-          non_cash: isCarb }
-        exRows.push(row)
-      }
-      if (exRows.length) { const { error } = await supabase.from('expenses').insert(exRows); if (error) throw error }
+          photo_path: e.photo_path || null, non_cash: isCarb }
+      })
 
-      await supabase.from('deliveries').delete().eq('report_date', date).eq('station_id', sid)
       const lvRows = deliveries.filter(d => N(d.quantite) > 0 || N(d.montant) > 0).map(d => ({
-        report_date: date, station_id: sid, type: d.type || 'autre', quantite: d.quantite ? numFR(d.quantite) : null,
-        unite: d.unite || null, pu_achat: d.pu_achat ? numFR(d.pu_achat) : null,
-        montant: d.montant ? numFR(d.montant) : null, fournisseur: d.fournisseur || null,
-        supplier_id: d.supplier_id ? Number(d.supplier_id) : null, note: d.note || null, created_by: session.user.id }))
-      if (lvRows.length) { const { error } = await supabase.from('deliveries').insert(lvRows); if (error) throw error }
+        type: d.type || 'autre', quantite: d.quantite ? numFR(d.quantite) : null, unite: d.unite || null,
+        pu_achat: d.pu_achat ? numFR(d.pu_achat) : null, montant: d.montant ? numFR(d.montant) : null,
+        fournisseur: d.fournisseur || null, supplier_id: d.supplier_id ? Number(d.supplier_id) : null, note: d.note || null }))
 
-      await supabase.from('deposits').delete().eq('report_date', date).eq('station_id', sid)
-      const depRows = []
-      for (const d of deposits) {
-        if (N(d.montant) <= 0) continue
-        depRows.push({ report_date: date, station_id: sid, pole: d.pole || "carburant", montant: numFR(d.montant),
-          periode_debut: d.periode_debut || null, periode_fin: d.periode_fin || null,
-          deposit_date: d.periode_fin || null, photo_path: d.photo_path || null, created_by: session.user.id })
-      }
-      if (depRows.length) { const { error } = await supabase.from('deposits').insert(depRows); if (error) throw error }
-      // photos-preuves envoyées
+      const depRows = deposits.filter(d => N(d.montant) > 0).map(d => ({
+        pole: d.pole || 'carburant', montant: numFR(d.montant),
+        periode_debut: d.periode_debut || null, periode_fin: d.periode_fin || null, photo_path: d.photo_path || null }))
+
+      // NB : plus de sortie automatique pour le GAZ / LUBRIFIANT. Le stock est DÉCLARÉ chaque
+      // jour (gaz_stock_*, lubrifiant_stock) ; la sortie (consommation) est DÉDUITE de deux
+      // relevés consécutifs par la vue v_sorties_deduites. Supérette : suivie en VALEUR (pas de
+      // comptage déclaré) → sortie au coût de revient. La fonction RPC nettoie les anciens
+      // mouvements "vente" de ce jour avant d'écrire les nouveaux (idempotent, comme avant).
+      const tauxSup = N(settings.taux_superette) || 8
+      const cogs = numFR(f.superette_espece) ? Math.round(numFR(f.superette_espece) * (1 - tauxSup / 100)) : 0
+
+      // Toute cette séquence (daily_reports / snapshot lubrifiant / expenses / deliveries /
+      // deposits / nettoyage+sortie supérette / submissions) est désormais UNE SEULE
+      // transaction côté base (fonction RPC) — voir migration_v122 : avant, c'était ~10 appels
+      // réseau séparés, et un échec/timeout en plein milieu laissait une saisie à moitié
+      // enregistrée (repéré en prod comme cause probable de doublons de mouvements de stock).
+      const { error: e1 } = await supabase.rpc('enregistrer_saisie_jour', {
+        p_station_id: sid, p_report_date: date, p_moment: moment, p_payload: payload, p_set_matin: setMatin,
+        p_snapshot: snapRows, p_expenses: exRows, p_deliveries: lvRows, p_deposits: depRows, p_superette_cogs: cogs,
+      })
+      if (e1) throw e1
+
+      // Photos-preuves : Storage n'est pas transactionnel avec SQL, reste un appel séparé — APRÈS
+      // l'écriture financière/stock ci-dessus (si cette étape échoue, la saisie est déjà
+      // enregistrée en sécurité, cohérent avec "les photos sont recommandées, jamais bloquantes").
       for (const np of newPhotos) {
         const path = `${sid}/photos/${date}/${Date.now()}_${np.file.name.replace(/[^\w.\-]/g, '_')}`
         const { error: up } = await supabase.storage.from(BORDEREAUX_BUCKET).upload(path, await compressImage(np.file))
@@ -643,23 +642,6 @@ export default function Submit() {
         if (ai) throw ai
       }
       // photos des compteurs : déjà envoyées à la prise de vue (voir handleMeterPhoto), rien à faire ici.
-
-      // NB : plus de sortie automatique pour le GAZ / LUBRIFIANT.
-      // Le stock est DÉCLARÉ chaque jour (gaz_stock_*, lubrifiant_stock) ; la sortie
-      // (consommation) est DÉDUITE de deux relevés consécutifs par la vue v_sorties_deduites :
-      //   sortie(J) = stock_déclaré(J-1) + entrées(J) − stock_déclaré(J).
-      // On nettoie d'éventuelles anciennes sorties auto gaz/lubrifiant (doublons → stock négatif).
-      await supabase.from('stock_movements').delete()
-        .eq('station_id', sid).eq('date_mouvement', date).eq('source', 'vente')
-        .in('categorie', ['gaz', 'lubrifiant'])
-      // Supérette : suivie en VALEUR (pas de comptage déclaré) → sortie au coût de revient.
-      await supabase.from('stock_movements').delete()
-        .eq('station_id', sid).eq('date_mouvement', date).eq('source', 'vente').eq('categorie', 'superette')
-      const tauxSup = N(settings.taux_superette) || 8
-      const cogs = numFR(f.superette_espece) ? Math.round(numFR(f.superette_espece) * (1 - tauxSup / 100)) : 0
-      if (cogs) await supabase.from('stock_movements').insert([{ station_id: sid, categorie: 'superette', type: 'sortie', valeur: cogs, source: 'vente', note: 'coût de revient', date_mouvement: date, created_by: session.user.id }])
-
-      await supabase.from('submissions').insert({ report_date: date, station_id: sid, moment, created_by: session.user.id })
 
       // Recompresse en arrière-plan les photos envoyées brutes cette session (voir handleMeterPhoto
       // /handleExpensePhoto/handleDepositPhoto) — pas de await : ça ne doit pas retarder le retour
@@ -708,37 +690,24 @@ export default function Submit() {
     const perimeLines = prods.filter(p => N(entry(p.id).perime) > 0)
     setBusy(true); setErr(''); setMsg('')
     try {
-      const { error } = await supabase.from('daily_reports').upsert(
-        { station_id: stationId, report_date: date, superette_espece: salesTotal, created_by: session.user.id },
-        { onConflict: 'station_id,report_date' })
-      if (error) throw error
-      // Remplace les lignes de vente du jour (idempotent → la vendeuse peut re-saisir/corriger)
-      await supabase.from('superette_sales').delete().eq('station_id', stationId).eq('report_date', date)
-      if (venduLines.length) {
-        const { error: si } = await supabase.from('superette_sales').insert(venduLines.map(p => ({
-          station_id: stationId, report_date: date, product_id: p.id, nom: p.nom,
-          quantite: N(entry(p.id).vendu), prix_vente: N(p.prix_vente), montant: lineMontant(p), created_by: session.user.id,
-        })))
-        if (si) throw si
-      }
-      // Mouvements de stock par article (sans valeur : la valorisation globale reste celle
-      // du champ "Espèces supérette" ci-dessus — éviter un double comptage dans v_stock_valeur).
-      // Tagués par ref=saisie-vendeuse-<date> et remplacés en bloc à chaque enregistrement
-      // (idempotent, comme superette_sales) sans toucher aux mouvements saisis ailleurs (Stock).
+      // Les 4 écritures (daily_reports / superette_sales / stock_movements / submissions) sont
+      // désormais une seule transaction côté base (fonction RPC) — voir migration_v122 : un
+      // échec réseau en plein milieu ne peut plus laisser une recette enregistrée sans le
+      // mouvement de stock correspondant (ou l'inverse).
       const ref = `saisie-vendeuse-${date}`
-      await supabase.from('stock_movements').delete().eq('station_id', stationId).eq('categorie', 'superette').eq('ref', ref)
       const mvts = [
         ...venduLines.map(p => ({ type: 'sortie', source: 'vente', produit: p.nom, quantite: N(entry(p.id).vendu), note: null })),
         ...recuLines.map(p => ({ type: 'entree', source: 'achat', produit: p.nom, quantite: N(entry(p.id).recu), note: 'Saisie vendeuse' })),
         ...perimeLines.map(p => ({ type: 'sortie', source: 'perte', produit: p.nom, quantite: N(entry(p.id).perime), note: 'Périmé / à jeter — saisie vendeuse' })),
       ]
-      if (mvts.length) {
-        const { error: mi } = await supabase.from('stock_movements').insert(mvts.map(m => ({
-          station_id: stationId, categorie: 'superette', date_mouvement: date, created_by: session.user.id, ref, ...m,
-        })))
-        if (mi) throw mi
-      }
-      await supabase.from('submissions').insert({ report_date: date, station_id: stationId, moment: 'superette', created_by: session.user.id })
+      const { error } = await supabase.rpc('enregistrer_vente_superette_jour', {
+        p_station_id: stationId, p_report_date: date, p_superette_espece: salesTotal,
+        p_sales: venduLines.map(p => ({
+          product_id: p.id, nom: p.nom, quantite: N(entry(p.id).vendu), prix_vente: N(p.prix_vente), montant: lineMontant(p),
+        })),
+        p_mouvements: mvts, p_ref: ref,
+      })
+      if (error) throw error
       setMsg('Supérette enregistrée')
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (e) { setErr(e.message || String(e)) } finally { setBusy(false) }

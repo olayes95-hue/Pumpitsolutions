@@ -124,41 +124,27 @@ export async function receptionner({ supabase, bucket, stationId, session, order
   // handleReceptionPhoto dans Orders.jsx / OrderReception.jsx — recv.photo_path est son chemin.
   const photo_path = recv.photo_path || null
 
-  // Chaque écriture vérifie son erreur et jette immédiatement : un échec RLS silencieux ici
-  // (déjà arrivé — la mise à jour du statut fuel_orders était bloquée pour le gérant sans que
-  // personne ne le voie, laissant des commandes "lancée" malgré des réceptions bien enregistrées)
-  // doit remonter comme une vraie erreur, pas un faux succès.
-  if (cat === 'carburant') {
-    const prix = prixAchat(order.produit, settings)
-    const { error: e1 } = await supabase.from('order_receptions').insert({ order_id: order.id, station_id: stationId, report_date: day, quantite_recue: recu, cuve_avant: N(recv.cuve_avant), cuve_apres: N(recv.cuve_apres), prix_achat: prix, montant: recu * prix, photo_path, created_by: session.user.id })
-    if (e1) throw e1
-    const { error: e2 } = await supabase.from('fuel_orders').update({ statut: complet ? 'recue' : 'partielle', cuve_avant: order.cuve_avant != null ? order.cuve_avant : N(recv.cuve_avant), cuve_apres: N(recv.cuve_apres), report_date: day, prix_achat: prix, montant: total * prix, recu_by: session.user.id, recu_at: new Date().toISOString() }).eq('id', order.id)
-    if (e2) throw e2
-    // Recalcule le stock cuve du jour à partir du MAX de toutes les réceptions (voir
-    // recomputeDailyStock) — plus un simple écrasement par "cuve après" de CETTE réception,
-    // donc insensible à l'ordre dans lequel plusieurs réceptions du même jour sont saisies.
-    await recomputeDailyStock({ supabase, stationId, produit: order.produit, day })
-  } else {
-    const { error: e1 } = await supabase.from('order_receptions').insert({ order_id: order.id, station_id: stationId, report_date: day, quantite_recue: recu, photo_path, created_by: session.user.id })
-    if (e1) throw e1
-    const { error: e2 } = await supabase.from('fuel_orders').update({ statut: complet ? 'recue' : 'partielle', report_date: day, recu_by: session.user.id, recu_at: new Date().toISOString() }).eq('id', order.id)
-    if (e2) throw e2
-    const mvt = { station_id: stationId, categorie: cat, type: 'entree', source: 'reception', ref: 'CMD#' + order.id, date_mouvement: day, created_by: session.user.id }
-    if (cat === 'superette') mvt.valeur = N(order.montant_paiement)
-    else {
-      mvt.produit = order.produit; mvt.quantite = recu
-      if (recv.qte_saisie != null) mvt.qte_saisie = recv.qte_saisie
-      if (recv.unite_saisie) mvt.unite_saisie = recv.unite_saisie
-      if (recv.facteur_conversion != null) mvt.facteur_conversion = recv.facteur_conversion
-      if (recv.detail_saisie) mvt.detail_saisie = recv.detail_saisie
-    }
-    const { error: e3 } = await supabase.from('stock_movements').insert(mvt)
-    if (e3) throw e3
-  }
-  if (photo_path) {
-    const { error: e4 } = await supabase.from('attachments').insert({ station_id: stationId, report_date: day, categorie: 'reception', note: `${order.produit || cat} — reçu ${recu} / ${N(order.quantite_commandee)}`, photo_path, created_by: session.user.id })
-    if (e4) throw e4
-  }
+  // Toute la séquence (order_receptions / fuel_orders / recalcul stock cuve / stock_movements /
+  // attachments) est écrite en une seule transaction côté base (fonction RPC) — avant, chaque
+  // étape était un appel séparé depuis le navigateur ; un échec RLS silencieux entre deux appels
+  // (déjà arrivé en production — la mise à jour du statut fuel_orders bloquée pour le gérant
+  // sans que personne ne le voie, laissant des commandes "lancée" malgré une réception
+  // enregistrée) laissait une incohérence au lieu de tout annuler. Voir migration_v122.
+  const prix = cat === 'carburant' ? prixAchat(order.produit, settings) : null
+  const { error } = await supabase.rpc('receptionner_commande', {
+    p_order_id: order.id, p_station_id: stationId, p_report_date: day, p_categorie: cat, p_produit: order.produit,
+    p_quantite_recue: recu,
+    p_cuve_avant: cat === 'carburant' ? N(recv.cuve_avant) : null,
+    p_cuve_apres: cat === 'carburant' ? N(recv.cuve_apres) : null,
+    p_order_cuve_avant: order.cuve_avant ?? null,
+    p_prix_achat: prix, p_total: total, p_complet: complet, p_photo_path: photo_path, p_quantite_commandee: N(order.quantite_commandee),
+    p_qte_saisie: cat !== 'carburant' && recv.qte_saisie != null ? recv.qte_saisie : null,
+    p_unite_saisie: cat !== 'carburant' ? (recv.unite_saisie || null) : null,
+    p_facteur_conversion: cat !== 'carburant' && recv.facteur_conversion != null ? recv.facteur_conversion : null,
+    p_detail_saisie: cat !== 'carburant' ? (recv.detail_saisie || null) : null,
+    p_montant_paiement: cat === 'superette' ? N(order.montant_paiement) : null,
+  })
+  if (error) throw error
 
   return { complet, total, matinManquant }
 }
