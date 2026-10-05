@@ -397,6 +397,27 @@ export default function Stock() {
                 </div>
               )}
 
+              {catTab === 'superette' && isAdmin && (() => {
+                const refAujourdhui = `saisie-vendeuse-${today()}`
+                const saisieJour = mvtsCat.filter(m => m.ref === refAujourdhui)
+                const vendu = saisieJour.filter(m => m.source === 'vente')
+                const recu = saisieJour.filter(m => m.source === 'achat')
+                const perime = saisieJour.filter(m => m.source === 'perte')
+                return (
+                  <div>
+                    <SectionLabel>Saisie vendeuse du jour</SectionLabel>
+                    {saisieJour.length ? (<>
+                      <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', marginBottom: 'var(--sp-3)' }}>
+                        <Tag>{vendu.length} vendu{vendu.length > 1 ? 's' : ''}</Tag>
+                        <Tag>{recu.length} reçu{recu.length > 1 ? 's' : ''}</Tag>
+                        <Tag>{perime.length} périmé{perime.length > 1 ? 's' : ''}</Tag>
+                      </div>
+                      <DataTable columns={journalColumns} rows={saisieJour} />
+                    </>) : <PanelEmpty icon="calendar-days" label="Rien saisi par la vendeuse aujourd'hui pour l'instant." />}
+                  </div>
+                )
+              })()}
+
 
               {catTab === 'lubrifiant' && ecartRows.length > 0 && (
                 <div>
