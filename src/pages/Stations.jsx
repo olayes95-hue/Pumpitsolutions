@@ -49,7 +49,7 @@ export default function Stations() {
   const [tab, setTab] = useState(() => TABS[0]?.value || 'stations')
 
   async function load() {
-    const [s, u, st, r, p, rp, ps, ec, fo, bc] = await Promise.all([
+    const [s, u, st, r, p, rp, ps, ec, fo, bc, em] = await Promise.all([
       supabase.from('stations').select('*').order('id'),
       supabase.from('profiles').select('id, full_name, role, station_id, approved').order('full_name'),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
@@ -60,8 +60,10 @@ export default function Stations() {
       supabase.from('expense_categories').select('*').order('ordre'),
       supabase.from('formules').select('key, label, max_utilisateurs_station'),
       supabase.from('bank_line_categories').select('*').order('ordre'),
+      supabase.rpc('equipe_emails'),   // email vit dans auth.users, pas profiles — voir migration_v131
     ])
-    setStations(s.data || []); setUsers(u.data || []); setSettings(st.data || null)
+    const emailById = new Map((em.data || []).map(x => [x.id, x.email]))
+    setStations(s.data || []); setUsers((u.data || []).map(x => ({ ...x, email: emailById.get(x.id) || '' }))); setSettings(st.data || null)
     setRoles(r.data || []); setPermissions(p.data || []); setRolePerms(rp.data || [])
     const psm = {}; for (const x of (ps.data || [])) (psm[x.profile_id] = psm[x.profile_id] || []).push(x.station_id)
     setProfileStations(psm)
@@ -128,6 +130,15 @@ export default function Stations() {
       if (selected.length) await supabase.from('profile_stations').insert(selected.map(sid => ({ profile_id: u.id, station_id: sid })))
     }
     flash(approve ? 'Compte validé' : 'Membre mis à jour'); load()
+  }
+  // Changer l'email d'un AUTRE compte nécessite l'API Admin de Supabase Auth (clé service_role,
+  // jamais exposée au navigateur) — voir supabase/functions/admin-update-email et migration_v131.
+  async function saveEmail(u) {
+    const newEmail = (u._emailDraft || '').trim()
+    if (!newEmail || newEmail === u.email) return
+    const { data, error } = await supabase.functions.invoke('admin-update-email', { body: { profile_id: u.id, new_email: newEmail } })
+    if (error || data?.error) { fail(error || data.error); return }
+    flash('Email mis à jour'); load()
   }
   // Retire l'accès à l'application (supprime la ligne profil) — ne supprime PAS le compte
   // email/mot de passe côté Supabase Auth (nécessiterait une clé service_role). Si ce compte
@@ -244,6 +255,13 @@ export default function Stations() {
 
   const stationCols = [
     { key: 'full_name', header: 'Nom' },
+    { key: 'email', header: 'Email', render: u => (
+      <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', minWidth: 220 }}>
+        <Input size="sm" value={u._emailDraft ?? u.email ?? ''} onChange={e => upU(u.id, '_emailDraft', e.target.value)} style={{ flex: 1 }} />
+        {(u._emailDraft ?? u.email) !== u.email && (u._emailDraft || '').trim() &&
+          <Button size="sm" tone="dark" onClick={() => saveEmail(u)}>Modifier</Button>}
+      </div>
+    ) },
     { key: 'role', header: 'Rôle', render: u => <Select size="sm" value={u.role} onChange={e => upU(u.id, 'role', e.target.value)} options={roles.map(r => ({ value: r.key, label: r.label }))} style={{ width: '100%' }} /> },
     { key: 'station_id', header: 'Station(s)', render: u => SINGLE_STATION_ROLES.includes(u.role)
       ? <Select size="sm" value={u.station_id || ''} onChange={e => upU(u.id, 'station_id', e.target.value)} options={stationOptions} style={{ width: '100%' }} />
