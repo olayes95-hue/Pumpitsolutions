@@ -8,7 +8,6 @@ export const ALERT_TONES = {
   ECART_CAISSE: { label: 'Écart de caisse', tone: 'warn' },
   DEPENSE_NON_JUSTIFIEE: { label: 'Dépense non justifiée', tone: 'warn' },
   ECART_COMPTEUR: { label: 'Écart compteur', tone: 'warn' },
-  ECART_VENTE_CARBURANT: { label: 'Vente déclarée ≠ bon + espèces', tone: 'warn' },
   RELEVE_COMPTEUR_MANQUANT: { label: 'Relevé compteur non mis à jour', tone: 'info' },
   DONNEES_INCOHERENTES: { label: 'Données compteur/cuve à vérifier', tone: 'info' },
   STOCK_BAS: { label: 'Stock bas carburant', tone: 'alarm' },
