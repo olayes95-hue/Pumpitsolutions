@@ -3,8 +3,7 @@
 // Rempli page par page au fur et à mesure de leur conversion.
 
 export const ALERT_TONES = {
-  VERSEMENT_MANQUANT: { label: 'Versement manquant', tone: 'alarm' },
-  VERSEMENT_INCOMPLET: { label: 'Versement incomplet', tone: 'alarm' },
+  VERSEMENT_INCOMPLET: { label: 'Versement incomplet ou manquant', tone: 'alarm' },
   ECART_CAISSE: { label: 'Écart de caisse', tone: 'warn' },
   DEPENSE_NON_JUSTIFIEE: { label: 'Dépense non justifiée', tone: 'warn' },
   ECART_COMPTEUR: { label: 'Écart compteur', tone: 'warn' },
