@@ -41,7 +41,7 @@ export default function Stations() {
   // strictement admin, Stations/Équipe deviennent délégables via manage_stations_config/manage_team.
   const TABS = [
     (isAdmin || can('manage_stations_config')) && { value: 'stations', label: 'Stations' },
-    (isAdmin || can('manage_team')) && { value: 'equipe', label: 'Équipe' },
+    (isAdmin || can('manage_team') || can('view_team')) && { value: 'equipe', label: 'Équipe' },
     // Rôles et permissions sont communs à tous les clients : seul l'administrateur de la plateforme les modifie.
     isPlatformAdmin && { value: 'roles', label: 'Rôles' },
     isAdmin && { value: 'parametres', label: 'Paramètres' },
@@ -251,42 +251,52 @@ export default function Stations() {
 
   const stationOptions = [{ value: '', label: '— toutes / aucune —' }, ...stations.map(s => ({ value: s.id, label: s.nom }))]
 
+  // view_team (ex. directeur) : visibilité sur l'équipe sans les droits d'édition de
+  // manage_team — champs en lecture, aucune action de validation/désactivation.
+  const peutGererEquipe = isAdmin || can('manage_team')
   const stationCols = [
     { key: 'full_name', header: 'Nom' },
-    { key: 'email', header: 'Email', render: u => (
+    { key: 'email', header: 'Email', render: u => !peutGererEquipe ? u.email : (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', minWidth: 220 }}>
         <Input size="sm" value={u._emailDraft ?? u.email ?? ''} onChange={e => upU(u.id, '_emailDraft', e.target.value)} style={{ flex: 1 }} />
         {(u._emailDraft ?? u.email) !== u.email && (u._emailDraft || '').trim() &&
           <Button size="sm" tone="dark" onClick={() => saveEmail(u)}>Modifier</Button>}
       </div>
     ) },
-    { key: 'role', header: 'Rôle', render: u => <Select size="sm" value={u.role} onChange={e => upU(u.id, 'role', e.target.value)} options={roles.map(r => ({ value: r.key, label: r.label }))} style={{ width: '100%' }} /> },
-    { key: 'station_id', header: 'Station(s)', render: u => SINGLE_STATION_ROLES.includes(u.role)
-      ? <Select size="sm" value={u.station_id || ''} onChange={e => upU(u.id, 'station_id', e.target.value)} options={stationOptions} style={{ width: '100%' }} />
-      : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
-          {stations.map(s => (
-            <Checkbox key={s.id} label={s.nom} checked={(profileStations[u.id] || []).includes(s.id)}
-              onChange={v => toggleUserStation(u.id, s.id, v)} />
-          ))}
-        </div> },
+    { key: 'role', header: 'Rôle', render: u => !peutGererEquipe ? (roles.find(r => r.key === u.role)?.label || u.role)
+      : <Select size="sm" value={u.role} onChange={e => upU(u.id, 'role', e.target.value)} options={roles.map(r => ({ value: r.key, label: r.label }))} style={{ width: '100%' }} /> },
+    { key: 'station_id', header: 'Station(s)', render: u => {
+      const noms = SINGLE_STATION_ROLES.includes(u.role)
+        ? stations.find(s => s.id === u.station_id)?.nom || '—'
+        : stations.filter(s => (profileStations[u.id] || []).includes(s.id)).map(s => s.nom).join(', ') || '—'
+      if (!peutGererEquipe) return noms
+      return SINGLE_STATION_ROLES.includes(u.role)
+        ? <Select size="sm" value={u.station_id || ''} onChange={e => upU(u.id, 'station_id', e.target.value)} options={stationOptions} style={{ width: '100%' }} />
+        : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
+            {stations.map(s => (
+              <Checkbox key={s.id} label={s.nom} checked={(profileStations[u.id] || []).includes(s.id)}
+                onChange={v => toggleUserStation(u.id, s.id, v)} />
+            ))}
+          </div>
+    } },
   ]
   const pendingColumns = [
     ...stationCols,
-    { key: 'actions', header: '', align: 'right', render: u => (
+    ...(peutGererEquipe ? [{ key: 'actions', header: '', align: 'right', render: u => (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
         <Button size="sm" tone="dark" onClick={() => saveUser(u, { approve: true })}>Valider</Button>
         <Button size="sm" tone="danger" onClick={() => deleteUser(u)}>Supprimer</Button>
       </div>
-    ) },
+    ) }] : []),
   ]
   const userColumns = [
     ...stationCols,
-    { key: 'actions', header: '', align: 'right', render: u => (
+    ...(peutGererEquipe ? [{ key: 'actions', header: '', align: 'right', render: u => (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
         <Button size="sm" tone="dark" onClick={() => saveUser(u)}>OK</Button>
         <Button size="sm" tone="danger" disabled={u.id === session?.user?.id} title={u.id === session?.user?.id ? 'Vous ne pouvez pas désactiver votre propre compte' : undefined} onClick={() => disableUser(u)}>Désactiver</Button>
       </div>
-    ) },
+    ) }] : []),
   ]
   const pendingUsers = users.filter(u => !u.approved)
   const activeUsers = users.filter(u => u.approved)
@@ -342,7 +352,7 @@ export default function Stations() {
 
       {tab === 'equipe' && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
-        {pendingUsers.length > 0 && (
+        {peutGererEquipe && pendingUsers.length > 0 && (
           <Panel title="Comptes en attente de validation" meta={`${pendingUsers.length}`} status="alarm" flush>
             <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
               Nouvelles inscriptions ou comptes désactivés — sans accès tant qu'ils ne sont pas
