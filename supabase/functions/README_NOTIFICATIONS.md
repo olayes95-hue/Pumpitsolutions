@@ -59,6 +59,8 @@ adresse avant d'activer, consulte l'historique d'envoi en bas de la page.
 | `commande_a_valider` | `{{station}}`, `{{produit}}`, `{{quantite}}`, `{{date}}`, `{{gerant}}` | admin + directeur de la station |
 | `commande_statut` | `{{station}}`, `{{produit}}`, `{{statut}}`, `{{valideur}}` | la personne qui a proposé la commande |
 | `reception_ecart` | `{{station}}`, `{{produit}}`, `{{quantite_commandee}}`, `{{quantite_recue}}` | admin + directeur de la station |
+| `prix_a_valider` | `{{station}}`, `{{produit}}`, `{{champ_label}}`, `{{prix_actuel}}`, `{{prix_demande}}`, `{{gerant}}` | admin + directeur de la station |
+| `prix_statut` | `{{produit}}`, `{{champ_label}}`, `{{prix_demande}}`, `{{statut}}`, `{{valideur}}` | la personne qui a proposé le prix |
 | `essai_j3` / `essai_termine` | `{{station}}`, `{{date_fin}}` | admin + directeur du client |
 | `facture_emise` / `facture_retard` | `{{numero}}`, `{{montant}}`, `{{periode_debut}}`, `{{periode_fin}}` / `{{date_emission}}` | admin + directeur du client |
 | `compte_a_valider` | `{{nom}}`, `{{email}}` | admin + directeur de l'organisation |

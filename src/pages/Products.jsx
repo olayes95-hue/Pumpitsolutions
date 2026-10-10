@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
+import { useStation } from '../lib/station.jsx'
+import { fcfa } from '../lib/format'
+import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { numFR } from '../lib/format'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
@@ -32,11 +35,18 @@ function FormSection({ title, children }) {
 }
 
 export default function Products() {
-  const { isAdmin, can } = useAuth()
-  // Catalogue : réservé à qui gère les produits. Historique des prix : aussi ouvert au
-  // directeur (permission séparée, voir migration_v101) — simple consultation, pas d'édition.
+  const { isAdmin, can, session } = useAuth()
+  const { stationId } = useStation()
+  // peutEditerDirect : écrit directement products.prix_* (admin). peutProposer : accès en
+  // mode "proposition" (chef de piste, voir migration_v139) — toute modification de prix
+  // passe par product_price_requests, jamais d'écriture directe sur products pour ce profil.
+  const peutEditerDirect = isAdmin || can('manage_products')
+  const peutProposer = !peutEditerDirect && can('propose_prices')
+  // Catalogue : réservé à qui gère les produits, ou qui peut proposer un prix. Historique
+  // des prix : aussi ouvert au directeur (permission séparée, voir migration_v101) — simple
+  // consultation, pas d'édition.
   const TABS = [
-    (isAdmin || can('manage_products')) && { value: 'catalogue', label: 'Catalogue' },
+    (peutEditerDirect || peutProposer) && { value: 'catalogue', label: 'Catalogue' },
     (isAdmin || can('view_price_history')) && { value: 'prix', label: 'Historique des prix' },
   ].filter(Boolean)
   const [tab, setTab] = useState(() => TABS[0]?.value || 'catalogue')
@@ -51,9 +61,23 @@ export default function Products() {
   const [nf, setNf] = useState({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '', consigne_prix: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [settings, setSettings] = useState(null)
+  // Mode "proposition" : valeur d'origine (pour calculer prix_actuel) + mes demandes en
+  // cours, pour ne pas en reproposer une deuxième tant que la première n'est pas traitée.
+  const [original, setOriginal] = useState({})
+  const [mesDemandes, setMesDemandes] = useState([])
 
-  async function load() { setList((await supabase.from('products').select('*').order('categorie').order('ordre')).data || []) }
+  async function load() {
+    const { data } = await supabase.from('products').select('*').order('categorie').order('ordre')
+    setList(data || [])
+    setOriginal(Object.fromEntries((data || []).map(p => [p.id, { prix_achat: p.prix_achat, prix_vente: p.prix_vente, consigne_prix: p.consigne_prix }])))
+  }
+  async function loadMesDemandes() {
+    if (!peutProposer || !session?.user?.id) return
+    const { data } = await supabase.from('product_price_requests').select('*, products(nom, categorie)').eq('demande_par', session.user.id).order('demande_at', { ascending: false })
+    setMesDemandes(data || [])
+  }
   useEffect(() => { load() }, [])
+  useEffect(() => { loadMesDemandes() }, [peutProposer, session?.user?.id])
   useEffect(() => { supabase.from('settings').select('*').eq('id', 1).maybeSingle().then(({ data }) => setSettings(data || {})) }, [])
   // Marge = prix de vente − prix d'achat : ce n'est pas une donnée saisie indépendamment,
   // juste l'écart entre deux prix déjà renseignés ci-dessus — jamais modifiable à la main.
@@ -121,6 +145,24 @@ export default function Products() {
   }
   async function del(id) { await supabase.from('products').delete().eq('id', id); load() }
 
+  // Mode "proposition" (chef de piste) : jamais d'écriture directe sur products — une ligne
+  // par champ de prix réellement changé dans product_price_requests (migration_v139), que la
+  // hiérarchie devra valider. prix_actuel vient de `original` (valeur au chargement), pas de
+  // la valeur en cours de saisie dans `list`, pour rester correct même après plusieurs frappes.
+  const PRICE_FIELDS = ['prix_achat', 'prix_vente', 'consigne_prix']
+  function pendingDemande(productId, champ) {
+    return mesDemandes.find(d => d.product_id === productId && d.champ === champ && d.statut === 'en_attente')
+  }
+  async function proposer(p) {
+    const rows = PRICE_FIELDS
+      .filter(champ => numFR(p[champ]) !== numFR(original[p.id]?.[champ]) && !pendingDemande(p.id, champ))
+      .map(champ => ({ product_id: p.id, station_id: stationId, champ, prix_actuel: numFR(original[p.id]?.[champ]), prix_demande: numFR(p[champ]), demande_par: session.user.id }))
+    if (!rows.length) return
+    const { error } = await supabase.from('product_price_requests').insert(rows)
+    if (error) setErr(error.message)
+    else { setDirty(d => { const n = new Set(d); n.delete(p.id); return n }); flash(`${rows.length} proposition(s) envoyée(s) à votre hiérarchie`); load(); loadMesDemandes() }
+  }
+
   async function validate(p) {
     const { error } = await supabase.from('products').update({
       categorie: p.categorie, nom: p.nom, unite: p.unite,
@@ -151,22 +193,33 @@ export default function Products() {
     ) },
   ]
 
+  // Champ de prix en mode "proposition" : badge si une demande est déjà en attente sur ce
+  // champ pour ce produit (évite les doublons), sinon un Input normal (passe par up(), lu
+  // ensuite par proposer() au clic — jamais d'écriture directe sur products).
+  function champPrix(p, champ, placeholder) {
+    const en_attente = peutProposer && pendingDemande(p.id, champ)
+    if (en_attente) return <Badge tone="warn" title={`Proposé : ${fcfa(en_attente.prix_demande)}`}>En attente</Badge>
+    return <Input size="sm" numeric value={p[champ] ?? ''} onChange={e => up(p.id, champ, e.target.value)} placeholder={placeholder} style={{ width: 90 }} />
+  }
+  const texte = (v) => <span style={{ font: '400 14px/1.3 var(--font-ui)', color: 'var(--text-body)' }}>{v}</span>
   const columns = [
-    { key: 'nom', header: 'Nom', width: 280, render: p => <Input size="sm" value={p.nom || ''} onChange={e => up(p.id, 'nom', e.target.value)} style={{ width: '100%' }} /> },
-    { key: 'unite', header: 'Unité', render: p => <Select size="sm" value={p.unite || 'unité'} onChange={e => up(p.id, 'unite', e.target.value)} options={UNITE_OPTIONS} style={{ width: '100%' }} /> },
+    { key: 'nom', header: 'Nom', width: 280, render: p => peutProposer ? texte(p.nom) : <Input size="sm" value={p.nom || ''} onChange={e => up(p.id, 'nom', e.target.value)} style={{ width: '100%' }} /> },
+    { key: 'unite', header: 'Unité', render: p => peutProposer ? texte(p.unite) : <Select size="sm" value={p.unite || 'unité'} onChange={e => up(p.id, 'unite', e.target.value)} options={UNITE_OPTIONS} style={{ width: '100%' }} /> },
     ...(cat === 'lubrifiant' || cat === 'superette' ? [
-      { key: 'conditionnement_nom', header: 'Conditionnement', render: p => <Input size="sm" value={p.conditionnement_nom || ''} onChange={e => up(p.id, 'conditionnement_nom', e.target.value)} placeholder="ex : carton" style={{ width: 100 }} /> },
-      { key: 'conditionnement_qte', header: 'Qté/condit.', align: 'right', render: p => <Input size="sm" numeric value={p.conditionnement_qte ?? ''} onChange={e => up(p.id, 'conditionnement_qte', e.target.value)} placeholder="ex : 12" style={{ width: 70 }} /> },
-      { key: 'prix_achat_gros', header: 'Prix du gros', align: 'right', render: p => <Input size="sm" numeric value={p.prix_achat_gros ?? ''} onChange={e => up(p.id, 'prix_achat_gros', e.target.value)} placeholder="carton" style={{ width: 90 }} /> },
+      { key: 'conditionnement_nom', header: 'Conditionnement', render: p => peutProposer ? texte(p.conditionnement_nom || '—') : <Input size="sm" value={p.conditionnement_nom || ''} onChange={e => up(p.id, 'conditionnement_nom', e.target.value)} placeholder="ex : carton" style={{ width: 100 }} /> },
+      { key: 'conditionnement_qte', header: 'Qté/condit.', align: 'right', render: p => peutProposer ? texte(p.conditionnement_qte ?? '—') : <Input size="sm" numeric value={p.conditionnement_qte ?? ''} onChange={e => up(p.id, 'conditionnement_qte', e.target.value)} placeholder="ex : 12" style={{ width: 70 }} /> },
+      { key: 'prix_achat_gros', header: 'Prix du gros', align: 'right', render: p => peutProposer ? texte(p.prix_achat_gros ?? '—') : <Input size="sm" numeric value={p.prix_achat_gros ?? ''} onChange={e => up(p.id, 'prix_achat_gros', e.target.value)} placeholder="carton" style={{ width: 90 }} /> },
     ] : []),
-    { key: 'prix_achat', header: 'Prix achat (unité)', align: 'right', render: p => <Input size="sm" numeric value={p.prix_achat ?? ''} onChange={e => up(p.id, 'prix_achat', e.target.value)} style={{ width: 90 }} /> },
-    { key: 'prix_vente', header: 'Prix vente', align: 'right', render: p => <Input size="sm" numeric value={p.prix_vente ?? ''} onChange={e => up(p.id, 'prix_vente', e.target.value)} style={{ width: 90 }} /> },
+    { key: 'prix_achat', header: 'Prix achat (unité)', align: 'right', render: p => champPrix(p, 'prix_achat') },
+    { key: 'prix_vente', header: 'Prix vente', align: 'right', render: p => champPrix(p, 'prix_vente') },
     ...(cat === 'gaz' ? [
-      { key: 'consigne_prix', header: 'Prix consigne', align: 'right', render: p => <Input size="sm" numeric value={p.consigne_prix ?? ''} onChange={e => up(p.id, 'consigne_prix', e.target.value)} placeholder="—" style={{ width: 90 }} /> },
+      { key: 'consigne_prix', header: 'Prix consigne', align: 'right', render: p => champPrix(p, 'consigne_prix', '—') },
     ] : []),
-    { key: 'seuil', header: 'Seuil', align: 'right', render: p => <Input size="sm" numeric value={p.seuil ?? ''} onChange={e => up(p.id, 'seuil', e.target.value)} style={{ width: 70 }} /> },
-    { key: 'actif', header: 'Actif', render: p => <Checkbox checked={!!p.actif} onChange={v => up(p.id, 'actif', v)} /> },
-    { key: 'actions', header: '', align: 'right', render: p => (
+    { key: 'seuil', header: 'Seuil', align: 'right', render: p => peutProposer ? texte(p.seuil ?? 0) : <Input size="sm" numeric value={p.seuil ?? ''} onChange={e => up(p.id, 'seuil', e.target.value)} style={{ width: 70 }} /> },
+    { key: 'actif', header: 'Actif', render: p => peutProposer ? texte(p.actif ? 'Oui' : 'Non') : <Checkbox checked={!!p.actif} onChange={v => up(p.id, 'actif', v)} /> },
+    { key: 'actions', header: '', align: 'right', render: p => peutProposer ? (
+      dirty.has(p.id) && <Button size="sm" tone="dark" onClick={() => proposer(p)}>Proposer</Button>
+    ) : (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
         <Button size="sm" tone="dark" onClick={() => save(p)}>OK</Button>
         <Button size="sm" tone="danger" onClick={() => del(p.id)}>✕</Button>
@@ -186,15 +239,17 @@ export default function Products() {
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
           {cat === 'carburant'
             ? "Prix de vente (pré-remplis dans la saisie), prix d'achat (coût des commandes) et marge, en FCFA/L."
+            : peutProposer
+            ? "Catalogue en lecture. Proposez un nouveau prix d'achat, de vente ou de consigne : il ne s'applique qu'après validation de votre hiérarchie."
             : "Catalogue par catégorie avec prix d'achat, prix de vente et seuil d'alerte."}
         </p>
         <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-            {DISPLAY_CATS.map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
+            {(peutEditerDirect ? DISPLAY_CATS : CATS).map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
           </div>
-          {cat !== 'carburant' && <Button size="sm" tone="primary" onClick={() => setShowAddForm(s => !s)}>{showAddForm ? 'Annuler' : '+ Nouveau produit'}</Button>}
+          {peutEditerDirect && cat !== 'carburant' && <Button size="sm" tone="primary" onClick={() => setShowAddForm(s => !s)}>{showAddForm ? 'Annuler' : '+ Nouveau produit'}</Button>}
         </div>
-        {cat !== 'carburant' && showAddForm && (
+        {peutEditerDirect && cat !== 'carburant' && showAddForm && (
           <form onSubmit={add} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'end', marginTop: 'var(--sp-4)', padding: 'var(--sp-4)', background: 'var(--brume)', borderRadius: 'var(--radius-1)' }}>
             <Field label="Nouveau produit" style={{ flex: '2 1 200px' }}>
               <Input value={nf.nom} onChange={e => setNf({ ...nf, nom: e.target.value })} placeholder={cat === 'superette' ? 'ex : Eau 1,5L' : 'nom'} />
@@ -243,7 +298,7 @@ export default function Products() {
           </form>
         </Panel>
       ) : (<>
-      {pending.length > 0 && (
+      {peutEditerDirect && pending.length > 0 && (
         <Panel title="Produits à valider" meta={`${pending.length}`} status="warn" flush>
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
             Ajoutés par une vendeuse pendant la vente. Corrigez la catégorie ou les prix si besoin, puis <b>Valider</b> (ou rejeter).
@@ -257,7 +312,7 @@ export default function Products() {
       <Panel title={cat} meta={`${shownAll.length}`} flush>
         <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', padding: 'var(--gutter-panel)', paddingBottom: 0 }}>
           <Input size="sm" value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher un produit…" style={{ flex: '1 1 220px' }} />
-          {dirty.size > 0 && <Button size="sm" tone="dark" disabled={saving} onClick={saveAll}>{saving ? 'Enregistrement…' : `Enregistrer tout (${dirty.size})`}</Button>}
+          {peutEditerDirect && dirty.size > 0 && <Button size="sm" tone="dark" disabled={saving} onClick={saveAll}>{saving ? 'Enregistrement…' : `Enregistrer tout (${dirty.size})`}</Button>}
         </div>
         {shown.length
           ? <DataTable columns={columns} rows={shown} />
@@ -267,6 +322,20 @@ export default function Products() {
             onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
         )}
       </Panel>
+
+      {peutProposer && (
+        <Panel title="Mes propositions de prix" meta={`${mesDemandes.length}`} flush>
+          {mesDemandes.length
+            ? <DataTable columns={[
+                { key: 'produit', header: 'Produit', render: d => d.products?.nom || '—' },
+                { key: 'champ', header: 'Champ', render: d => ({ prix_achat: "Prix d'achat", prix_vente: 'Prix de vente', consigne_prix: 'Prix de consigne' }[d.champ] || d.champ) },
+                { key: 'prix_actuel', header: 'Actuel', align: 'right', render: d => d.prix_actuel != null ? fcfa(d.prix_actuel) : '—' },
+                { key: 'prix_demande', header: 'Demandé', align: 'right', render: d => fcfa(d.prix_demande) },
+                { key: 'statut', header: 'Statut', render: d => <Badge tone={d.statut === 'validee' ? 'ok' : d.statut === 'refusee' ? 'alarm' : 'warn'}>{d.statut === 'validee' ? 'Validée' : d.statut === 'refusee' ? 'Refusée' : 'En attente'}</Badge> },
+              ]} rows={mesDemandes} />
+            : <PanelEmpty icon="book-open" label="Aucune proposition de prix envoyée pour le moment." />}
+        </Panel>
+      )}
       </>)}
       </>)}
 

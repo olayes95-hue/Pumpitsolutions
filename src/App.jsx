@@ -94,7 +94,7 @@ function useSpaces() {
         stock && { to: '/stock', icon: isVendeuse ? 'shopping-cart' : 'package', label: isVendeuse ? 'Supérette' : 'Stock et mouvements' },
         (opMetier || can('validate_orders')) && { to: '/commandes', icon: 'truck', label: 'Commandes' },
       ]),
-      (can('manage_products') || can('view_price_history')) && { to: '/produits', icon: 'book-open', label: 'Produits et prix' },
+      (can('manage_products') || can('view_price_history') || can('propose_prices')) && { to: '/produits', icon: 'book-open', label: 'Produits et prix' },
       can('manage_suppliers') && { to: '/fournisseurs', icon: 'factory', label: 'Fournisseurs' },
     ] },
     { key: 'finance', label: 'Finance', icon: 'wallet', items: [
@@ -315,7 +315,7 @@ function AppRoutes() {
           <Route path="/saisies" element={<Navigate to="/historique" />} />
           <Route path="/stock" element={guard(stock, <Stock />)} />
           <Route path="/commandes" element={guard(opMetier || can('validate_orders'), <Orders />)} />
-          <Route path="/produits" element={guard(can('manage_products') || can('view_price_history'), <Products />)} />
+          <Route path="/produits" element={guard(can('manage_products') || can('view_price_history') || can('propose_prices'), <Products />)} />
           <Route path="/fournisseurs" element={guard(can('manage_suppliers'), <Suppliers />)} />
           <Route path="/finance" element={guard(can('view_finance') && has('finance'), <Finance />)} />
           <Route path="/rapport-mensuel" element={guard(can('view_finance') && has('finance'), <RapportMensuel />)} />

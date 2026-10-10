@@ -8,6 +8,7 @@
 //     versement_manquant, versement_incomplet, ecart_caisse, ecart_compteur, ecart_stock,
 //     stock_bas, point_manquant, releve_compteur_manquant, depense_non_justifiee
 //   Commandes : commande_a_valider, commande_statut, reception_ecart
+//   Prix : prix_a_valider, prix_statut
 //   Compte/plateforme : essai_j3, essai_termine, facture_emise, facture_retard
 //
 // Paramétrage par offre : une règle peut poser requiert_fonction (clé de formules.fonctions)
@@ -230,6 +231,58 @@ async function traiterReceptionEcart(regles: any[]) {
   await setCursor("reception_ecart", dernier)
 }
 
+// ---------- Prix (product_price_requests, voir migration_v139) ----------
+const CHAMP_LABEL: Record<string, string> = { prix_achat: "prix d'achat", prix_vente: "prix de vente", consigne_prix: "prix de consigne" }
+
+async function traiterPrixAValider(regles: any[]) {
+  const cursor = await getCursor("prix_a_valider")
+  const { data: demandes } = await sb.from("product_price_requests").select("*, products(nom, categorie), stations(nom)")
+    .eq("statut", "en_attente").gt("demande_at", cursor).order("demande_at")
+  if (!demandes?.length) return
+  let dernier = cursor
+  for (const d of demandes as any[]) {
+    const formule = d.station_id ? await formuleDeStation(d.station_id) : null
+    const gerant = d.demande_par ? await emailDe(d.demande_par) : null
+    const vars = {
+      station: d.stations?.nom || `station #${d.station_id}`, produit: d.products?.nom || "",
+      champ_label: CHAMP_LABEL[d.champ] || d.champ,
+      prix_actuel: String(d.prix_actuel ?? ""), prix_demande: String(d.prix_demande ?? ""),
+      gerant: gerant || "le gérant",
+    }
+    for (const r of regles) {
+      if (!(await regleAutoriseeOffre(r, formule))) continue
+      const dest = r.destinataires?.type === "roles_client"
+        ? await emailsRoles(r.destinataires.roles, { stationId: d.station_id })
+        : destinatairesStatiques(r)
+      for (const email of dest) await envoyer(r.id, "prix_a_valider", email, r.sujet, r.corps_html, vars)
+    }
+    if (d.demande_at > dernier) dernier = d.demande_at
+  }
+  await setCursor("prix_a_valider", dernier)
+}
+
+async function traiterPrixStatut(regles: any[]) {
+  const cursor = await getCursor("prix_statut")
+  const { data: demandes } = await sb.from("product_price_requests").select("*, products(nom, categorie)")
+    .in("statut", ["validee", "refusee"]).gt("traite_at", cursor).order("traite_at")
+  if (!demandes?.length) return
+  let dernier = cursor
+  for (const d of demandes as any[]) {
+    if (!d.demande_par) continue
+    const emailDemandeur = await emailDe(d.demande_par)
+    if (!emailDemandeur) continue
+    const valideur = d.traite_par ? await emailDe(d.traite_par) : null
+    const vars = {
+      produit: d.products?.nom || "", champ_label: CHAMP_LABEL[d.champ] || d.champ,
+      prix_demande: String(d.prix_demande ?? ""), statut: d.statut === "validee" ? "validée" : "refusée",
+      valideur: valideur || "la direction",
+    }
+    for (const r of regles) for (const email of [emailDemandeur]) await envoyer(r.id, "prix_statut", email, r.sujet, r.corps_html, vars)
+    if (d.traite_at > dernier) dernier = d.traite_at
+  }
+  await setCursor("prix_statut", dernier)
+}
+
 // ---------- Comptes employés (profiles) ----------
 // compte_a_valider cursor sur created_at (nouveau profil, jamais encore approuvé) ; compte_retire
 // cursor sur updated_at ET exige updated_at > created_at (sinon un profil tout juste créé, encore
@@ -362,6 +415,8 @@ const HANDLERS: Record<string, (regles: any[]) => Promise<void>> = {
   commande_a_valider: traiterCommandeAValider,
   commande_statut: traiterCommandeStatut,
   reception_ecart: traiterReceptionEcart,
+  prix_a_valider: traiterPrixAValider,
+  prix_statut: traiterPrixStatut,
   essai_j3: traiterEssaiJ3,
   essai_termine: traiterEssaiTermine,
   facture_emise: traiterFactureEmise,
