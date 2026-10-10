@@ -1,10 +1,28 @@
 import { useState } from 'react'
 import { useAuth } from '../lib/auth.jsx'
+import { PASSWORD_RULES, passwordValid } from '../lib/password'
 import { Viewport } from '../ds/pumpit/components/core/Viewport.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
+import { Icon } from '../ds/pumpit/components/core/Icon.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
+
+export function PasswordRules({ password }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', marginTop: 'var(--sp-1)' }}>
+      {PASSWORD_RULES.map(r => {
+        const ok = r.test(password || '')
+        return (
+          <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', font: '400 13px/1.3 var(--font-ui)', color: ok ? 'var(--state-ok)' : 'var(--text-muted)' }}>
+            <Icon name={ok ? 'check' : 'circle'} size={13} />
+            {r.label}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 export default function Login() {
   const { signIn, signUp, resetPasswordForEmail } = useAuth()
@@ -30,6 +48,7 @@ export default function Login() {
         if (error && !/user not found/i.test(error.message)) setErr(error.message)
         else setMsg("Si un compte existe avec cet e-mail, un lien de réinitialisation vient d'être envoyé.")
       } else {
+        if (!passwordValid(password)) { setErr('Le mot de passe ne respecte pas encore toutes les règles ci-dessous.'); return }
         const { error } = await signUp(email, password, name, code)
         if (error) setErr(traduire(error.message))
         else setMsg('Compte créé. Confirmez votre e-mail si un message vous est envoyé, puis connectez-vous.')
@@ -79,8 +98,9 @@ export default function Login() {
                 <Input size="lg" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required />
               </Field>
               {mode !== 'forgot' && (
-                <Field label="Mot de passe" required hint={mode === 'signup' ? '6 caractères minimum.' : undefined}>
-                  <Input size="lg" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+                <Field label="Mot de passe" required>
+                  <Input size="lg" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e => setPassword(e.target.value)} required minLength={mode === 'signup' ? 8 : 6} />
+                  {mode === 'signup' && <PasswordRules password={password} />}
                 </Field>
               )}
               {mode === 'login' && (

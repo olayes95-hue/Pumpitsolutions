@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../lib/auth.jsx'
+import { passwordValid } from '../lib/password'
+import { PasswordRules } from './Login.jsx'
 import { Viewport } from '../ds/pumpit/components/core/Viewport.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
@@ -18,7 +20,7 @@ export default function ResetPassword() {
 
   async function submit(e) {
     e.preventDefault(); setErr('')
-    if (password.length < 6) { setErr('6 caractères minimum.'); return }
+    if (!passwordValid(password)) { setErr('Le mot de passe ne respecte pas encore toutes les règles ci-dessous.'); return }
     if (password !== confirm) { setErr('Les deux mots de passe ne correspondent pas.'); return }
     setBusy(true)
     const { error } = await updatePassword(password)
@@ -52,11 +54,12 @@ export default function ResetPassword() {
             {done
               ? <AlertBanner tone="ok" title="Mot de passe mis à jour">Reconnectez-vous avec votre nouveau mot de passe.</AlertBanner>
               : <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
-                  <Field label="Nouveau mot de passe" required hint="6 caractères minimum.">
-                    <Input size="lg" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+                  <Field label="Nouveau mot de passe" required>
+                    <Input size="lg" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
+                    <PasswordRules password={password} />
                   </Field>
                   <Field label="Confirmer le mot de passe" required>
-                    <Input size="lg" type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} required minLength={6} />
+                    <Input size="lg" type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} required minLength={8} />
                   </Field>
                   <Button type="submit" tone="primary" size="lg" block disabled={busy} style={{ marginTop: 'var(--sp-3)' }}>
                     {busy ? 'Un instant…' : 'Enregistrer le nouveau mot de passe'}
