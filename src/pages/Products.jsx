@@ -55,11 +55,18 @@ export default function Products() {
   async function load() { setList((await supabase.from('products').select('*').order('categorie').order('ordre')).data || []) }
   useEffect(() => { load() }, [])
   useEffect(() => { supabase.from('settings').select('*').eq('id', 1).maybeSingle().then(({ data }) => setSettings(data || {})) }, [])
+  // Marge = prix de vente − prix d'achat : ce n'est pas une donnée saisie indépendamment,
+  // juste l'écart entre deux prix déjà renseignés ci-dessus — jamais modifiable à la main.
+  // L'essence sert de référence pour marge_unitaire (colonne unique côté base, voir
+  // commission_carburant dans v_ventes_mensuelles — même marge appliquée aux deux
+  // carburants) ; le gasoil est affiché à côté pour repérer un écart éventuel.
+  const margeEssence = (numFR(settings?.essence_pv) != null && numFR(settings?.essence_pa) != null) ? numFR(settings.essence_pv) - numFR(settings.essence_pa) : null
+  const margeGasoil = (numFR(settings?.gasoil_pv) != null && numFR(settings?.gasoil_pa) != null) ? numFR(settings.gasoil_pv) - numFR(settings.gasoil_pa) : null
   async function saveCarburant(e) {
     e.preventDefault(); setErr('')
     const { error } = await supabase.from('settings').update({
       essence_pv: numFR(settings.essence_pv), gasoil_pv: numFR(settings.gasoil_pv),
-      marge_unitaire: numFR(settings.marge_unitaire),
+      marge_unitaire: margeEssence ?? margeGasoil ?? 0,
       essence_pa: numFR(settings.essence_pa), gasoil_pa: numFR(settings.gasoil_pa),
     }).eq('id', 1)
     error ? setErr(error.message) : flash('Prix carburant enregistrés')
@@ -213,7 +220,6 @@ export default function Products() {
               <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
                 <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.essence_pv ?? ''} onChange={e => setSettings({ ...settings, essence_pv: e.target.value })} /></Field>
                 <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pv ?? ''} onChange={e => setSettings({ ...settings, gasoil_pv: e.target.value })} /></Field>
-                <Field label="Marge (F/L)" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.marge_unitaire ?? ''} onChange={e => setSettings({ ...settings, marge_unitaire: e.target.value })} /></Field>
               </div>
             </FormSection>
             <FormSection title="Prix d'achat">
@@ -221,6 +227,17 @@ export default function Products() {
                 <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.essence_pa ?? ''} onChange={e => setSettings({ ...settings, essence_pa: e.target.value })} /></Field>
                 <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pa ?? ''} onChange={e => setSettings({ ...settings, gasoil_pa: e.target.value })} /></Field>
               </div>
+            </FormSection>
+            <FormSection title="Marge (calculée automatiquement)">
+              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+                <Field label="Essence (F/L)" style={{ flex: '1 1 140px' }}><Input type="text" numeric disabled value={margeEssence ?? '—'} /></Field>
+                <Field label="Gasoil (F/L)" style={{ flex: '1 1 140px' }}><Input type="text" numeric disabled value={margeGasoil ?? '—'} /></Field>
+              </div>
+              <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-3) 0 0' }}>
+                Prix de vente − prix d'achat : jamais saisie à la main. {margeEssence != null && margeGasoil != null && margeEssence !== margeGasoil
+                  ? `Les deux diffèrent — c'est la marge essence (${margeEssence} F/L) qui est utilisée pour la commission carburant.`
+                  : "Utilisée pour la commission carburant et le seuil de rentabilité."}
+              </p>
             </FormSection>
             <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>
           </form>
