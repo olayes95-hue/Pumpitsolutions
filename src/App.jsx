@@ -28,6 +28,7 @@ const Inspections = lazy(() => import('./pages/Inspections.jsx'))
 const OcrCheck = lazy(() => import('./pages/OcrCheck.jsx'))
 const AuditLog = lazy(() => import('./pages/AuditLog.jsx'))
 const Finance = lazy(() => import('./pages/Finance.jsx'))
+const RapportMensuel = lazy(() => import('./pages/RapportMensuel.jsx'))
 const Products = lazy(() => import('./pages/Products.jsx'))
 const Stock = lazy(() => import('./pages/Stock.jsx'))
 const Aide = lazy(() => import('./pages/Aide.jsx'))
@@ -97,6 +98,7 @@ function useSpaces() {
     ] },
     { key: 'finance', label: 'Finance', icon: 'wallet', items: [
       can('view_finance') && has('finance') && { to: '/finance', icon: 'chart-column', label: 'Point financier' },
+      can('view_finance') && has('finance') && { to: '/rapport-mensuel', icon: 'receipt', label: 'Rapport mensuel' },
       can('view_bank_recon') && has('finance') && { to: '/rapprochement', icon: 'landmark', label: 'Rapprochement' },
       can('view_ocr_check') && has('bordereaux') && { to: '/verif-photos', icon: 'camera', label: 'Bordereaux' },
     ] },
@@ -315,6 +317,7 @@ function AppRoutes() {
           <Route path="/produits" element={guard(can('manage_products') || can('view_price_history'), <Products />)} />
           <Route path="/fournisseurs" element={guard(can('manage_suppliers'), <Suppliers />)} />
           <Route path="/finance" element={guard(can('view_finance') && has('finance'), <Finance />)} />
+          <Route path="/rapport-mensuel" element={guard(can('view_finance') && has('finance'), <RapportMensuel />)} />
           <Route path="/rapprochement" element={guard(can('view_bank_recon') && has('finance'), <BankRecon />)} />
           <Route path="/verif-photos" element={guard(can('view_ocr_check') && has('bordereaux'), <OcrCheck />)} />
           <Route path="/stations" element={guard(can('manage_stations_config') || can('manage_team'), <Stations />)} />

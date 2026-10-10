@@ -90,6 +90,12 @@ export default function Submit() {
   // dès qu'il touche le champ, le préremplissage s'arrête de l'écraser pour cette journée.
   const [gazEspeceTouched, setGazEspeceTouched] = useState(false)
   const [lubEspeceTouched, setLubEspeceTouched] = useState(false)
+  // Suivi des bouteilles de gaz par état (pleines/vides/consignées, voir migration_v134) :
+  // { [taille]: { consigneQte, consigneMontant } } — « avec consigne » est une part du total
+  // déjà saisi dans gaz_vendu_{taille} (le reste est implicitement « échange »), jamais une
+  // double saisie. { [taille]: { vides, remb, rembMontant } } pour les retours.
+  const [gazConsigne, setGazConsigne] = useState({})
+  const [gazRetours, setGazRetours] = useState({})
   const [lubTheorique, setLubTheorique] = useState({})   // {nom: stock_theorique} — v_stock_theorique, pour l'écart en direct
   const [expenses, setExpenses] = useState([])
   const [deposits, setDeposits] = useState([])
@@ -194,7 +200,7 @@ export default function Submit() {
   async function load(d) {
     setMsg(''); setErr(''); setErrTarget('top')
     // Les 6 requêtes du jour sont lancées EN PARALLÈLE (avant : en série ≈ 6× la latence réseau).
-    const [r, ex, dep, dl, at, rt, sub] = await Promise.all([
+    const [r, ex, dep, dl, at, rt, sub, gm] = await Promise.all([
       supabase.from('daily_reports').select('*').eq('report_date', d).eq('station_id', stationId).maybeSingle(),
       supabase.from('expenses').select('*').eq('report_date', d).eq('station_id', stationId),
       supabase.from('deposits').select('*').eq('report_date', d).eq('station_id', stationId),
@@ -202,8 +208,24 @@ export default function Submit() {
       supabase.from('attachments').select('*').eq('report_date', d).eq('station_id', stationId).order('id'),
       supabase.from('v_order_reception').select('*').eq('station_id', stationId),
       supabase.from('submissions').select('moment').eq('report_date', d).eq('station_id', stationId),
+      supabase.from('gaz_mouvements_bouteilles').select('*').eq('report_date', d).eq('station_id', stationId),
     ])
     setSubmittedMoments(new Set((sub.data || []).map(x => x.moment)))
+    // Reconstruit la part « avec consigne » et les retours depuis les mouvements déjà
+    // enregistrés ce jour (relecture d'un jour passé) — vide sinon (nouvelle journée).
+    {
+      // Mouvements stockés par taille affichée ('3 kg'...) ; la saisie est indexée par clé
+      // courte ('3'...) comme GAZ/gaz_vendu_* — reconverti ici via la correspondance GAZ.
+      const tailleToK = {}; for (const [k, lab] of GAZ) tailleToK[lab] = k
+      const consigneByK = {}, retoursByK = {}
+      for (const m of (gm.data || [])) {
+        const k = tailleToK[m.taille]; if (!k) continue
+        if (m.type === 'vente_consigne') consigneByK[k] = { consigneQte: m.quantite, consigneMontant: m.montant_consigne ?? '' }
+        else if (m.type === 'retour_vide') retoursByK[k] = { ...retoursByK[k], vides: m.quantite }
+        else if (m.type === 'retour_consigne_remboursee') retoursByK[k] = { ...retoursByK[k], remb: m.quantite, rembMontant: m.montant_consigne ?? '' }
+      }
+      setGazConsigne(consigneByK); setGazRetours(retoursByK)
+    }
     const draft = r.data ? null : readDraft(stationId, d)
     if (r.data) {
       const c = { ...EMPTY }
@@ -648,6 +670,26 @@ export default function Submit() {
       })
       if (e1) throw e1
 
+      // Bouteilles de gaz (pleines/vides/consignées, voir migration_v134) : pas dans la
+      // transaction RPC ci-dessus (table séparée, indépendante du reste) — remplace les
+      // mouvements du jour (idempotent, comme pour les achats/dépenses dans la fonction RPC).
+      if (activite('gaz') && showVenduLubGaz) {
+        const gazRows = []
+        for (const [k, lab] of GAZ) {
+          const c = gazConsigne[k]
+          // Plafonné au total vendu de la taille : si le gérant réduit le total après avoir
+          // saisi une part consignée, cette part ne doit jamais dépasser ce qui a été vendu.
+          const consigneQte = Math.min(N(c?.consigneQte), Number(f['gaz_vendu_' + k]) || 0)
+          if (consigneQte > 0) gazRows.push({ station_id: sid, report_date: date, taille: lab, type: 'vente_consigne', quantite: consigneQte, montant_consigne: c.consigneMontant ? numFR(c.consigneMontant) : null })
+          const rt = gazRetours[k]
+          if (N(rt?.vides) > 0) gazRows.push({ station_id: sid, report_date: date, taille: lab, type: 'retour_vide', quantite: N(rt.vides) })
+          if (N(rt?.remb) > 0) gazRows.push({ station_id: sid, report_date: date, taille: lab, type: 'retour_consigne_remboursee', quantite: N(rt.remb), montant_consigne: rt.rembMontant ? numFR(rt.rembMontant) : null })
+        }
+        const { error: eg1 } = await supabase.from('gaz_mouvements_bouteilles').delete().eq('station_id', sid).eq('report_date', date)
+        if (eg1) throw eg1
+        if (gazRows.length) { const { error: eg2 } = await supabase.from('gaz_mouvements_bouteilles').insert(gazRows); if (eg2) throw eg2 }
+      }
+
       // Photos-preuves : Storage n'est pas transactionnel avec SQL, reste un appel séparé — APRÈS
       // l'écriture financière/stock ci-dessus (si cette étape échoue, la saisie est déjà
       // enregistrée en sécurité, cohérent avec "les photos sont recommandées, jamais bloquantes").
@@ -961,13 +1003,64 @@ export default function Submit() {
             {showVenduLubGaz ? 'Bouteilles et quantités vendues aujourd\'hui, et recettes en espèces des autres pôles.' : 'Recettes en espèces des autres pôles.'}
           </p>
           {activite('gaz') && showVenduLubGaz && <FormSection title="Bouteilles de gaz vendues">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-              {GAZ.map(([k, lab]) => (
-                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
-                  <span style={{ flex: 1, font: '400 15px/1.25 var(--font-ui)', color: 'var(--text-body)' }}>{lab}</span>
-                  <NumericStepper value={Number(f['gaz_vendu_' + k]) || 0} onChange={v => set('gaz_vendu_' + k, String(v))} suffix="b." />
-                </div>
-              ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+              {GAZ.map(([k, lab]) => {
+                const total = Number(f['gaz_vendu_' + k]) || 0
+                const consigne = Math.min(N(gazConsigne[k]?.consigneQte), total)
+                return (
+                  <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+                      <span style={{ flex: 1, font: '400 15px/1.25 var(--font-ui)', color: 'var(--text-body)' }}>{lab}</span>
+                      <NumericStepper value={total} onChange={v => set('gaz_vendu_' + k, String(v))} suffix="b." />
+                    </div>
+                    {total > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)', paddingLeft: 'var(--sp-5)' }}>
+                        <span style={{ flex: 1, font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>dont vendues avec consigne (sans reprise de vide)</span>
+                        <NumericStepper value={consigne} min={0} max={total}
+                          onChange={v => setGazConsigne(p => ({ ...p, [k]: { ...p[k], consigneQte: v } }))} suffix="b." />
+                      </div>
+                    )}
+                    {consigne > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)', paddingLeft: 'var(--sp-5)' }}>
+                        <span style={{ flex: 1, font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Consigne perçue ({consigne} b.)</span>
+                        <Input size="sm" type="text" inputMode="decimal" numeric style={{ width: 110 }} suffix="F"
+                          value={gazConsigne[k]?.consigneMontant ?? ''}
+                          onChange={e => setGazConsigne(p => ({ ...p, [k]: { ...p[k], consigneMontant: e.target.value } }))} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </FormSection>}
+          {activite('gaz') && showVenduLubGaz && <FormSection title="Retours de bouteilles" style={{ marginTop: 'var(--sp-4)' }}>
+            <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
+              Bouteilles vides rapportées aujourd'hui par des clients qui avaient pris une bouteille consignée précédemment.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+              {GAZ.map(([k, lab]) => {
+                const rt = gazRetours[k] || {}
+                return (
+                  <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+                      <span style={{ flex: 1, font: '400 15px/1.25 var(--font-ui)', color: 'var(--text-body)' }}>{lab} — vides rendues (sans remboursement)</span>
+                      <NumericStepper value={N(rt.vides)} min={0} onChange={v => setGazRetours(p => ({ ...p, [k]: { ...p[k], vides: v } }))} suffix="b." />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)', paddingLeft: 'var(--sp-5)' }}>
+                      <span style={{ flex: 1, font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>dont consigne remboursée</span>
+                      <NumericStepper value={N(rt.remb)} min={0} onChange={v => setGazRetours(p => ({ ...p, [k]: { ...p[k], remb: v } }))} suffix="b." />
+                    </div>
+                    {N(rt.remb) > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)', paddingLeft: 'var(--sp-5)' }}>
+                        <span style={{ flex: 1, font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Montant remboursé ({N(rt.remb)} b.)</span>
+                        <Input size="sm" type="text" inputMode="decimal" numeric style={{ width: 110 }} suffix="F"
+                          value={rt.rembMontant ?? ''}
+                          onChange={e => setGazRetours(p => ({ ...p, [k]: { ...p[k], rembMontant: e.target.value } }))} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </FormSection>}
           {activite('lubrifiant') && showVenduLubGaz && <FormSection title="Lubrifiants vendus" style={{ marginTop: 'var(--sp-4)' }}>

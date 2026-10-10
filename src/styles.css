@@ -132,11 +132,23 @@ summary{cursor:pointer}
 .pi-facture .r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .pi-facture .bloc{background:var(--brume);border-radius:16px;padding:14px 16px;flex:1}
 .pi-facture .et{font-weight:600;color:var(--ardoise);font-size:12px;margin-bottom:4px}
+/* ---------- rapport mensuel imprimable (même charte, mise en page propre) ---------- */
+.pi-rapport{font-family:var(--font-ui);color:var(--nuit);font-size:13px;line-height:1.5}
+.pi-rapport h1{font:var(--fw-black) 26px/1.1 var(--font-display);letter-spacing:-.02em}
+.pi-rapport h2{font:var(--fw-semibold) 15px/1.2 var(--font-ui);color:var(--ardoise);margin:24px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--nuit)}
+.pi-rapport table{width:100%;border-collapse:collapse;margin-top:8px}
+.pi-rapport th{text-align:left;font-weight:600;color:var(--ardoise);padding:6px 10px;border-bottom:1px solid var(--filet)}
+.pi-rapport td{padding:6px 10px;border-bottom:1px solid var(--filet)}
+.pi-rapport .r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pi-rapport .bloc{background:var(--brume);border-radius:16px;padding:14px 16px;flex:1}
+.pi-rapport .et{font-weight:600;color:var(--ardoise);font-size:12px;margin-bottom:4px}
+.pi-rapport .conseil{padding:8px 0;border-bottom:1px solid var(--filet)}
+.pi-rapport .conseil:last-child{border-bottom:none}
 @media print{
   body.pi-printing #root{display:none!important}
   body.pi-printing .pi-print-sheet{display:block}
   body.pi-printing{background:#FFFFFF}
-  .pi-facture .bloc{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .pi-facture .bloc,.pi-rapport .bloc{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   @page{size:A4;margin:16mm}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

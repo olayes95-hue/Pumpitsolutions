@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [alerts, setAlerts] = useState([])   // v_alerts des 60 derniers jours (station active), triées par gravité
   const [stock, setStock] = useState(null)
   const [forecast, setForecast] = useState(null)
+  const [gazEtats, setGazEtats] = useState([])   // v_gaz_etats_bouteilles (migration_v134) — pleines/vides/consignées par taille
   const [loading, setLoading] = useState(true)
   // Par défaut, mois en cours (pas le dernier mois avec des données, qui peut être ancien).
   const today = new Date().toISOString().slice(0, 10)
@@ -125,11 +126,12 @@ export default function Dashboard() {
 
   async function loadStock() {
     if (!stationId) return
-    const [ls, sf] = await Promise.all([
+    const [ls, sf, ge] = await Promise.all([
       supabase.from('v_latest_stock').select('*').eq('station_id', stationId).maybeSingle(),
       supabase.from('v_stock_forecast').select('*').eq('station_id', stationId).maybeSingle(),
+      supabase.from('v_gaz_etats_bouteilles').select('*').eq('station_id', stationId),
     ])
-    setStock(ls.data || null); setForecast(sf.data || null)
+    setStock(ls.data || null); setForecast(sf.data || null); setGazEtats(ge.data || [])
     setRefreshedAt(new Date().toLocaleTimeString('fr-FR'))
   }
   useEffect(() => { if (!stationId) return
@@ -349,7 +351,9 @@ export default function Dashboard() {
             <Kpi label="Bons en cours" value={stock.bons_restant != null ? fcfa(stock.bons_restant) : '—'}
               sub={N(stock.bons_utilises_depuis) > 0 ? `dont ${fcfa(stock.bons_utilises_depuis)} engagés en commandes` : ''}
               status={stock.bons_restant != null && stock.bons_restant < 0 ? 'alarm' : undefined} />
-            <Kpi label="Bouteilles gaz" value={[stock.gaz_stock_3, stock.gaz_stock_6, stock.gaz_stock_12, stock.gaz_stock_38].reduce((a, b) => a + N(b), 0)} unit="b." />
+            <Kpi label="Bouteilles gaz — pleines" value={gazEtats.reduce((s, g) => s + N(g.pleines_stock), 0)} unit="b." />
+            <Kpi label="Bouteilles gaz — vides" value={gazEtats.reduce((s, g) => s + N(g.vides_stock), 0)} unit="b." />
+            <Kpi label="Bouteilles gaz — consignées" value={gazEtats.reduce((s, g) => s + N(g.consignees_circulation), 0)} unit="b." sub="en circulation chez des clients" />
           </div>
         </>)}
       </Panel>
