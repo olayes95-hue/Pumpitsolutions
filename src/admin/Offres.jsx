@@ -8,6 +8,7 @@ import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
+import { Textarea } from '../ds/pumpit/components/forms/Textarea.jsx'
 import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { Drawer } from '../ds/pumpit/components/feedback/Drawer.jsx'
@@ -75,7 +76,9 @@ export default function Offres() {
     if (prix === null || prix < 0) return fail('Prix invalide. Mettez 0 pour une offre gratuite.')
     const maxUsers = nombre(fiche.max_utilisateurs_station)
     if (maxUsers !== null && maxUsers < 1) return fail('Le nombre maximum d\'utilisateurs doit être vide (illimité) ou au moins 1.')
-    const champs = { label: fiche.label.trim(), description: String(fiche.description || '').trim() || null, prix_mensuel: prix, ordre: nombre(fiche.ordre) ?? 0, max_utilisateurs_station: maxUsers }
+    const pointsForts = String(fiche.points_forts_vitrine_texte || '').split('\n').map(s => s.trim()).filter(Boolean)
+    const champs = { label: fiche.label.trim(), description: String(fiche.description || '').trim() || null, prix_mensuel: prix, ordre: nombre(fiche.ordre) ?? 0, max_utilisateurs_station: maxUsers,
+      points_forts_vitrine: pointsForts, mise_en_avant_vitrine: !!fiche.mise_en_avant_vitrine }
     if (fiche.nouvelle) {
       const key = cleDepuis(fiche.label)
       if (!key) return fail('Nom invalide.')
@@ -117,11 +120,12 @@ export default function Offres() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
                   <span style={{ font: '700 18px/1.2 var(--font-display)' }}>{o.label}</span>
                   {!o.actif && <Badge tone="idle">Désactivée</Badge>}
+                  {o.mise_en_avant_vitrine && <Badge tone="ok">Mise en avant (site)</Badge>}
                 </div>
                 <div><span style={{ font: '800 26px/1.1 var(--font-display)' }}>{Number(o.prix_mensuel) ? fcfa(o.prix_mensuel) : 'Gratuit'}</span>{Number(o.prix_mensuel) ? <span style={{ color: 'var(--text-muted)' }}> / station / mois</span> : null}</div>
                 {o.description && <p style={{ margin: 0, font: '400 14px/1.45 var(--font-ui)', color: 'var(--text-secondary)' }}>{o.description}</p>}
-                <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>{usage[o.key] || 0} station{(usage[o.key] || 0) > 1 ? 's' : ''} · {(o.activites || []).length} activité{(o.activites || []).length > 1 ? 's' : ''} · {(o.fonctions || []).length} fonction{(o.fonctions || []).length > 1 ? 's' : ''} · {o.max_utilisateurs_station ? `${o.max_utilisateurs_station} util. max/station` : 'utilisateurs illimités'}</span>
-                <Button size="sm" style={{ alignSelf: 'flex-start', marginTop: 'auto' }} onClick={() => { setErr(''); setFiche({ ...o }) }}>Modifier</Button>
+                <span style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>{usage[o.key] || 0} station{(usage[o.key] || 0) > 1 ? 's' : ''} · {(o.activites || []).length} activité{(o.activites || []).length > 1 ? 's' : ''} · {(o.fonctions || []).length} fonction{(o.fonctions || []).length > 1 ? 's' : ''} · {(o.points_forts_vitrine || []).length} point{(o.points_forts_vitrine || []).length > 1 ? 's' : ''} fort{(o.points_forts_vitrine || []).length > 1 ? 's' : ''} (site) · {o.max_utilisateurs_station ? `${o.max_utilisateurs_station} util. max/station` : 'utilisateurs illimités'}</span>
+                <Button size="sm" style={{ alignSelf: 'flex-start', marginTop: 'auto' }} onClick={() => { setErr(''); setFiche({ ...o, points_forts_vitrine_texte: (o.points_forts_vitrine || []).join('\n') }) }}>Modifier</Button>
               </div>
             ))}
           </div>
@@ -179,6 +183,10 @@ export default function Offres() {
             <Field label="Nombre max. d'utilisateurs par station" hint="Vide = illimité. Compte tous les comptes rattachés à une même station (gérant, pompiste, vendeuse, admin, directeur, comptable...).">
               <Input numeric inputMode="numeric" value={fiche.max_utilisateurs_station ?? ''} onChange={e => setFiche({ ...fiche, max_utilisateurs_station: e.target.value })} style={{ maxWidth: 120 }} placeholder="illimité" />
             </Field>
+            <Field label="Points forts affichés sur le site vitrine" hint="Un point par ligne — synchronisé automatiquement sur pumpits.fr, avec le prix et la description ci-dessus.">
+              <Textarea rows={5} value={fiche.points_forts_vitrine_texte ?? ''} onChange={e => setFiche({ ...fiche, points_forts_vitrine_texte: e.target.value })} placeholder={'ex :\n1 station\nAlertes écart de caisse\nFormation à la prise en main'} />
+            </Field>
+            <Checkbox label="Mettre en avant sur le site (badge « le plus choisi »)" checked={!!fiche.mise_en_avant_vitrine} onChange={v => setFiche({ ...fiche, mise_en_avant_vitrine: v })} />
             <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>{fiche.nouvelle ? 'Créer l\'offre' : 'Enregistrer'}</Button>
             {!fiche.nouvelle && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', marginTop: 'var(--sp-5)', paddingTop: 'var(--sp-5)', borderTop: '1px solid var(--border-hairline)' }}>
