@@ -21,6 +21,11 @@ export function AuthProvider({ children }) {
   const [reglagesPlateforme, setReglagesPlateforme] = useState(null)
   const [permsPlateforme, setPermsPlateforme] = useState([])
   const [loading, setLoading] = useState(true)
+  // Mot de passe oublié : le lien reçu par email établit une session SUPABASE "recovery"
+  // (événement PASSWORD_RECOVERY) avant même que l'utilisateur ait choisi un nouveau mot de
+  // passe — sans ce drapeau, App.jsx verrait une session normale et afficherait l'app entière
+  // au lieu de l'écran "Nouveau mot de passe".
+  const [recovery, setRecovery] = useState(false)
   // Distinct de `loading` (qui ne couvre que le tout premier chargement de la session) :
   // à chaque connexion/changement de session, onAuthStateChange met `session` à jour
   // immédiatement, avant que loadProfile() ait fini — sans ce flag, profile reste `null`
@@ -91,7 +96,8 @@ export function AuthProvider({ children }) {
       lastUserIdRef.current = newUserId
       setSession(s)
       if (event === 'SIGNED_IN') localStorage.setItem(SIGNIN_KEY, String(Date.now()))
-      if (event === 'SIGNED_OUT') localStorage.removeItem(SIGNIN_KEY)
+      if (event === 'SIGNED_OUT') { localStorage.removeItem(SIGNIN_KEY); setRecovery(false) }
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true)
       setTimeout(() => { loadProfile(newUserId, { silent }) }, 0)
     })
     return () => { clearTimeout(timeout); sub.subscription.unsubscribe() }
@@ -208,6 +214,12 @@ export function AuthProvider({ children }) {
     signUp: (email, password, full_name, org_code) =>
       supabase.auth.signUp({ email, password, options: { data: { full_name, org_code: (org_code || '').trim().toUpperCase() } } }),
     signOut: () => supabase.auth.signOut(),
+    recovery,
+    // redirectTo = origine courante : fonctionne aussi bien en prod qu'en staging/preview,
+    // chacun avec son propre domaine — à condition que ce domaine soit dans la liste des
+    // Redirect URLs autorisées du projet Supabase correspondant (Authentication > URL Configuration).
+    resetPasswordForEmail: (email) => supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
+    updatePassword: (password) => supabase.auth.updateUser({ password }),
   }
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>
 }

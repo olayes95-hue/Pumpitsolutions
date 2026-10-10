@@ -5,6 +5,7 @@ import { useAuth } from './lib/auth.jsx'
 import { StationProvider, useStation } from './lib/station.jsx'
 import { useOffre } from './lib/offre.jsx'
 import Login from './pages/Login.jsx'
+import ResetPassword from './pages/ResetPassword.jsx'
 import NotifBanner from './components/NotifBanner.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { Select } from './ds/pumpit/components/forms/Select.jsx'
@@ -333,9 +334,13 @@ function AppRoutes() {
 }
 
 export default function App() {
-  const { session, loading, profileLoading, profile, suspendu, organisationReady, isAgent } = useAuth()
+  const { session, loading, profileLoading, profile, suspendu, organisationReady, isAgent, recovery } = useAuth()
   const { pathname } = useLocation()
   if (loading) return <Loading />
+  // Lien "mot de passe oublié" reçu par email : avant toute chose, même si une session
+  // "recovery" existe déjà (voir lib/auth.jsx) — jamais l'app normale tant que le nouveau
+  // mot de passe n'est pas choisi.
+  if (recovery) return <ResetPassword />
   if (!session) return <Login />
   // profileLoading (et pas seulement `!profile`) : à chaque connexion, la session est connue
   // avant le profil. Sans ce garde-fou, l'écran d'attente de validation s'affichait un instant
