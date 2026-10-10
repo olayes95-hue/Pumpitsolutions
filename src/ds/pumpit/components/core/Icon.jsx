@@ -8,6 +8,7 @@ import {
   Wrench, Download, Plus, Image, Clock, Moon, ClipboardList, Fuel, Droplet,
   Sun, Gauge, Wallet, Settings, Inbox,
   MessageCircle, Phone, Send, ArrowLeft, Printer, Users, Paperclip, LifeBuoy, Receipt, ExternalLink, Activity,
+  Eye, EyeOff,
 } from 'lucide-react';
 
 // Registre explicite : n'importer que les icônes utilisées garde le bundle léger.
@@ -28,6 +29,7 @@ const REGISTRY = {
   sun: Sun, gauge: Gauge, wallet: Wallet, settings: Settings, inbox: Inbox,
   'message-circle': MessageCircle, phone: Phone, send: Send, 'arrow-left': ArrowLeft, printer: Printer, users: Users,
   paperclip: Paperclip, 'life-buoy': LifeBuoy, receipt: Receipt, 'external-link': ExternalLink, activity: Activity,
+  eye: Eye, 'eye-off': EyeOff,
 };
 
 // Charte : bibliothèque Lucide, trait de 2 px, extrémités arrondies, une seule couleur par icône.
