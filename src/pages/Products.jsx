@@ -18,6 +18,18 @@ const CATS = ['gaz', 'lubrifiant', 'superette', 'autre']
 const UNITES = ['bouteille', 'bidon', 'carton', 'fût', 'unité', 'litre', 'valeur']
 const UNITE_OPTIONS = UNITES.map(u => ({ value: u, label: u }))
 const CAT_OPTIONS = CATS.map(c => ({ value: c, label: c }))
+// « Carburant » est un bouton d'onglet en plus, pas une catégorie de la table `products` :
+// un seul essence + un seul gasoil par station (table `settings`), jamais un catalogue.
+const DISPLAY_CATS = ['carburant', ...CATS]
+
+function FormSection({ title, children }) {
+  return (
+    <div style={{ padding: 'var(--sp-4)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)', border: '1px solid var(--border-hairline)' }}>
+      <div style={{ font: 'var(--fw-semibold) 13px/1.25 var(--font-ui)', color: 'var(--text-muted)', marginBottom: 'var(--sp-3)' }}>{title}</div>
+      {children}
+    </div>
+  )
+}
 
 export default function Products() {
   const { isAdmin, can } = useAuth()
@@ -36,11 +48,22 @@ export default function Products() {
   const [dirty, setDirty] = useState(() => new Set())
   const [saving, setSaving] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [nf, setNf] = useState({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '' })
+  const [nf, setNf] = useState({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '', consigne_prix: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
+  const [settings, setSettings] = useState(null)
 
   async function load() { setList((await supabase.from('products').select('*').order('categorie').order('ordre')).data || []) }
   useEffect(() => { load() }, [])
+  useEffect(() => { supabase.from('settings').select('*').eq('id', 1).maybeSingle().then(({ data }) => setSettings(data || {})) }, [])
+  async function saveCarburant(e) {
+    e.preventDefault(); setErr('')
+    const { error } = await supabase.from('settings').update({
+      essence_pv: numFR(settings.essence_pv), gasoil_pv: numFR(settings.gasoil_pv),
+      marge_unitaire: numFR(settings.marge_unitaire),
+      essence_pa: numFR(settings.essence_pa), gasoil_pa: numFR(settings.gasoil_pa),
+    }).eq('id', 1)
+    error ? setErr(error.message) : flash('Prix carburant enregistrés')
+  }
   useEffect(() => { setPage(1) }, [cat, search])
   const flash = (m) => { setMsg(m); setErr(''); setTimeout(() => setMsg(''), 2000) }
   // Prix du gros (carton) renseigné + conditionnement connu => le prix d'achat unité se déduit
@@ -64,14 +87,16 @@ export default function Products() {
     const { error } = await supabase.from('products').insert({
       categorie: cat, nom: nf.nom, unite: nf.unite,
       prix_achat: numFR(nf.prix_achat), prix_vente: numFR(nf.prix_vente), seuil: numFR(nf.seuil) ?? 0,
+      consigne_prix: cat === 'gaz' ? numFR(nf.consigne_prix) : null,
       ordre: (list.filter(p => p.categorie === cat).length + 1) * 10 })
-    if (error) setErr(error.message); else { setNf({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '' }); flash('Produit ajouté'); load() }
+    if (error) setErr(error.message); else { setNf({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '', consigne_prix: '' }); flash('Produit ajouté'); load() }
   }
   const productPayload = (p) => ({
     nom: p.nom, unite: p.unite, prix_achat: numFR(p.prix_achat), prix_vente: numFR(p.prix_vente),
     seuil: numFR(p.seuil) ?? 0, actif: p.actif, ordre: numFR(p.ordre),
     unite_stock: p.unite_stock || null, conditionnement_nom: p.conditionnement_nom || null,
-    conditionnement_qte: numFR(p.conditionnement_qte), prix_achat_gros: numFR(p.prix_achat_gros) })
+    conditionnement_qte: numFR(p.conditionnement_qte), prix_achat_gros: numFR(p.prix_achat_gros),
+    consigne_prix: numFR(p.consigne_prix) })
   async function save(p) {
     const { error } = await supabase.from('products').update(productPayload(p)).eq('id', p.id)
     if (error) setErr(error.message)
@@ -129,6 +154,9 @@ export default function Products() {
     ] : []),
     { key: 'prix_achat', header: 'Prix achat (unité)', align: 'right', render: p => <Input size="sm" numeric value={p.prix_achat ?? ''} onChange={e => up(p.id, 'prix_achat', e.target.value)} style={{ width: 90 }} /> },
     { key: 'prix_vente', header: 'Prix vente', align: 'right', render: p => <Input size="sm" numeric value={p.prix_vente ?? ''} onChange={e => up(p.id, 'prix_vente', e.target.value)} style={{ width: 90 }} /> },
+    ...(cat === 'gaz' ? [
+      { key: 'consigne_prix', header: 'Prix consigne', align: 'right', render: p => <Input size="sm" numeric value={p.consigne_prix ?? ''} onChange={e => up(p.id, 'consigne_prix', e.target.value)} placeholder="—" style={{ width: 90 }} /> },
+    ] : []),
     { key: 'seuil', header: 'Seuil', align: 'right', render: p => <Input size="sm" numeric value={p.seuil ?? ''} onChange={e => up(p.id, 'seuil', e.target.value)} style={{ width: 70 }} /> },
     { key: 'actif', header: 'Actif', render: p => <Checkbox checked={!!p.actif} onChange={v => up(p.id, 'actif', v)} /> },
     { key: 'actions', header: '', align: 'right', render: p => (
@@ -149,15 +177,17 @@ export default function Products() {
       {tab === 'catalogue' && (<>
       <Panel title="Produits & prix">
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
-          Catalogue par catégorie avec prix d'achat, prix de vente et seuil d'alerte. (Le carburant se règle dans « Prix &amp; marge ».)
+          {cat === 'carburant'
+            ? "Prix de vente (pré-remplis dans la saisie), prix d'achat (coût des commandes) et marge, en FCFA/L."
+            : "Catalogue par catégorie avec prix d'achat, prix de vente et seuil d'alerte."}
         </p>
         <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-            {CATS.map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
+            {DISPLAY_CATS.map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
           </div>
-          <Button size="sm" tone="primary" onClick={() => setShowAddForm(s => !s)}>{showAddForm ? 'Annuler' : '+ Nouveau produit'}</Button>
+          {cat !== 'carburant' && <Button size="sm" tone="primary" onClick={() => setShowAddForm(s => !s)}>{showAddForm ? 'Annuler' : '+ Nouveau produit'}</Button>}
         </div>
-        {showAddForm && (
+        {cat !== 'carburant' && showAddForm && (
           <form onSubmit={add} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'end', marginTop: 'var(--sp-4)', padding: 'var(--sp-4)', background: 'var(--brume)', borderRadius: 'var(--radius-1)' }}>
             <Field label="Nouveau produit" style={{ flex: '2 1 200px' }}>
               <Input value={nf.nom} onChange={e => setNf({ ...nf, nom: e.target.value })} placeholder={cat === 'superette' ? 'ex : Eau 1,5L' : 'nom'} />
@@ -168,11 +198,34 @@ export default function Products() {
             <Field label="Prix vente" style={{ flex: '1 1 100px' }}>
               <Input numeric value={nf.prix_vente} onChange={e => setNf({ ...nf, prix_vente: e.target.value })} />
             </Field>
+            {cat === 'gaz' && <Field label="Prix consigne" style={{ flex: '1 1 100px' }}>
+              <Input numeric value={nf.consigne_prix} onChange={e => setNf({ ...nf, consigne_prix: e.target.value })} />
+            </Field>}
             <Button type="submit" tone="primary">+ Ajouter à « {cat} »</Button>
           </form>
         )}
       </Panel>
 
+      {cat === 'carburant' ? (
+        settings && <Panel title="Carburant">
+          <form onSubmit={saveCarburant} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
+            <FormSection title="Prix de vente">
+              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.essence_pv ?? ''} onChange={e => setSettings({ ...settings, essence_pv: e.target.value })} /></Field>
+                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pv ?? ''} onChange={e => setSettings({ ...settings, gasoil_pv: e.target.value })} /></Field>
+                <Field label="Marge (F/L)" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.marge_unitaire ?? ''} onChange={e => setSettings({ ...settings, marge_unitaire: e.target.value })} /></Field>
+              </div>
+            </FormSection>
+            <FormSection title="Prix d'achat">
+              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.essence_pa ?? ''} onChange={e => setSettings({ ...settings, essence_pa: e.target.value })} /></Field>
+                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pa ?? ''} onChange={e => setSettings({ ...settings, gasoil_pa: e.target.value })} /></Field>
+              </div>
+            </FormSection>
+            <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>
+          </form>
+        </Panel>
+      ) : (<>
       {pending.length > 0 && (
         <Panel title="Produits à valider" meta={`${pending.length}`} status="warn" flush>
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
@@ -197,6 +250,7 @@ export default function Products() {
             onPage={setPage} onPageSize={s => { setPageSize(s); setPage(1) }} />
         )}
       </Panel>
+      </>)}
       </>)}
 
       {tab === 'prix' && <PriceHistory />}

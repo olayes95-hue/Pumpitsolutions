@@ -112,6 +112,7 @@ export default function Submit() {
   const rawPhotoPathsRef = useRef([])
   const [lubTypes, setLubTypes] = useState(LUB_TYPES)    // références lubrifiant (dynamiques)
   const [gazPrices, setGazPrices] = useState({})          // {"3 kg": prix_vente, ...} — pour déduire les espèces gaz des bouteilles vendues
+  const [gazConsignePrices, setGazConsignePrices] = useState({})   // {"3 kg": consigne_prix, ...} — préremplit le montant de consigne perçue (catalogue, voir migration_v135)
   const [expenseCategories, setExpenseCategories] = useState([])   // catalogue admin (table expense_categories), à la place de la liste figée
   const [settings, setSettings] = useState({ essence_pv: 725, gasoil_pv: 750, marge_unitaire: 25 })
   const [prods, setProds] = useState([])                 // catalogue supérette/autre (vendeuse)
@@ -154,7 +155,9 @@ export default function Submit() {
   useEffect(() => { supabase.from('settings').select('*').eq('id', 1).maybeSingle().then(({ data }) => data && setSettings(data)) }, [])
   useEffect(() => { supabase.from('suppliers').select('id,nom,categorie').order('nom').then(({ data }) => setSuppliers(data || [])) }, [])
   useEffect(() => { supabase.from('products').select('nom, unite, conditionnement_nom, conditionnement_qte, prix_vente').eq('categorie', 'lubrifiant').eq('actif', true).order('ordre').then(({ data }) => { if (data && data.length) setLubTypes(data) }) }, [])
-  useEffect(() => { supabase.from('products').select('nom,prix_vente').eq('categorie', 'gaz').then(({ data }) => { const m = {}; (data || []).forEach(p => m[p.nom] = N(p.prix_vente)); setGazPrices(m) }) }, [])
+  useEffect(() => { supabase.from('products').select('nom,prix_vente,consigne_prix').eq('categorie', 'gaz').then(({ data }) => {
+    const m = {}, c = {}; (data || []).forEach(p => { m[p.nom] = N(p.prix_vente); c[p.nom] = N(p.consigne_prix) }); setGazPrices(m); setGazConsignePrices(c)
+  }) }, [])
   useEffect(() => { supabase.from('expense_categories').select('*').eq('actif', true).order('ordre').then(({ data }) => setExpenseCategories(data || [])) }, [])
   useEffect(() => { if (!stationId) return; supabase.from('v_stock_theorique').select('produit, stock_theorique').eq('station_id', stationId).eq('categorie', 'lubrifiant').then(({ data }) => { const m = {}; (data || []).forEach(r => m[r.produit] = N(r.stock_theorique)); setLubTheorique(m) }) }, [stationId])
   useEffect(() => { if (stationId) load(date) }, [date, stationId])
@@ -220,7 +223,7 @@ export default function Submit() {
       const consigneByK = {}, retoursByK = {}
       for (const m of (gm.data || [])) {
         const k = tailleToK[m.taille]; if (!k) continue
-        if (m.type === 'vente_consigne') consigneByK[k] = { consigneQte: m.quantite, consigneMontant: m.montant_consigne ?? '' }
+        if (m.type === 'vente_consigne') consigneByK[k] = { consigneQte: m.quantite, consigneMontant: m.montant_consigne ?? '', montantTouched: true }
         else if (m.type === 'retour_vide') retoursByK[k] = { ...retoursByK[k], vides: m.quantite }
         else if (m.type === 'retour_consigne_remboursee') retoursByK[k] = { ...retoursByK[k], remb: m.quantite, rembMontant: m.montant_consigne ?? '' }
       }
@@ -1017,7 +1020,13 @@ export default function Submit() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)', paddingLeft: 'var(--sp-5)' }}>
                         <span style={{ flex: 1, font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>dont vendues avec consigne (sans reprise de vide)</span>
                         <NumericStepper value={consigne} min={0} max={total}
-                          onChange={v => setGazConsigne(p => ({ ...p, [k]: { ...p[k], consigneQte: v } }))} suffix="b." />
+                          onChange={v => setGazConsigne(p => {
+                            // Préremplit le montant depuis le prix catalogue (Produits & prix, migration_v135),
+                            // tant que le gérant n'a pas lui-même corrigé le champ pour cette taille.
+                            const prix = N(gazConsignePrices[lab])
+                            const montant = !p[k]?.montantTouched && prix > 0 ? String(v * prix) : p[k]?.consigneMontant
+                            return { ...p, [k]: { ...p[k], consigneQte: v, consigneMontant: montant } }
+                          })} suffix="b." />
                       </div>
                     )}
                     {consigne > 0 && (
@@ -1025,7 +1034,7 @@ export default function Submit() {
                         <span style={{ flex: 1, font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Consigne perçue ({consigne} b.)</span>
                         <Input size="sm" type="text" inputMode="decimal" numeric style={{ width: 110 }} suffix="F"
                           value={gazConsigne[k]?.consigneMontant ?? ''}
-                          onChange={e => setGazConsigne(p => ({ ...p, [k]: { ...p[k], consigneMontant: e.target.value } }))} />
+                          onChange={e => setGazConsigne(p => ({ ...p, [k]: { ...p[k], consigneMontant: e.target.value, montantTouched: true } }))} />
                       </div>
                     )}
                   </div>

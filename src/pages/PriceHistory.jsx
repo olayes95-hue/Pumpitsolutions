@@ -7,7 +7,7 @@ import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Pagination } from '../ds/pumpit/components/data/Pagination.jsx'
 
-const CHAMP_LABEL = { prix_achat: "Prix d'achat", prix_vente: 'Prix de vente' }
+const CHAMP_LABEL = { prix_achat: "Prix d'achat", prix_vente: 'Prix de vente', consigne_prix: 'Prix de consigne' }
 const frDateTime = (iso) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
 
 export default function PriceHistory() {

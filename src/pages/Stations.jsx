@@ -195,8 +195,6 @@ export default function Stations() {
   async function savePrices(e) {
     e.preventDefault()
     const { error } = await supabase.from('settings').update({
-      essence_pv: num(settings.essence_pv), gasoil_pv: num(settings.gasoil_pv), marge_unitaire: num(settings.marge_unitaire),
-      essence_pa: num(settings.essence_pa), gasoil_pa: num(settings.gasoil_pa),
       taux_gaz: num(settings.taux_gaz), taux_superette: num(settings.taux_superette),
       superette_commission_reelle: !!settings.superette_commission_reelle,
       seuil_rupture: num(settings.seuil_rupture),
@@ -429,22 +427,9 @@ export default function Stations() {
       {tab === 'parametres' && settings && (
         <Panel title="Prix & marge">
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
-            Prix de vente (pré-remplis dans la saisie), prix d'achat (coût des commandes) et marge, en FCFA/L.
+            Les prix carburant (essence, gasoil) se règlent désormais dans Produits & prix. Ici : commission supérette, seuils et autres réglages.
           </p>
           <form onSubmit={savePrices} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
-            <FormSection title="Prix de vente">
-              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.essence_pv} onChange={e => setSettings({ ...settings, essence_pv: e.target.value })} /></Field>
-                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pv} onChange={e => setSettings({ ...settings, gasoil_pv: e.target.value })} /></Field>
-                <Field label="Marge (F/L)" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.marge_unitaire} onChange={e => setSettings({ ...settings, marge_unitaire: e.target.value })} /></Field>
-              </div>
-            </FormSection>
-            <FormSection title="Prix d'achat">
-              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.essence_pa ?? ''} onChange={e => setSettings({ ...settings, essence_pa: e.target.value })} /></Field>
-                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pa ?? ''} onChange={e => setSettings({ ...settings, gasoil_pa: e.target.value })} /></Field>
-              </div>
-            </FormSection>
             <FormSection title="Commission supérette">
               <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
                 Gaz et lubrifiant ne sont plus estimés à un taux fixe : leur commission se
