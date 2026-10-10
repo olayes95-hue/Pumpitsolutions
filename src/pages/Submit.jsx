@@ -85,6 +85,7 @@ export default function Submit() {
   const [lub, setLub] = useState({})
   const [lubVendu, setLubVendu] = useState({})   // {nom: quantité vendue aujourd'hui} — pour la commission réelle (prix vente − prix achat), plus une estimation à %
   const [lubVenduSplit, setLubVenduSplit] = useState({})
+  const [lubStockSplit, setLubStockSplit] = useState({})
   // Espèces gaz/lubrifiant : préremplies depuis les quantités vendues × prix (voir
   // gazEspeceCalc/lubEspeceCalc), mais le gérant peut corriger (ex. bouteille offerte, rabais) —
   // dès qu'il touche le champ, le préremplissage s'arrête de l'écraser pour cette journée.
@@ -252,7 +253,7 @@ export default function Submit() {
       setF({ ...EMPTY, ess_pu: settings.essence_pv, gas_pu: settings.gasoil_pv }); setLub({}); setLubVendu({})
       setGazEspeceTouched(false); setLubEspeceTouched(false)
     }
-    setLubVenduSplit({})
+    setLubVenduSplit({}); setLubStockSplit({})
     // Dépenses/versements/achats : la base fait autorité dès qu'il y a quelque chose ; sinon,
     // on retombe sur le brouillon local (ex. après un rechargement inattendu de la page).
     setExpenses(ex.data?.length ? ex.data : (draft?.expenses || []))
@@ -948,11 +949,32 @@ export default function Submit() {
                 const t = pr.nom
                 const th = lubTheorique[t]
                 const ecart = (th != null && lub[t] != null) ? N(lub[t]) - th : null
+                const hasCondit = N(pr.conditionnement_qte) > 0
                 return (
                   <div key={t} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
                     <span style={{ font: '400 14px/1.2 var(--font-ui)', color: 'var(--text-body)' }}>{t}</span>
-                    <Input size="sm" type="text" inputMode="numeric" numeric value={lub[t] ?? ''} placeholder="0" style={{ width: 90 }}
-                      onChange={e => setLub(p => ({ ...p, [t]: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+                    {!hasCondit ? (
+                      <Input size="sm" type="text" inputMode="numeric" numeric value={lub[t] ?? ''} placeholder="0" style={{ width: 90 }}
+                        onChange={e => setLub(p => ({ ...p, [t]: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+                    ) : (() => {
+                      const split = lubStockSplit[t] || { cartons: '', unites: '' }
+                      const updateSplit = (patch) => {
+                        const next = { ...split, ...patch }
+                        setLubStockSplit(p => ({ ...p, [t]: next }))
+                        const total = N(next.cartons) * N(pr.conditionnement_qte) + N(next.unites)
+                        setLub(p => ({ ...p, [t]: total || undefined }))
+                      }
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                          <Input size="sm" type="text" inputMode="numeric" numeric value={split.cartons} placeholder="0" style={{ width: 55 }}
+                            onChange={e => updateSplit({ cartons: e.target.value })} />
+                          <span style={{ font: '400 12px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>{pr.conditionnement_nom || 'carton'}(s) +</span>
+                          <Input size="sm" type="text" inputMode="numeric" numeric value={split.unites} placeholder="0" style={{ width: 55 }}
+                            onChange={e => updateSplit({ unites: e.target.value })} />
+                          <span style={{ font: '400 12px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>{pr.unite || 'unité'}(s) = {N(lub[t])}</span>
+                        </div>
+                      )
+                    })()}
                     {ecart != null && (
                       <span style={{ font: '400 12px/1.3 var(--font-ui)', color: Math.abs(ecart) < 0.5 ? 'var(--state-ok)' : 'var(--state-alarm)' }}>
                         Théorique {th} — écart {ecart > 0 ? '+' : ''}{ecart}{Math.abs(ecart) >= 0.5 ? ' à justifier' : ''}
