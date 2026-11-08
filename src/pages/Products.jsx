@@ -245,7 +245,7 @@ export default function Products() {
         </p>
         <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-            {(peutEditerDirect ? DISPLAY_CATS : CATS).map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
+            {((peutEditerDirect || peutProposer) ? DISPLAY_CATS : CATS).map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
           </div>
           {peutEditerDirect && cat !== 'carburant' && <Button size="sm" tone="primary" onClick={() => setShowAddForm(s => !s)}>{showAddForm ? 'Annuler' : '+ Nouveau produit'}</Button>}
         </div>
@@ -270,17 +270,22 @@ export default function Products() {
 
       {cat === 'carburant' ? (
         settings && <Panel title="Carburant">
+          {peutProposer && (
+            <AlertBanner tone="info" title="Lecture seule" style={{ marginBottom: 'var(--sp-4)' }}>
+              Les prix carburant ne passent pas par le même circuit de proposition que les autres pôles — contactez votre hiérarchie pour un changement.
+            </AlertBanner>
+          )}
           <form onSubmit={saveCarburant} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
             <FormSection title="Prix de vente">
               <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.essence_pv ?? ''} onChange={e => setSettings({ ...settings, essence_pv: e.target.value })} /></Field>
-                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pv ?? ''} onChange={e => setSettings({ ...settings, gasoil_pv: e.target.value })} /></Field>
+                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={peutProposer} value={settings.essence_pv ?? ''} onChange={e => setSettings({ ...settings, essence_pv: e.target.value })} /></Field>
+                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={peutProposer} value={settings.gasoil_pv ?? ''} onChange={e => setSettings({ ...settings, gasoil_pv: e.target.value })} /></Field>
               </div>
             </FormSection>
             <FormSection title="Prix d'achat">
               <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.essence_pa ?? ''} onChange={e => setSettings({ ...settings, essence_pa: e.target.value })} /></Field>
-                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric value={settings.gasoil_pa ?? ''} onChange={e => setSettings({ ...settings, gasoil_pa: e.target.value })} /></Field>
+                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={peutProposer} value={settings.essence_pa ?? ''} onChange={e => setSettings({ ...settings, essence_pa: e.target.value })} /></Field>
+                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={peutProposer} value={settings.gasoil_pa ?? ''} onChange={e => setSettings({ ...settings, gasoil_pa: e.target.value })} /></Field>
               </div>
             </FormSection>
             <FormSection title="Marge (calculée automatiquement)">
@@ -294,7 +299,7 @@ export default function Products() {
                   : "Utilisée pour la commission carburant et le seuil de rentabilité."}
               </p>
             </FormSection>
-            <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>
+            {!peutProposer && <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>}
           </form>
         </Panel>
       ) : (<>
