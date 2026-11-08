@@ -104,7 +104,7 @@ function useSpaces() {
       can('view_finance') && has('finance') && { to: '/rapport-mensuel', icon: 'receipt', label: 'Rapport mensuel' },
       can('view_bank_recon') && has('finance') && { to: '/rapprochement', icon: 'landmark', label: 'Rapprochement' },
       can('view_ocr_check') && has('bordereaux') && { to: '/verif-photos', icon: 'camera', label: 'Bordereaux' },
-      can('manage_finance') && has('finance') && { to: '/clients', icon: 'users', label: 'Clients à crédit' },
+      can('manage_finance') && has('clients_credit') && { to: '/clients', icon: 'users', label: 'Clients à crédit' },
     ] },
     { key: 'reglages', label: 'Réglages', icon: 'settings', items: [
       (can('manage_stations_config') || can('manage_team')) && { to: '/stations', icon: 'building-2', label: 'Stations et équipe' },
@@ -323,7 +323,7 @@ function AppRoutes() {
           <Route path="/finance" element={guard(can('view_finance') && has('finance'), <Finance />)} />
           <Route path="/rapport-mensuel" element={guard(can('view_finance') && has('finance'), <RapportMensuel />)} />
           <Route path="/rapprochement" element={guard(can('view_bank_recon') && has('finance'), <BankRecon />)} />
-          <Route path="/clients" element={guard(can('manage_finance') && has('finance'), <Clients />)} />
+          <Route path="/clients" element={guard(can('manage_finance') && has('clients_credit'), <Clients />)} />
           <Route path="/verif-photos" element={guard(can('view_ocr_check') && has('bordereaux'), <OcrCheck />)} />
           <Route path="/stations" element={guard(can('manage_stations_config') || can('manage_team'), <Stations />)} />
           <Route path="/entreprise" element={guard(org || can('view_finance'), <Entreprise />)} />

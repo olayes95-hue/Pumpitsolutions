@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
+import { useOffre } from '../lib/offre.jsx'
 import { Panel } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
@@ -29,6 +30,7 @@ const groupBy = (rows, key) => rows.reduce((m, r) => { (m[r[key] || '—'] = m[r
 
 export default function Stations() {
   const { isAdmin, can, session, isPlatformAdmin } = useAuth()
+  const { has } = useOffre()
   const [stations, setStations] = useState([])
   const [users, setUsers] = useState([])
   const [settings, setSettings] = useState(null)
@@ -324,7 +326,7 @@ export default function Stations() {
   ]
   const userColumns = [
     ...stationCols,
-    { key: 'rh', header: '', align: 'right', render: u => <Button size="sm" onClick={() => openRh(u)}>Fiche RH</Button> },
+    ...(has('rh_leger') ? [{ key: 'rh', header: '', align: 'right', render: u => <Button size="sm" onClick={() => openRh(u)}>Fiche RH</Button> }] : []),
     ...(peutGererEquipe ? [{ key: 'actions', header: '', align: 'right', render: u => (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
         <Button size="sm" tone="dark" onClick={() => saveUser(u)}>OK</Button>
@@ -337,9 +339,9 @@ export default function Stations() {
   const ctRh = rhDetail && etatContrat(rhDetail, today())
   // Personnel à surveiller : visite médicale en retard, ou contrat à échéance sous 30 jours —
   // visible à qui a déjà accès à l'onglet Équipe (manage_team/view_team), direction incluse.
-  const personnelASurveiller = activeUsers.map(u => ({
+  const personnelASurveiller = has('rh_leger') ? activeUsers.map(u => ({
     u, vm: etatVisiteMedicale(u, today()), ct: etatContrat(u, today()),
-  })).filter(x => x.vm.enRetard || x.ct.echeanceProche || x.ct.expire)
+  })).filter(x => x.vm.enRetard || x.ct.echeanceProche || x.ct.expire) : []
   const pendingUsers = users.filter(u => !u.approved)
   const activeUsers = users.filter(u => u.approved)
 

@@ -356,11 +356,11 @@ export default function Dashboard() {
             <Kpi label="Bouteilles gaz — pleines" value={gazEtats.reduce((s, g) => s + N(g.pleines_stock), 0)} unit="b." />
             <Kpi label="Bouteilles gaz — vides" value={gazEtats.reduce((s, g) => s + N(g.vides_stock), 0)} unit="b." />
             <Kpi label="Bouteilles gaz — consignées" value={gazEtats.reduce((s, g) => s + N(g.consignees_circulation), 0)} unit="b." sub="en circulation chez des clients" />
-            {ecartJauge?.ecart_ess_cumule != null && (
+            {has('ecart_jauge') && ecartJauge?.ecart_ess_cumule != null && (
               <Kpi label="Écart de jauge — essence" value={`${N(ecartJauge.ecart_ess_cumule) > 0 ? '+' : ''}${Math.round(N(ecartJauge.ecart_ess_cumule))}`} unit="L"
                 sub="cuve déclarée − stock théorique, cumulé ce mois" status={Math.abs(N(ecartJauge.ecart_ess_cumule)) > 300 ? 'alarm' : 'ok'} />
             )}
-            {ecartJauge?.ecart_gas_cumule != null && (
+            {has('ecart_jauge') && ecartJauge?.ecart_gas_cumule != null && (
               <Kpi label="Écart de jauge — gasoil" value={`${N(ecartJauge.ecart_gas_cumule) > 0 ? '+' : ''}${Math.round(N(ecartJauge.ecart_gas_cumule))}`} unit="L"
                 sub="cuve déclarée − stock théorique, cumulé ce mois" status={Math.abs(N(ecartJauge.ecart_gas_cumule)) > 300 ? 'alarm' : 'ok'} />
             )}

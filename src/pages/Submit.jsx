@@ -77,7 +77,7 @@ function clearDraft(stationId, date) {
 export default function Submit() {
   const { session, isAdmin, isPompiste, isVendeuse, profile, can } = useAuth()
   const { stationId, current } = useStation()
-  const { activite } = useOffre()   // activités incluses dans l'offre de la station (carburant, lubrifiant, gaz, superette)
+  const { activite, has } = useOffre()   // activités + fonctions incluses dans l'offre de la station (carburant, lubrifiant, gaz, superette / clients_credit, gaz_promo…)
   const [params] = useSearchParams()
   const [date, setDate] = useState(params.get('date') || today())
   const [moment, setMoment] = useState(['matin', 'apres-midi', 'soir'].includes(params.get('moment')) ? params.get('moment') : defaultMoment())
@@ -163,7 +163,7 @@ export default function Submit() {
     const m = {}, c = {}; (data || []).forEach(p => { m[p.nom] = N(p.prix_vente); c[p.nom] = N(p.consigne_prix) }); setGazPrices(m); setGazConsignePrices(c)
   }) }, [])
   useEffect(() => { supabase.from('expense_categories').select('*').eq('actif', true).order('ordre').then(({ data }) => setExpenseCategories(data || [])) }, [])
-  useEffect(() => { if (!stationId) return; supabase.from('clients').select('id,nom').eq('station_id', stationId).eq('actif', true).order('nom').then(({ data }) => setClients(data || [])) }, [stationId])
+  useEffect(() => { if (!stationId || !has('clients_credit')) return; supabase.from('clients').select('id,nom').eq('station_id', stationId).eq('actif', true).order('nom').then(({ data }) => setClients(data || [])) }, [stationId])
   useEffect(() => { if (!stationId) return; supabase.from('v_stock_theorique').select('produit, stock_theorique').eq('station_id', stationId).eq('categorie', 'lubrifiant').then(({ data }) => { const m = {}; (data || []).forEach(r => m[r.produit] = N(r.stock_theorique)); setLubTheorique(m) }) }, [stationId])
   useEffect(() => { if (stationId) load(date) }, [date, stationId])
 
@@ -1271,6 +1271,7 @@ export default function Submit() {
                     {e.categorie === 'CARBURANT'
                       ? <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Prélèvement carburant du propriétaire : <b>charge non-cash</b> (aucun paiement en espèces). Pas de reçu requis ; remonte chaque mois au Point financier sous « Carburant / déplacement (auto) » et n'est pas décompté du cash à verser.</p>
                       : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}><b>Charge non-cash</b> (aucun paiement en espèces) — pas de justificatif requis.</p>}
+                    {has('clients_credit') && <>
                     <Field label="Bénéficiaire">
                       <Select value={e.client_id == null ? 'proprietaire' : 'client'} onChange={ev => setExpenses(prev => prev.map((x, j) => j !== i ? x : { ...x, client_id: ev.target.value === 'client' ? '' : null }))} style={{ width: '100%' }}
                         options={[{ value: 'proprietaire', label: 'Propriétaire (non remboursé)' }, { value: 'client', label: 'Client à crédit (à recouvrer)' }]} />
@@ -1291,6 +1292,7 @@ export default function Submit() {
                         </Field>
                       )
                     )}
+                    </>}
                   </>) : (<>
                     <Field label="Pôle(s) payé(s) depuis la caisse de…">
                       <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
