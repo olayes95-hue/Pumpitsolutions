@@ -15,16 +15,18 @@ export async function uploadEvidence(supabase, bucket, folder, file) {
 }
 
 // Recompresse en place (même chemin) un fichier déjà envoyé brut par uploadEvidence — appelé au
-// submit final. Jamais bloquant : une erreur (réseau, fichier déjà supprimé...) laisse simplement
-// le fichier brut tel quel, ce n'est qu'une optimisation de stockage, pas une étape critique.
+// submit final, et réessayé plus tard pour les fichiers qui ont raté ce passage (voir
+// pendingRawPhotos.js). Jamais bloquant : une erreur (réseau, fichier déjà supprimé...) laisse
+// simplement le fichier brut tel quel, ce n'est qu'une optimisation de stockage, pas une étape
+// critique. Renvoie true si traité (compressé OU jugé déjà correct), false si à réessayer plus tard.
 export async function compressStoredPhoto(supabase, bucket, path) {
   try {
     const { data, error } = await supabase.storage.from(bucket).download(path)
-    if (error || !data) return
+    if (error || !data) return false
     const compressed = await compressImage(data)
-    if (compressed === data) return // pas de gain, ou pas une image compressible
-    await supabase.storage.from(bucket).update(path, compressed)
-  } catch { /* jamais bloquant */ }
+    if (compressed !== data) await supabase.storage.from(bucket).update(path, compressed)
+    return true
+  } catch { return false }
 }
 
 export async function compressImage(file, { maxDim = 1600, quality = 0.7 } = {}) {

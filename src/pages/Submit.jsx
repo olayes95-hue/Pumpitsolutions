@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
 import { fcfa, today, numFR, frDate, formatThousands } from '../lib/format'
 import { compressImage, compressStoredPhoto } from '../lib/image'
+import { addPendingRawPhoto, removePendingRawPhoto } from '../lib/pendingRawPhotos'
 import OrderReception from '../components/OrderReception.jsx'
 import { Panel } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
@@ -329,11 +330,17 @@ export default function Submit() {
       const { error: up } = await supabase.storage.from(BORDEREAUX_BUCKET).upload(path, file)
       if (up) throw up
       rawPhotoPathsRef.current.push(path)
+      addPendingRawPhoto(BORDEREAUX_BUCKET, path)
       const { data: ins, error: ai } = await supabase.from('attachments').insert({
         station_id: stationId, report_date: date, categorie: 'compteur', note: `${label} — index ${f[k] || '?'}`, photo_path: path, created_by: session.user.id,
       }).select().single()
       if (ai) throw ai
       setAttachments(a => [...a.filter(x => !anciennes.some(old => old.id === x.id)), ins])
+      // L'ancien fichier n'est plus référencé par personne dès que l'attachment pointant vers
+      // lui est supprimé ci-dessus — sans ce nettoyage, il reste orphelin dans le stockage pour
+      // toujours (constaté en prod : des centaines de Mo de photos de reprise jamais effacées).
+      const anciensChemins = anciennes.map(a => a.photo_path).filter(Boolean)
+      if (anciensChemins.length) supabase.storage.from(BORDEREAUX_BUCKET).remove(anciensChemins).catch(() => {})
     } catch (e) {
       fail(`Échec de l'envoi de la photo (${label}) : ${e.message || e}. Vérifiez votre connexion et réessayez.`)
     } finally {
@@ -348,11 +355,16 @@ export default function Submit() {
     if (!file || !stationId) return
     setExpPhotoBusy(p => ({ ...p, [i]: true }))
     try {
+      const ancienChemin = expenses[i]?.photo_path
       const path = `${stationId}/depenses/${date}/${Date.now()}_${file.name.replace(/[^\w.\-]/g, '_')}`
       const { error: up } = await supabase.storage.from(BORDEREAUX_BUCKET).upload(path, file)
       if (up) throw up
       rawPhotoPathsRef.current.push(path)
+      addPendingRawPhoto(BORDEREAUX_BUCKET, path)
       setExpenses(p => p.map((x, j) => j === i ? { ...x, photo_path: path, _file: undefined } : x))
+      // Reprise d'un justificatif déjà envoyé pour cette même ligne : l'ancien fichier n'est
+      // plus référencé par rien dès que photo_path est remplacé ci-dessus.
+      if (ancienChemin) supabase.storage.from(BORDEREAUX_BUCKET).remove([ancienChemin]).catch(() => {})
     } catch (e) {
       fail(`Échec de l'envoi de la photo du justificatif : ${e.message || e}. Vérifiez votre connexion et réessayez.`, 'expenses')
     } finally {
@@ -363,11 +375,14 @@ export default function Submit() {
     if (!file || !stationId) return
     setDepPhotoBusy(p => ({ ...p, [i]: true }))
     try {
+      const ancienChemin = deposits[i]?.photo_path
       const path = `${stationId}/${date}/${Date.now()}_${file.name.replace(/[^\w.\-]/g, '_')}`
       const { error: up } = await supabase.storage.from(BORDEREAUX_BUCKET).upload(path, file)
       if (up) throw up
       rawPhotoPathsRef.current.push(path)
+      addPendingRawPhoto(BORDEREAUX_BUCKET, path)
       setDeposits(p => p.map((x, j) => j === i ? { ...x, photo_path: path, _file: undefined } : x))
+      if (ancienChemin) supabase.storage.from(BORDEREAUX_BUCKET).remove([ancienChemin]).catch(() => {})
     } catch (e) {
       fail(`Échec de l'envoi de la photo du bordereau : ${e.message || e}. Vérifiez votre connexion et réessayez.`, 'deposits')
     } finally {
@@ -712,7 +727,7 @@ export default function Submit() {
       // "Enregistré" à l'écran, et un échec ici (réseau...) n'a aucune conséquence sur la saisie
       // déjà enregistrée (compressStoredPhoto ne fait jamais échouer l'appelant).
       const toCompress = rawPhotoPathsRef.current.splice(0, rawPhotoPathsRef.current.length)
-      for (const p of toCompress) compressStoredPhoto(supabase, BORDEREAUX_BUCKET, p)
+      for (const p of toCompress) compressStoredPhoto(supabase, BORDEREAUX_BUCKET, p).then(ok => { if (ok) removePendingRawPhoto(BORDEREAUX_BUCKET, p) })
 
       setMsg(`Enregistré ! (${momentLabel(moment)} — ${date})`)
       load(date)

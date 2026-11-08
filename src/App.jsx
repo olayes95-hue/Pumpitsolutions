@@ -15,6 +15,7 @@ import { Viewport } from './ds/pumpit/components/core/Viewport.jsx'
 import { Button } from './ds/pumpit/components/core/Button.jsx'
 import { AlertBanner } from './ds/pumpit/components/feedback/AlertBanner.jsx'
 import { frDate } from './lib/format'
+import { retryPendingRawPhotos } from './lib/pendingRawPhotos'
 
 // Chargées à la demande : réduit fortement le bundle initial (surtout pour gérant et vendeuse sur mobile).
 const Submit = lazy(() => import('./pages/Submit.jsx'))
@@ -336,6 +337,9 @@ function AppRoutes() {
 export default function App() {
   const { session, loading, profileLoading, profile, suspendu, organisationReady, isAgent, recovery } = useAuth()
   const { pathname } = useLocation()
+  // Reprend la compression des photos restées brutes d'une session précédente interrompue
+  // (voir lib/pendingRawPhotos.js) — une fois par connexion, indépendamment de l'écran ouvert.
+  useEffect(() => { if (session) retryPendingRawPhotos(supabase) }, [session?.user?.id])
   if (loading) return <Loading />
   // Lien "mot de passe oublié" reçu par email : avant toute chose, même si une session
   // "recovery" existe déjà (voir lib/auth.jsx) — jamais l'app normale tant que le nouveau
