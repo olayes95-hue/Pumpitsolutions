@@ -51,6 +51,7 @@ export default function Finance() {
   const [stockVal, setStockVal] = useState([])
   const [bonsRestant, setBonsRestant] = useState(0)
   const [soldeClients, setSoldeClients] = useState(0)   // v_solde_client (migration_v143) — créance totale sur les clients à crédit
+  const [clientRemb, setClientRemb] = useState([])      // client_remboursements — annule la charge le mois où le remboursement est reçu
   const [stockCuve, setStockCuve] = useState({ ess_stock: 0, gas_stock: 0 })
   const [commandesEnCours, setCommandesEnCours] = useState([])   // fuel_orders lancée/partielle
   const [receptionsTotaux, setReceptionsTotaux] = useState({})  // {order_id: quantite_recue_total}
@@ -79,10 +80,10 @@ export default function Finance() {
 
   async function load() {
     if (!stationId) return
-    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc] = await Promise.all([
+    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc, crm] = await Promise.all([
       supabase.from('v_ventes_mensuelles').select('*').eq('station_id', stationId).order('mois'),
       supabase.from('charges').select('*').eq('station_id', stationId),
-      supabase.from('expenses').select('report_date,categorie,montant,client_id').eq('station_id', stationId),
+      supabase.from('expenses').select('report_date,categorie,montant').eq('station_id', stationId),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
       supabase.from('v_pertes_mensuelles').select('*').eq('station_id', stationId),
       supabase.from('v_stock_valeur').select('*').eq('station_id', stationId),
@@ -99,6 +100,7 @@ export default function Finance() {
       supabase.from('v_commission_reelle_mensuelle').select('*').eq('station_id', stationId),
       supabase.from('v_commission_superette_mensuelle').select('*').eq('station_id', stationId),
       supabase.from('v_solde_client').select('solde_du').eq('station_id', stationId),
+      supabase.from('client_remboursements').select('report_date,montant').eq('station_id', stationId),
     ])
     setVentes(v.data || []); setCharges(c.data || []); setExpenses(e.data || []); setCommissionReelle(cr.data || []); setCommissionSuperette(cs.data || [])
     if (st.data) setSettings(st.data)
@@ -115,6 +117,7 @@ export default function Finance() {
     setSoldeBanque(sb.data || null)
     setMouvementsBanque(mb.data || [])
     setSoldeClients((sc.data || []).reduce((s, x) => s + N(x.solde_du), 0))
+    setClientRemb(crm.data || [])
   }
   useEffect(() => { load() }, [stationId])
   // Rafraîchit automatiquement si une saisie change pendant que la page est ouverte (ex. une
@@ -162,20 +165,29 @@ export default function Finance() {
 
   // charges AUTO depuis les dépenses quotidiennes (SBEE, carburant) — factorisé pour être
   // réutilisable sur n'importe quel prédicat de mois (période courante, précédente, un mois donné).
-  // Une dépense attribuée à un client à crédit (expenses.client_id, migration_v143) n'est PAS
-  // une charge réelle de la station — c'est une créance à recouvrer (voir soldeClients ci-dessous) —
-  // contrairement au prélèvement du propriétaire (même catégorie CARBURANT, sans client_id).
+  // Une dépense attribuée à un client à crédit (expenses.client_id, migration_v143) compte comme
+  // n'importe quelle autre dépense CARBURANT tant qu'elle n'est pas remboursée — exactement comme
+  // le prélèvement du propriétaire. Ce qui la distingue : rembClientsFor() ci-dessous vient
+  // ANNULER cette charge, dans le mois où le remboursement est reçu (pas dans le mois de la
+  // dépense d'origine) — c'est ça, "la créance n'est plus active, et ça se voit dans le Point
+  // financier", plutôt que de l'exclure des charges en permanence comme avant.
   function autoChargesFor(predicate) {
     const m = {}
     for (const e of expenses) {
       const em = (e.report_date || '').slice(0, 7)
-      if (!predicate(em) || e.client_id) continue
+      if (!predicate(em)) continue
       if (e.categorie === 'SBEE' || e.categorie === 'CARBURANT') m[e.categorie] = (m[e.categorie] || 0) + N(e.montant)
     }
     return m
   }
   const autoCharges = autoChargesFor(inPeriod)
   const totAuto = Object.values(autoCharges).reduce((s, v) => s + v, 0)
+  // Remboursements reçus de clients à crédit, sur la période — vient annuler la charge
+  // correspondante (voir commentaire ci-dessus). report_date = date de réception du remboursement.
+  function rembClientsFor(predicate) {
+    return clientRemb.filter(r => predicate((r.report_date || '').slice(0, 7))).reduce((s, r) => s + N(r.montant), 0)
+  }
+  const rembClients = rembClientsFor(inPeriod)
 
   // charges MANUELLES
   const chP = charges.filter(c => inPeriod(c.mois))
@@ -192,7 +204,7 @@ export default function Finance() {
   const perteNaLitres = pertesP.reduce((s, p) => s + N(p.perte_na_litres), 0)
   const perteMontant = pertesP.reduce((s, p) => s + N(p.perte_montant), 0)
 
-  const totCharges = totAuto + totManuel + perteMontant
+  const totCharges = totAuto + totManuel + perteMontant - rembClients
   const produits = commCarb + commGazLub + commSuperette + autresProduits
   const resultat = produits - totCharges
 
@@ -222,8 +234,9 @@ export default function Finance() {
   const autresProduitsPrev = chPprev.filter(c => c.categorie === REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
   const totManuelPrev = chPprev.filter(c => c.categorie !== REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
   const perteMontantPrev = pertes.filter(p => prevInPeriod(p.mois)).reduce((s, p) => s + N(p.perte_montant), 0)
+  const rembClientsPrev = rembClientsFor(prevInPeriod)
   const produitsPrev = commCarbPrev + commGazLubPrev + commSuperettePrev + autresProduitsPrev
-  const totChargesPrev = totAutoPrev + totManuelPrev + perteMontantPrev
+  const totChargesPrev = totAutoPrev + totManuelPrev + perteMontantPrev - rembClientsPrev
   const resultatPrev = produitsPrev - totChargesPrev
   function cmp(curr, prev) {
     if (!prevLabel || !prev) return {}
@@ -430,6 +443,7 @@ export default function Finance() {
     { key: 'produits', label: '= PRODUITS', bold: true },
     { key: 'sbee', label: 'SBEE (auto)' },
     { key: 'carbDepl', label: 'Carburant / déplacement (auto)' },
+    { key: 'rembClients', label: 'Remboursements clients à crédit reçus' },
     { key: 'pertes', label: 'Pertes livraison (auto)' },
     { key: 'chargesFixes', label: 'Charges fixes' },
     { key: 'charges', label: '= CHARGES', bold: true },
@@ -448,9 +462,10 @@ export default function Finance() {
     const autresP = cM.filter(c => c.categorie === REVENU_CAT).reduce((sum, c) => sum + N(c.montant), 0)
     const totMan = cM.filter(c => c.categorie !== REVENU_CAT).reduce((sum, c) => sum + N(c.montant), 0)
     const pertesM = pertes.filter(p => p.mois === m).reduce((sum, p) => sum + N(p.perte_montant), 0)
+    const rembM = rembClientsFor(em => em === m)
     const prod = cCarb + cGL + cSup + autresP
-    const tot = totA + totMan + pertesM
-    return { commCarb: cCarb, commGL: cGL, commSup: cSup, autresProduits: autresP, sbee: N(auto.SBEE), carbDepl: N(auto.CARBURANT), pertes: pertesM, chargesFixes: totMan, produits: prod, charges: tot, resultat: prod - tot }
+    const tot = totA + totMan + pertesM - rembM
+    return { commCarb: cCarb, commGL: cGL, commSup: cSup, autresProduits: autresP, sbee: N(auto.SBEE), carbDepl: N(auto.CARBURANT), pertes: pertesM, rembClients: rembM, chargesFixes: totMan, produits: prod, charges: tot, resultat: prod - tot }
   }
   const yearMonths = annee ? MONTHS.map(m => `${annee}-${m}`) : []
   // Mois exclus (avant la date d'ouverture, si définie) : null plutôt que calculés, pour ne
@@ -573,6 +588,7 @@ export default function Finance() {
           <LedgerHead>Charges</LedgerHead>
           <LedgerRow label="SBEE (auto, depuis dépenses)" value={fcfa(autoCharges.SBEE)} />
           <LedgerRow label="Carburant / déplacement (auto)" value={fcfa(autoCharges.CARBURANT)} />
+          {rembClients > 0 && <LedgerRow label="Remboursements clients à crédit reçus (annule la charge)" value={`− ${fcfa(rembClients)}`} />}
           {perteMontant > 0 && <LedgerRow label="Pertes livraison (auto)" value={fcfa(perteMontant)} />}
           <LedgerRow label="Charges fixes (saisies)" value={fcfa(totManuel)} />
           <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--sp-3)', borderTop: '2px solid var(--border-default)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>
