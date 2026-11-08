@@ -11,11 +11,19 @@ import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
+import { Drawer, DrawerRow } from '../ds/pumpit/components/feedback/Drawer.jsx'
+import { etatVisiteMedicale, etatContrat } from '../lib/formules.js'
+import { today, frDate } from '../lib/format'
 
 // Rôles historiques : une seule station (profiles.station_id), non modifiables/supprimables
 // (gelés par trigger côté base — voir migration_v65). Tout autre rôle (directeur/comptable,
 // ou un rôle créé ici) est rattachable à plusieurs stations via profile_stations.
 const SINGLE_STATION_ROLES = ['gerant', 'pompiste', 'vendeuse', 'admin']
+
+const CONTRAT_TYPES = [
+  { value: 'cdi', label: 'CDI' }, { value: 'cdd', label: 'CDD' },
+  { value: 'essai', label: "Période d'essai" }, { value: 'prestataire', label: 'Prestataire' },
+]
 
 const groupBy = (rows, key) => rows.reduce((m, r) => { (m[r[key] || '—'] = m[r[key] || '—'] || []).push(r); return m }, {})
 
@@ -37,6 +45,8 @@ export default function Stations() {
   const [newRole, setNewRole] = useState({ key: '', label: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [newName, setNewName] = useState('')
+  const [rhDetailId, setRhDetailId] = useState(null)   // profil ouvert dans le Drawer Fiche RH
+  const [rhForm, setRhForm] = useState({})
   // Onglets visibles selon les permissions du profil courant — Rôles/Paramètres restent
   // strictement admin, Stations/Équipe deviennent délégables via manage_stations_config/manage_team.
   const TABS = [
@@ -51,7 +61,7 @@ export default function Stations() {
   async function load() {
     const [s, u, st, r, p, rp, ps, ec, fo, bc, em] = await Promise.all([
       supabase.from('stations').select('*').order('id'),
-      supabase.from('profiles').select('id, full_name, role, station_id, approved').order('full_name'),
+      supabase.from('profiles').select('id, full_name, role, station_id, approved, contrat_type, contrat_fin, cnss_declare, assurance_maladie_fin, visite_medicale_le, visite_medicale_mois').order('full_name'),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
       supabase.from('roles').select('*').order('created_at'),
       supabase.from('permissions').select('*').order('category').order('label'),
@@ -130,6 +140,26 @@ export default function Stations() {
       if (selected.length) await supabase.from('profile_stations').insert(selected.map(sid => ({ profile_id: u.id, station_id: sid })))
     }
     flash(approve ? 'Compte validé' : 'Membre mis à jour'); load()
+  }
+  function openRh(u) {
+    setRhDetailId(u.id)
+    setRhForm({
+      contrat_type: u.contrat_type || '', contrat_fin: u.contrat_fin || '',
+      cnss_declare: u.cnss_declare == null ? '' : String(u.cnss_declare),
+      assurance_maladie_fin: u.assurance_maladie_fin || '', visite_medicale_le: u.visite_medicale_le || '',
+      visite_medicale_mois: u.visite_medicale_mois || 12,
+    })
+  }
+  async function saveRh() {
+    const patch = {
+      contrat_type: rhForm.contrat_type || null, contrat_fin: rhForm.contrat_fin || null,
+      cnss_declare: rhForm.cnss_declare === '' ? null : rhForm.cnss_declare === 'true',
+      assurance_maladie_fin: rhForm.assurance_maladie_fin || null, visite_medicale_le: rhForm.visite_medicale_le || null,
+      visite_medicale_mois: Number(rhForm.visite_medicale_mois) || 12,
+    }
+    const { error } = await supabase.from('profiles').update(patch).eq('id', rhDetailId)
+    if (error) { fail(error); return }
+    flash('Fiche RH enregistrée'); setRhDetailId(null); load()
   }
   // Changer l'email d'un AUTRE compte nécessite l'API Admin de Supabase Auth (clé service_role,
   // jamais exposée au navigateur) — voir supabase/functions/admin-update-email et migration_v131.
@@ -291,6 +321,7 @@ export default function Stations() {
   ]
   const userColumns = [
     ...stationCols,
+    { key: 'rh', header: '', align: 'right', render: u => <Button size="sm" onClick={() => openRh(u)}>Fiche RH</Button> },
     ...(peutGererEquipe ? [{ key: 'actions', header: '', align: 'right', render: u => (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
         <Button size="sm" tone="dark" onClick={() => saveUser(u)}>OK</Button>
@@ -298,6 +329,14 @@ export default function Stations() {
       </div>
     ) }] : []),
   ]
+  const rhDetail = activeUsers.find(u => u.id === rhDetailId)
+  const vmRh = rhDetail && etatVisiteMedicale(rhDetail, today())
+  const ctRh = rhDetail && etatContrat(rhDetail, today())
+  // Personnel à surveiller : visite médicale en retard, ou contrat à échéance sous 30 jours —
+  // visible à qui a déjà accès à l'onglet Équipe (manage_team/view_team), direction incluse.
+  const personnelASurveiller = activeUsers.map(u => ({
+    u, vm: etatVisiteMedicale(u, today()), ct: etatContrat(u, today()),
+  })).filter(x => x.vm.enRetard || x.ct.echeanceProche || x.ct.expire)
   const pendingUsers = users.filter(u => !u.approved)
   const activeUsers = users.filter(u => u.approved)
 
@@ -352,6 +391,21 @@ export default function Stations() {
 
       {tab === 'equipe' && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
+        {personnelASurveiller.length > 0 && (
+          <Panel title="Personnel à surveiller" meta={`${personnelASurveiller.length}`} status="warn" flush>
+            <div style={{ display: 'flex', flexDirection: 'column', margin: '0 var(--gutter-panel)' }}>
+              {personnelASurveiller.map(({ u, vm, ct }) => (
+                <DrawerRow key={u.id} mono={false} status={(vm.enRetard || ct.expire) ? 'alarm' : 'warn'}
+                  label={u.full_name}
+                  value={[
+                    vm.enRetard && `Visite médicale en retard (${vm.joursRetard} j)`,
+                    ct.expire && `Contrat ${ (roles.find(r=>r.key===u.role)?.label||u.role) } expiré`,
+                    ct.echeanceProche && !ct.expire && `Contrat à échéance dans ${ct.joursRestants} j`,
+                  ].filter(Boolean).join(' · ')} />
+              ))}
+            </div>
+          </Panel>
+        )}
         {peutGererEquipe && pendingUsers.length > 0 && (
           <Panel title="Comptes en attente de validation" meta={`${pendingUsers.length}`} status="alarm" flush>
             <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
@@ -377,6 +431,51 @@ export default function Stations() {
         </Panel>
       </div>
       )}
+
+      <Drawer open={!!rhDetailId} onClose={() => setRhDetailId(null)} title={rhDetail?.full_name || ''}
+        meta="Fiche RH" status={(vmRh?.enRetard || ctRh?.expire) ? 'alarm' : (ctRh?.echeanceProche ? 'warn' : 'ok')}
+        footer={peutGererEquipe && <Button tone="primary" onClick={saveRh}>Enregistrer</Button>}>
+        {rhDetail && <>
+          {!peutGererEquipe ? (<>
+            <DrawerRow label="Type de contrat" mono={false} value={CONTRAT_TYPES.find(c => c.value === rhDetail.contrat_type)?.label || '—'} />
+            <DrawerRow label="Fin de contrat" mono={false} value={rhDetail.contrat_fin ? frDate(rhDetail.contrat_fin) : '—'}
+              status={ctRh?.expire ? 'alarm' : ctRh?.echeanceProche ? 'warn' : undefined} />
+            <DrawerRow label="CNSS déclaré" mono={false} value={rhDetail.cnss_declare == null ? 'Non renseigné' : (rhDetail.cnss_declare ? 'Oui' : 'Non')} />
+            <DrawerRow label="Assurance maladie — expiration" mono={false} value={rhDetail.assurance_maladie_fin ? frDate(rhDetail.assurance_maladie_fin) : '—'} />
+            <DrawerRow label="Dernière visite médicale" mono={false} value={rhDetail.visite_medicale_le ? frDate(rhDetail.visite_medicale_le) : 'Jamais faite'}
+              status={vmRh?.enRetard ? 'alarm' : undefined} />
+            <DrawerRow label="Périodicité" mono={false} value={`${rhDetail.visite_medicale_mois || 12} mois`} />
+            {vmRh?.enRetard && <DrawerRow label="Statut visite médicale" mono={false} status="alarm" value={`En retard de ${vmRh.joursRetard} j`} />}
+          </>) : (<>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)', paddingTop: 'var(--sp-3)' }}>
+              <Field label="Type de contrat">
+                <Select value={rhForm.contrat_type} onChange={e => setRhForm(p => ({ ...p, contrat_type: e.target.value }))} style={{ width: '100%' }}
+                  options={[{ value: '', label: '— non renseigné —' }, ...CONTRAT_TYPES]} />
+              </Field>
+              {rhForm.contrat_type !== 'cdi' && (
+                <Field label="Fin de contrat">
+                  <Input type="date" value={rhForm.contrat_fin} onChange={e => setRhForm(p => ({ ...p, contrat_fin: e.target.value }))} />
+                </Field>
+              )}
+              <Field label="CNSS déclaré">
+                <Select value={rhForm.cnss_declare} onChange={e => setRhForm(p => ({ ...p, cnss_declare: e.target.value }))} style={{ width: '100%' }}
+                  options={[{ value: '', label: 'Non renseigné' }, { value: 'true', label: 'Oui' }, { value: 'false', label: 'Non' }]} />
+              </Field>
+              <Field label="Assurance maladie — expiration">
+                <Input type="date" value={rhForm.assurance_maladie_fin} onChange={e => setRhForm(p => ({ ...p, assurance_maladie_fin: e.target.value }))} />
+              </Field>
+              <Field label="Dernière visite médicale">
+                <Input type="date" value={rhForm.visite_medicale_le} onChange={e => setRhForm(p => ({ ...p, visite_medicale_le: e.target.value }))} />
+              </Field>
+              <Field label="Périodicité (mois)">
+                <Input type="number" min="1" value={rhForm.visite_medicale_mois} onChange={e => setRhForm(p => ({ ...p, visite_medicale_mois: e.target.value }))} />
+              </Field>
+              {vmRh?.enRetard && <AlertBanner tone="alarm" title="Visite médicale en retard">{`En retard de ${vmRh.joursRetard} jour(s).`}</AlertBanner>}
+              {vmRh?.jamaisFaite && <AlertBanner tone="warn" title="Visite médicale jamais faite">Aucune date renseignée.</AlertBanner>}
+            </div>
+          </>)}
+        </>}
+      </Drawer>
 
       {tab === 'roles' && (
       <div style={{ display: 'flex', gap: 'var(--sp-5)', flexWrap: 'wrap', alignItems: 'flex-start' }}>

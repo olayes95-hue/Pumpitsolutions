@@ -10,6 +10,7 @@
 //   Commandes : commande_a_valider, commande_statut, reception_ecart
 //   Prix : prix_a_valider, prix_statut
 //   Compte/plateforme : essai_j3, essai_termine, facture_emise, facture_retard
+//   RH léger (migration_v145, profiles) : visite_medicale_retard, contrat_echeance
 //
 // Paramétrage par offre : une règle peut poser requiert_fonction (clé de formules.fonctions)
 // ou formules (liste de clés d'offre) — le déclenchement est alors filtré sur l'offre de la
@@ -402,6 +403,50 @@ async function traiterFactureRetard(regles: any[]) {
   await setCursor("facture_retard", new Date().toISOString())
 }
 
+// Visite médicale en retard : fire le lendemain du jour où (visite_medicale_le +
+// visite_medicale_mois) est dépassée — même logique "un seul envoi" que essai_termine
+// (curseur à la journée). Calcul fait ici (pas de colonne stockée), même formule que
+// etatVisiteMedicale() côté front (src/lib/formules.js).
+async function traiterVisiteMedicaleRetard(regles: any[]) {
+  const cursor = await getCursor("visite_medicale_retard")
+  if (cursor.slice(0, 10) === new Date().toISOString().slice(0, 10)) return
+  const hier = new Date(); hier.setDate(hier.getDate() - 1)
+  const hierStr = hier.toISOString().slice(0, 10)
+  const { data: profils } = await sb.from("profiles").select("id, full_name, organisation_id, visite_medicale_le, visite_medicale_mois")
+    .eq("approved", true).not("visite_medicale_le", "is", null)
+  for (const p of profils || []) {
+    if (!p.organisation_id) continue
+    const prochaine = new Date(p.visite_medicale_le)
+    prochaine.setMonth(prochaine.getMonth() + (p.visite_medicale_mois || 12))
+    if (prochaine.toISOString().slice(0, 10) !== hierStr) continue
+    const vars = { employe: p.full_name, derniere_visite: p.visite_medicale_le }
+    for (const r of regles) {
+      const dest = r.destinataires?.type === "roles_client" ? await emailsRoles(r.destinataires.roles, { organisationId: p.organisation_id }) : destinatairesStatiques(r)
+      for (const email of dest) await envoyer(r.id, "visite_medicale_retard", email, r.sujet, r.corps_html, vars)
+    }
+  }
+  await setCursor("visite_medicale_retard", new Date().toISOString())
+}
+// Contrat (CDD/essai/prestataire, jamais CDI) à échéance dans 30 jours — un seul envoi, le
+// jour exact où ce seuil est atteint, même logique que essai_j3.
+async function traiterContratEcheance(regles: any[]) {
+  const cursor = await getCursor("contrat_echeance")
+  if (cursor.slice(0, 10) === new Date().toISOString().slice(0, 10)) return
+  const cible = new Date(); cible.setDate(cible.getDate() + 30)
+  const cibleStr = cible.toISOString().slice(0, 10)
+  const { data: profils } = await sb.from("profiles").select("id, full_name, organisation_id, contrat_fin, contrat_type")
+    .eq("approved", true).eq("contrat_fin", cibleStr).neq("contrat_type", "cdi")
+  for (const p of profils || []) {
+    if (!p.organisation_id) continue
+    const vars = { employe: p.full_name, date_fin: p.contrat_fin }
+    for (const r of regles) {
+      const dest = r.destinataires?.type === "roles_client" ? await emailsRoles(r.destinataires.roles, { organisationId: p.organisation_id }) : destinatairesStatiques(r)
+      for (const email of dest) await envoyer(r.id, "contrat_echeance", email, r.sujet, r.corps_html, vars)
+    }
+  }
+  await setCursor("contrat_echeance", new Date().toISOString())
+}
+
 const HANDLERS: Record<string, (regles: any[]) => Promise<void>> = {
   versement_manquant: (r) => traiterAlerte("versement_manquant", r),
   versement_incomplet: (r) => traiterAlerte("versement_incomplet", r),
@@ -424,6 +469,8 @@ const HANDLERS: Record<string, (regles: any[]) => Promise<void>> = {
   compte_a_valider: traiterCompteAValider,
   compte_retire: traiterCompteRetire,
   client_suspendu: traiterClientSuspendu,
+  visite_medicale_retard: traiterVisiteMedicaleRetard,
+  contrat_echeance: traiterContratEcheance,
 }
 
 Deno.serve(async (req) => {

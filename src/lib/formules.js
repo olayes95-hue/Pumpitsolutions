@@ -43,6 +43,30 @@ export function etatAbonnement(org, reglages, aujourdhui) {
   return { enEssai, essaiTermine, bloque: suspendu || bloqueEssai, motif: suspendu ? 'suspendu' : bloqueEssai ? 'essai' : null, joursRestants }
 }
 
+// État de la visite médicale d'un employé (module RH léger, migration_v145). Même logique de
+// date que etatAbonnement() : une périodicité en mois, appliquée à la dernière visite faite.
+// jamaisFaite = aucune visite_medicale_le renseignée — distinct de enRetard (une visite existe
+// mais la prochaine est dépassée), pour ne pas confondre "jamais fait" et "en retard".
+export function etatVisiteMedicale(profile, aujourdhui) {
+  const le = profile?.visite_medicale_le || null
+  const periodicite = profile?.visite_medicale_mois || 12
+  if (!le) return { aJour: false, enRetard: false, jamaisFaite: true, prochaineDate: null, joursRetard: null }
+  const prochaine = new Date(le); prochaine.setMonth(prochaine.getMonth() + periodicite)
+  const prochaineDate = prochaine.toISOString().slice(0, 10)
+  const enRetard = prochaineDate < aujourdhui
+  const joursRetard = enRetard ? Math.round((new Date(aujourdhui) - prochaine) / 86400000) : null
+  return { aJour: !enRetard, enRetard, jamaisFaite: false, prochaineDate, joursRetard }
+}
+
+// État du contrat d'un employé : approche d'échéance (CDD/essai/prestataire — un CDI n'a pas
+// de contrat_fin et n'est jamais "à échéance"). seuilJours = fenêtre d'alerte avant l'échéance.
+export function etatContrat(profile, aujourdhui, seuilJours = 30) {
+  const fin = profile?.contrat_fin || null
+  if (!fin || profile?.contrat_type === 'cdi') return { echeanceProche: false, expire: false, joursRestants: null }
+  const joursRestants = Math.round((new Date(fin) - new Date(aujourdhui)) / 86400000)
+  return { echeanceProche: joursRestants >= 0 && joursRestants <= seuilJours, expire: joursRestants < 0, joursRestants }
+}
+
 // Alertes rattachées à la fonction « alertes_completes ». Les autres (versement manquant ou
 // incomplet, écart de caisse, stock bas, point manquant…) sont dans toutes les offres.
 const ALERTES_COMPLETES = new Set([
