@@ -100,6 +100,8 @@ export default function Submit() {
   const [gazRetours, setGazRetours] = useState({})
   const [lubTheorique, setLubTheorique] = useState({})   // {nom: stock_theorique} — v_stock_theorique, pour l'écart en direct
   const [expenses, setExpenses] = useState([])
+  const [clients, setClients] = useState([])   // clients à crédit actifs de la station (migration_v143)
+  const [newClientFor, setNewClientFor] = useState(null)   // index de dépense en cours de création de client
   const [deposits, setDeposits] = useState([])
   const [deliveries, setDeliveries] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -161,6 +163,7 @@ export default function Submit() {
     const m = {}, c = {}; (data || []).forEach(p => { m[p.nom] = N(p.prix_vente); c[p.nom] = N(p.consigne_prix) }); setGazPrices(m); setGazConsignePrices(c)
   }) }, [])
   useEffect(() => { supabase.from('expense_categories').select('*').eq('actif', true).order('ordre').then(({ data }) => setExpenseCategories(data || [])) }, [])
+  useEffect(() => { if (!stationId) return; supabase.from('clients').select('id,nom').eq('station_id', stationId).eq('actif', true).order('nom').then(({ data }) => setClients(data || [])) }, [stationId])
   useEffect(() => { if (!stationId) return; supabase.from('v_stock_theorique').select('produit, stock_theorique').eq('station_id', stationId).eq('categorie', 'lubrifiant').then(({ data }) => { const m = {}; (data || []).forEach(r => m[r.produit] = N(r.stock_theorique)); setLubTheorique(m) }) }, [stationId])
   useEffect(() => { if (stationId) load(date) }, [date, stationId])
 
@@ -370,6 +373,15 @@ export default function Submit() {
     } finally {
       setExpPhotoBusy(p => { const c = { ...p }; delete c[i]; return c })
     }
+  }
+
+  async function createClient(i, nom) {
+    if (!nom || !nom.trim() || !stationId) return
+    const { data, error } = await supabase.from('clients').insert({ station_id: stationId, nom: nom.trim() }).select('id,nom').single()
+    if (error) { fail(`Échec de la création du client : ${error.message}`, 'expenses'); return }
+    setClients(p => [...p, data].sort((a, b) => a.nom.localeCompare(b.nom)))
+    upd(setExpenses, i, 'client_id', data.id)
+    setNewClientFor(null)
   }
   async function handleDepositPhoto(i, file) {
     if (!file || !stationId) return
@@ -658,7 +670,8 @@ export default function Submit() {
           : (e.poles || []).filter(po => N(po.montant) > 0).map(po => ({ pole: po.pole, montant: numFR(po.montant) }))
         return { categorie: e.categorie || 'AUTRE', montant: numFR(e.montant),
           motif: e.motif || (isCarb ? 'Carburant / déplacement propriétaire' : null),
-          photo_path: e.photo_path || null, non_cash: isCarb, poles }
+          photo_path: e.photo_path || null, non_cash: isCarb, poles,
+          client_id: isCarb && e.client_id ? Number(e.client_id) : null }
       })
 
       const lvRows = deliveries.filter(d => N(d.quantite) > 0 || N(d.montant) > 0).map(d => ({
@@ -1249,11 +1262,31 @@ export default function Submit() {
                     <Field label="Montant" style={{ flex: '1 1 140px' }}><Input type="text" inputMode="decimal" numeric value={e.montant || ''} onChange={ev => upd(setExpenses, i, 'montant', ev.target.value)} /></Field>
                   </div>
                   <Field label="Motif"><Input value={e.motif || ''} onChange={ev => upd(setExpenses, i, 'motif', ev.target.value)} placeholder="ex : recharge électricité" /></Field>
-                  {nonCashCat(e.categorie) ? (
-                    e.categorie === 'CARBURANT'
+                  {nonCashCat(e.categorie) ? (<>
+                    {e.categorie === 'CARBURANT'
                       ? <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Prélèvement carburant du propriétaire : <b>charge non-cash</b> (aucun paiement en espèces). Pas de reçu requis ; remonte chaque mois au Point financier sous « Carburant / déplacement (auto) » et n'est pas décompté du cash à verser.</p>
-                      : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}><b>Charge non-cash</b> (aucun paiement en espèces) — pas de justificatif requis.</p>
-                  ) : (<>
+                      : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}><b>Charge non-cash</b> (aucun paiement en espèces) — pas de justificatif requis.</p>}
+                    <Field label="Bénéficiaire">
+                      <Select value={e.client_id == null ? 'proprietaire' : 'client'} onChange={ev => setExpenses(prev => prev.map((x, j) => j !== i ? x : { ...x, client_id: ev.target.value === 'client' ? '' : null }))} style={{ width: '100%' }}
+                        options={[{ value: 'proprietaire', label: 'Propriétaire (non remboursé)' }, { value: 'client', label: 'Client à crédit (à recouvrer)' }]} />
+                    </Field>
+                    {e.client_id !== null && e.client_id !== undefined && (
+                      newClientFor === i ? (
+                        <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                          <Field label="Nouveau client" style={{ flex: '1 1 200px' }}>
+                            <Input autoFocus placeholder="nom de la société ou du client" onKeyDown={ev => { if (ev.key === 'Enter') createClient(i, ev.target.value) }}
+                              onBlur={ev => { if (ev.target.value.trim()) createClient(i, ev.target.value) }} />
+                          </Field>
+                          <Button size="sm" onClick={() => setNewClientFor(null)}>Annuler</Button>
+                        </div>
+                      ) : (
+                        <Field label="Client">
+                          <Select value={e.client_id || ''} onChange={ev => ev.target.value === '__new__' ? setNewClientFor(i) : upd(setExpenses, i, 'client_id', ev.target.value)} style={{ width: '100%' }}
+                            options={[{ value: '', label: '— choisir un client —' }, ...clients.map(c => ({ value: c.id, label: c.nom })), { value: '__new__', label: '+ Nouveau client' }]} />
+                        </Field>
+                      )
+                    )}
+                  </>) : (<>
                     <Field label="Pôle(s) payé(s) depuis la caisse de…">
                       <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
                         {EXPENSE_POLES.map(po => (

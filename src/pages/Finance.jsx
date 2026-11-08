@@ -50,6 +50,7 @@ export default function Finance() {
   const [pertes, setPertes] = useState([])
   const [stockVal, setStockVal] = useState([])
   const [bonsRestant, setBonsRestant] = useState(0)
+  const [soldeClients, setSoldeClients] = useState(0)   // v_solde_client (migration_v143) — créance totale sur les clients à crédit
   const [stockCuve, setStockCuve] = useState({ ess_stock: 0, gas_stock: 0 })
   const [commandesEnCours, setCommandesEnCours] = useState([])   // fuel_orders lancée/partielle
   const [receptionsTotaux, setReceptionsTotaux] = useState({})  // {order_id: quantite_recue_total}
@@ -78,10 +79,10 @@ export default function Finance() {
 
   async function load() {
     if (!stationId) return
-    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs] = await Promise.all([
+    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc] = await Promise.all([
       supabase.from('v_ventes_mensuelles').select('*').eq('station_id', stationId).order('mois'),
       supabase.from('charges').select('*').eq('station_id', stationId),
-      supabase.from('expenses').select('report_date,categorie,montant').eq('station_id', stationId),
+      supabase.from('expenses').select('report_date,categorie,montant,client_id').eq('station_id', stationId),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
       supabase.from('v_pertes_mensuelles').select('*').eq('station_id', stationId),
       supabase.from('v_stock_valeur').select('*').eq('station_id', stationId),
@@ -97,6 +98,7 @@ export default function Finance() {
       supabase.from('compte_bancaire_mouvements').select('*').eq('station_id', stationId).order('date_mouvement', { ascending: false }),
       supabase.from('v_commission_reelle_mensuelle').select('*').eq('station_id', stationId),
       supabase.from('v_commission_superette_mensuelle').select('*').eq('station_id', stationId),
+      supabase.from('v_solde_client').select('solde_du').eq('station_id', stationId),
     ])
     setVentes(v.data || []); setCharges(c.data || []); setExpenses(e.data || []); setCommissionReelle(cr.data || []); setCommissionSuperette(cs.data || [])
     if (st.data) setSettings(st.data)
@@ -112,6 +114,7 @@ export default function Finance() {
     setCompteBancaire(cb.data || null)
     setSoldeBanque(sb.data || null)
     setMouvementsBanque(mb.data || [])
+    setSoldeClients((sc.data || []).reduce((s, x) => s + N(x.solde_du), 0))
   }
   useEffect(() => { load() }, [stationId])
   // Rafraîchit automatiquement si une saisie change pendant que la page est ouverte (ex. une
@@ -129,6 +132,7 @@ export default function Finance() {
       // sans cet abonnement, une recatégorisation ou un import dans Rapprochement ne rafraîchissait
       // jamais cette page si elle était déjà ouverte (il fallait la recharger à la main).
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bank_lines', filter: `station_id=eq.${stationId}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'client_remboursements', filter: `station_id=eq.${stationId}` }, load)
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [stationId])
@@ -158,11 +162,14 @@ export default function Finance() {
 
   // charges AUTO depuis les dépenses quotidiennes (SBEE, carburant) — factorisé pour être
   // réutilisable sur n'importe quel prédicat de mois (période courante, précédente, un mois donné).
+  // Une dépense attribuée à un client à crédit (expenses.client_id, migration_v143) n'est PAS
+  // une charge réelle de la station — c'est une créance à recouvrer (voir soldeClients ci-dessous) —
+  // contrairement au prélèvement du propriétaire (même catégorie CARBURANT, sans client_id).
   function autoChargesFor(predicate) {
     const m = {}
     for (const e of expenses) {
       const em = (e.report_date || '').slice(0, 7)
-      if (!predicate(em)) continue
+      if (!predicate(em) || e.client_id) continue
       if (e.categorie === 'SBEE' || e.categorie === 'CARBURANT') m[e.categorie] = (m[e.categorie] || 0) + N(e.montant)
     }
     return m
@@ -258,7 +265,7 @@ export default function Finance() {
     return s + montantTotal * (reste / commande)
   }, 0)
   const soldeBancaireActuel = N(compteBancaire?.solde_actuel)
-  const totalActif = stockTotal + stockCarburant + commandesEnCoursValeur + bonsRestant + cashCumule + ouvertureMontant + soldeBancaireActuel
+  const totalActif = stockTotal + stockCarburant + commandesEnCoursValeur + bonsRestant + soldeClients + cashCumule + ouvertureMontant + soldeBancaireActuel
   const totalPassif = chargesAPayerCumule
   const situationNette = totalActif - totalPassif
 
@@ -709,6 +716,7 @@ export default function Finance() {
             <LedgerRow label="Stock (gaz + lubrifiant + supérette)" value={fcfa(stockTotal)} />
             {commandesEnCoursValeur > 0 && <LedgerRow label="Commandes en cours (en transit)" value={fcfa(commandesEnCoursValeur)} />}
             <LedgerRow label="Bons en cours (créance, à ce jour)" value={fcfa(bonsRestant)} />
+            {soldeClients > 0 && <LedgerRow label="Créances clients à crédit (à ce jour)" value={fcfa(soldeClients)} />}
             <LedgerRow label="Cash non encore versé (cumulé)" value={fcfa(cashCumule)} />
             {soldeBanque && <LedgerRow label="Solde bancaire (à ce jour)" value={fcfa(soldeBancaireActuel)} />}
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 'var(--sp-5)', paddingTop: 'var(--sp-2)', borderTop: '1px solid var(--border-hairline)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)' }}>
