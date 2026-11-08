@@ -46,6 +46,7 @@ export default function Dashboard() {
   const [stock, setStock] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [gazEtats, setGazEtats] = useState([])   // v_gaz_etats_bouteilles (migration_v134) — pleines/vides/consignées par taille
+  const [ecartJauge, setEcartJauge] = useState(null)   // v_ecart_jauge_mensuel (migration_v142) — mois courant, {ecart_ess_cumule, ecart_gas_cumule}
   const [loading, setLoading] = useState(true)
   // Par défaut, mois en cours (pas le dernier mois avec des données, qui peut être ancien).
   const today = new Date().toISOString().slice(0, 10)
@@ -126,12 +127,13 @@ export default function Dashboard() {
 
   async function loadStock() {
     if (!stationId) return
-    const [ls, sf, ge] = await Promise.all([
+    const [ls, sf, ge, ej] = await Promise.all([
       supabase.from('v_latest_stock').select('*').eq('station_id', stationId).maybeSingle(),
       supabase.from('v_stock_forecast').select('*').eq('station_id', stationId).maybeSingle(),
       supabase.from('v_gaz_etats_bouteilles').select('*').eq('station_id', stationId),
+      supabase.from('v_ecart_jauge_mensuel').select('*').eq('station_id', stationId).eq('mois', new Date().toISOString().slice(0, 7)).maybeSingle(),
     ])
-    setStock(ls.data || null); setForecast(sf.data || null); setGazEtats(ge.data || [])
+    setStock(ls.data || null); setForecast(sf.data || null); setGazEtats(ge.data || []); setEcartJauge(ej.data || null)
     setRefreshedAt(new Date().toLocaleTimeString('fr-FR'))
   }
   useEffect(() => { if (!stationId) return
@@ -354,6 +356,14 @@ export default function Dashboard() {
             <Kpi label="Bouteilles gaz — pleines" value={gazEtats.reduce((s, g) => s + N(g.pleines_stock), 0)} unit="b." />
             <Kpi label="Bouteilles gaz — vides" value={gazEtats.reduce((s, g) => s + N(g.vides_stock), 0)} unit="b." />
             <Kpi label="Bouteilles gaz — consignées" value={gazEtats.reduce((s, g) => s + N(g.consignees_circulation), 0)} unit="b." sub="en circulation chez des clients" />
+            {ecartJauge?.ecart_ess_cumule != null && (
+              <Kpi label="Écart de jauge — essence" value={`${N(ecartJauge.ecart_ess_cumule) > 0 ? '+' : ''}${Math.round(N(ecartJauge.ecart_ess_cumule))}`} unit="L"
+                sub="cuve déclarée − stock théorique, cumulé ce mois" status={Math.abs(N(ecartJauge.ecart_ess_cumule)) > 300 ? 'alarm' : 'ok'} />
+            )}
+            {ecartJauge?.ecart_gas_cumule != null && (
+              <Kpi label="Écart de jauge — gasoil" value={`${N(ecartJauge.ecart_gas_cumule) > 0 ? '+' : ''}${Math.round(N(ecartJauge.ecart_gas_cumule))}`} unit="L"
+                sub="cuve déclarée − stock théorique, cumulé ce mois" status={Math.abs(N(ecartJauge.ecart_gas_cumule)) > 300 ? 'alarm' : 'ok'} />
+            )}
           </div>
         </>)}
       </Panel>
