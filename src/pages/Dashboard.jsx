@@ -386,6 +386,9 @@ export default function Dashboard() {
       {/* Détail qui alimente les totaux ci-dessus. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
         <Kpi label="Recettes espèces" value={L(fcfa(totCash))} sub={pctEsp != null ? `${pctEsp}% du CA` : ''} />
+        {sum('recettes_mobile_money') > 0 && (
+          <Kpi label="Mobile money" value={L(fcfa(sum('recettes_mobile_money')))} sub="hors espèces — circuit de dépôt séparé" />
+        )}
         <Kpi label="Ventes à bon" value={L(fcfa(totBon))} sub={pctBon != null ? `${pctBon}% du CA` : ''} />
         <Kpi label="Marge carburant" value={L(fcfa(totMarge))} sub="25 F/L" />
         <Kpi label="Livraisons / achats" value={L(fcfa(totLivr))} />

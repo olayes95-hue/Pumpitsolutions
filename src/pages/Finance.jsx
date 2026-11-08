@@ -554,6 +554,9 @@ export default function Finance() {
         <Kpi label="Commission carburant" value={fcfa(commCarb)} sub="litres × marge" {...cmp(commCarb, commCarbPrev)} />
         <Kpi label="Ventes gaz + lubrifiant" value={fcfa(sum('ventes_gaz') + sum('ventes_lubrifiant'))} />
         <Kpi label="Ventes supérette" value={fcfa(sum('ventes_superette'))} />
+        {sum('recettes_mobile_money') > 0 && (
+          <Kpi label="Mobile money" value={fcfa(sum('recettes_mobile_money'))} sub="hors espèces — circuit de dépôt séparé" />
+        )}
         <Kpi label="Total charges" value={fcfa(totCharges)} {...cmp(totCharges, totChargesPrev)} />
         <Kpi label="Charges à payer" value={fcfa(chargesAPayer)} status={chargesAPayer > 0 ? 'warn' : 'ok'} />
         <Kpi label="Valeur du stock" value={fcfa(stockTotal)} sub="gaz + lubrifiant + supérette" />

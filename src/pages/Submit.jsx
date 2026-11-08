@@ -43,7 +43,7 @@ const machineNums = (n) => Array.from({ length: n }, (_, i) => i + 1)
 const pumpKeys = (suffix) => [...machineNums(MAX_MACHINES).map(n => `e${n}${suffix}`), ...machineNums(MAX_MACHINES).map(n => `g${n}${suffix}`)]
 const NUMFIELDS = [
   'ess_litres','ess_pu','ess_bon','ess_espece','gas_litres','gas_pu','gas_bon','gas_espece',
-  'gaz_espece','superette_espece','lubrifiant_espece',
+  'gaz_espece','superette_espece','lubrifiant_espece','mobile_money',
   ...pumpKeys(''),   // relevés 16h (contrôle) : e1..e10, g1..g10
   ...pumpKeys('_m'), // relevés d'ouverture (matin) : e1_m..e10_m, g1_m..g10_m
   'total_bon_cumul',
@@ -518,6 +518,7 @@ export default function Submit() {
     </>)
     return (<>
       <MetricTile label="Recette espèces (jour)" value={fcfa(cashDeclare)} />
+      {current?.mobile_money_actif && <MetricTile label="Mobile money (jour)" value={fcfa(N(f.mobile_money))} />}
       <MetricTile label="Dépenses (jour)" value={fcfa(totDepense)} />
       <MetricTile label="Versé saisi ce jour" value={fcfa(totVerse)} />
     </>)
@@ -1164,6 +1165,10 @@ export default function Submit() {
             {activite('gaz') && <Field label="Espèces gaz" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...touchedNumProps('gaz_espece', setGazEspeceTouched)} /></Field>}
             {activite('superette') && <Field label="Espèces supérette" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('superette_espece')} /></Field>}
             {activite('lubrifiant') && <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...touchedNumProps('lubrifiant_espece', setLubEspeceTouched)} /></Field>}
+            {/* Réglage par station (mobile_money_actif, migration_v146), pas une fonction d'offre :
+                certaines stations l'utilisent, d'autres non. Toujours distinct des espèces — ne
+                rentre jamais dans le calcul du manque à verser (circuit bancaire différent). */}
+            {current?.mobile_money_actif && <Field label="Mobile money" hint={current.mobile_money_operateurs?.length ? current.mobile_money_operateurs.join(', ') : undefined} style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('mobile_money')} /></Field>}
           </div>
           {/* Préremplies depuis les quantités vendues × prix, mais modifiables (bouteille offerte,
               rabais…) — l'écart avec l'attendu reste visible, comme pour essence/gasoil plus haut :

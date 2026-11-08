@@ -90,6 +90,8 @@ export default function Stations() {
   const fail = (e) => { setErr(e.message || String(e)) }
 
   async function saveStation(s) {
+    const operateurs = String(s._operateursInput ?? (s.mobile_money_operateurs || []).join(', '))
+      .split(',').map(o => o.trim()).filter(Boolean)
     const { error } = await supabase.from('stations').update({
       nom: s.nom, compte_bancaire: s.compte_bancaire,
       seuil_essence: num(s.seuil_essence), seuil_gasoil: num(s.seuil_gasoil),
@@ -97,6 +99,7 @@ export default function Stations() {
       capacite_essence: num(s.capacite_essence) ?? 20000, capacite_gasoil: num(s.capacite_gasoil) ?? 20000,
       nombre_machines: Math.min(10, Math.max(1, num(s.nombre_machines) ?? 4)),
       suivi_lub_gaz: s.suivi_lub_gaz || 'les_deux',
+      mobile_money_actif: !!s.mobile_money_actif, mobile_money_operateurs: operateurs,
     }).eq('id', s.id)
     error ? fail(error) : flash('Station enregistrée')
   }
@@ -378,6 +381,14 @@ export default function Stations() {
                 <Select value={s.suivi_lub_gaz || 'les_deux'} onChange={e => upS(s.id, 'suivi_lub_gaz', e.target.value)} style={{ width: '100%' }}
                   options={[{ value: 'les_deux', label: 'Stock + Vendu (défaut)' }, { value: 'stock', label: 'Stock seul' }, { value: 'vendu', label: 'Vendu seul' }]} />
               </Field>
+              <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <Checkbox label="Mobile money activé pour cette station" checked={!!s.mobile_money_actif} onChange={v => upS(s.id, 'mobile_money_actif', v)} />
+                {s.mobile_money_actif && (
+                  <Field label="Opérateurs (séparés par une virgule)" style={{ flex: '1 1 240px' }}>
+                    <Input value={s._operateursInput ?? (s.mobile_money_operateurs || []).join(', ')} onChange={e => upS(s.id, '_operateursInput', e.target.value)} placeholder="ex : MoMo, Moov, Celtiis" />
+                  </Field>
+                )}
+              </div>
               <Button tone="primary" onClick={() => saveStation(s)} style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>
             </div>
           ))}
