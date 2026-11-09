@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
+import { useOffre } from '../lib/offre.jsx'
 import { fcfa } from '../lib/format'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { numFR } from '../lib/format'
@@ -23,7 +24,8 @@ const UNITE_OPTIONS = UNITES.map(u => ({ value: u, label: u }))
 const CAT_OPTIONS = CATS.map(c => ({ value: c, label: c }))
 // « Carburant » est un bouton d'onglet en plus, pas une catégorie de la table `products` :
 // un seul essence + un seul gasoil par station (table `settings`), jamais un catalogue.
-const DISPLAY_CATS = ['carburant', ...CATS]
+// « gaz_promo » (dépôt-vente, migration_v149) rejoint la liste seulement si l'offre l'inclut.
+const CAT_LABEL = { gaz_promo: 'Gaz promo' }
 
 function FormSection({ title, children }) {
   return (
@@ -37,6 +39,8 @@ function FormSection({ title, children }) {
 export default function Products() {
   const { isAdmin, can, session } = useAuth()
   const { stationId } = useStation()
+  const { has } = useOffre()
+  const DISPLAY_CATS = ['carburant', ...CATS, ...(has('gaz_promo') ? ['gaz_promo'] : [])]
   // peutEditerDirect : écrit directement products.prix_* (admin). peutProposer : accès en
   // mode "proposition" (chef de piste, voir migration_v139) — toute modification de prix
   // passe par product_price_requests, jamais d'écriture directe sur products pour ce profil.
@@ -252,7 +256,7 @@ export default function Products() {
         </p>
         <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-            {((peutEditerDirect || peutProposer || peutVoirSeul) ? DISPLAY_CATS : CATS).map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
+            {((peutEditerDirect || peutProposer || peutVoirSeul) ? DISPLAY_CATS : CATS).map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: CAT_LABEL[c] ? 'none' : 'capitalize' }}>{CAT_LABEL[c] || c}</Button>)}
           </div>
           {peutEditerDirect && cat !== 'carburant' && <Button size="sm" tone="primary" onClick={() => setShowAddForm(s => !s)}>{showAddForm ? 'Annuler' : '+ Nouveau produit'}</Button>}
         </div>

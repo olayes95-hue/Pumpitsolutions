@@ -155,7 +155,11 @@ export default function Finance() {
   // plus une estimation à taux fixe pour la supérette (pas de quantité par produit là-bas,
   // suivie en valeur globale — hors périmètre du calcul réel).
   const CR = commissionReelle.filter(c => inPeriod(c.mois))
-  const commGazLub = CR.reduce((s, c) => s + N(c.commission_gaz) + N(c.commission_lubrifiant), 0)
+  // commission_gaz_promo (migration_v149, dépôt-vente) : un vrai profit pour la station, compté
+  // avec le reste gaz+lubrifiant — mais exposé séparément dans le détail ci-dessous (commGazPromo)
+  // pour rester visible, comme demandé (stock ET marge du gaz promo suivis à part).
+  const commGazLub = CR.reduce((s, c) => s + N(c.commission_gaz) + N(c.commission_lubrifiant) + N(c.commission_gaz_promo), 0)
+  const commGazPromo = CR.reduce((s, c) => s + N(c.commission_gaz_promo), 0)
   // Supérette : calcul réel (PV − PA par produit vendu, comme gaz/lubrifiant) une fois activé
   // par l'admin (Stations > Prix & marge) — sinon estimation à taux fixe comme avant.
   const supCommReelle = (filterFn) => commissionSuperette.filter(c => filterFn(c.mois)).reduce((s, c) => s + N(c.commission_superette), 0)
@@ -654,6 +658,7 @@ export default function Finance() {
           <LedgerHead>Produits (commissions, auto)</LedgerHead>
           <LedgerRow label="Commission carburant" value={fcfa(commCarb)} />
           <LedgerRow label="Commission gaz + lubrifiant (prix vente − prix achat)" value={fcfa(commGazLub)} />
+          {commGazPromo > 0 && <LedgerRow label="dont gaz en dépôt-vente (promo)" value={fcfa(commGazPromo)} />}
           <LedgerRow label={settings.superette_commission_reelle ? 'Commission supérette (prix vente − prix achat)' : `Commission supérette (${settings.taux_superette}%)`} value={fcfa(commSuperette)} />
           {autresProduits > 0 && <LedgerRow label="Autres produits (saisis)" value={fcfa(autresProduits)} />}
           <LedgerHead>Charges</LedgerHead>

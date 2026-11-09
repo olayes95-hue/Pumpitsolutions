@@ -99,6 +99,11 @@ export default function Submit() {
   const [gazConsigne, setGazConsigne] = useState({})
   const [gazRetours, setGazRetours] = useState({})
   const [lubTheorique, setLubTheorique] = useState({})   // {nom: stock_theorique} — v_stock_theorique, pour l'écart en direct
+  // Gaz en dépôt-vente (promo, migration_v149) : même mécanique que lubrifiant (produits
+  // dynamiques, catégorie 'gaz_promo', stock déclaré en jsonb) — stock séparé du gaz normal.
+  const [gazPromoTypes, setGazPromoTypes] = useState([])
+  const [gazPromoStock, setGazPromoStock] = useState({})
+  const [gazPromoVendu, setGazPromoVendu] = useState({})
   const [expenses, setExpenses] = useState([])
   const [clients, setClients] = useState([])   // clients à crédit actifs de la station (migration_v143)
   const [newClientFor, setNewClientFor] = useState(null)   // index de dépense en cours de création de client
@@ -159,6 +164,7 @@ export default function Submit() {
   useEffect(() => { supabase.from('settings').select('*').eq('id', 1).maybeSingle().then(({ data }) => data && setSettings(data)) }, [])
   useEffect(() => { supabase.from('suppliers').select('id,nom,categorie').order('nom').then(({ data }) => setSuppliers(data || [])) }, [])
   useEffect(() => { supabase.from('products').select('nom, unite, conditionnement_nom, conditionnement_qte, prix_vente').eq('categorie', 'lubrifiant').eq('actif', true).order('ordre').then(({ data }) => { if (data && data.length) setLubTypes(data) }) }, [])
+  useEffect(() => { if (!has('gaz_promo')) return; supabase.from('products').select('nom, prix_vente').eq('categorie', 'gaz_promo').eq('actif', true).order('ordre').then(({ data }) => setGazPromoTypes(data || [])) }, [])
   useEffect(() => { supabase.from('products').select('nom,prix_vente,consigne_prix').eq('categorie', 'gaz').then(({ data }) => {
     const m = {}, c = {}; (data || []).forEach(p => { m[p.nom] = N(p.prix_vente); c[p.nom] = N(p.consigne_prix) }); setGazPrices(m); setGazConsignePrices(c)
   }) }, [])
@@ -240,6 +246,7 @@ export default function Submit() {
       Object.keys(EMPTY).forEach(k => c[k] = r.data[k] ?? '')
       THOUSANDS_FIELDS.forEach(k => { if (c[k] !== '') c[k] = formatThousands(String(c[k])) })
       setF(c); setLub(r.data.lubrifiant_stock || {}); setLubVendu(r.data.lubrifiant_vendu || {})
+      setGazPromoStock(r.data.gaz_promo_stock || {}); setGazPromoVendu(r.data.gaz_promo_vendu || {})
       // La journée est réellement enregistrée en base : le brouillon local n'a plus lieu d'être.
       clearDraft(stationId, d)
       // Valeurs déjà déclarées (espèces) : ne jamais les recalculer silencieusement par-dessus
@@ -252,9 +259,11 @@ export default function Submit() {
     // trompeur (laisserait croire à un incident alors que c'est le cas normal).
     else if (draft?.f) {
       setF(draft.f); setLub(draft.lub || {}); setLubVendu(draft.lubVendu || {})
+      setGazPromoStock(draft.gazPromoStock || {}); setGazPromoVendu(draft.gazPromoVendu || {})
       setGazEspeceTouched(false); setLubEspeceTouched(false)
     } else {
       setF({ ...EMPTY, ess_pu: settings.essence_pv, gas_pu: settings.gasoil_pv }); setLub({}); setLubVendu({})
+      setGazPromoStock({}); setGazPromoVendu({})
       setGazEspeceTouched(false); setLubEspeceTouched(false)
     }
     setLubVenduSplit({}); setLubStockSplit({})
@@ -275,8 +284,8 @@ export default function Submit() {
   // récupérable après un rechargement inattendu de l'onglet.
   useEffect(() => {
     if (!stationId || !date) return
-    saveDraft(stationId, date, { f, lub, lubVendu, expenses: stripFiles(expenses), deposits: stripFiles(deposits), deliveries: stripFiles(deliveries) })
-  }, [f, lub, lubVendu, expenses, deposits, deliveries, stationId, date])
+    saveDraft(stationId, date, { f, lub, lubVendu, gazPromoStock, gazPromoVendu, expenses: stripFiles(expenses), deposits: stripFiles(deposits), deliveries: stripFiles(deliveries) })
+  }, [f, lub, lubVendu, gazPromoStock, gazPromoVendu, expenses, deposits, deliveries, stationId, date])
 
   // champ compteur avec photo-preuve par pompe — envoyée immédiatement à la sélection (voir handleMeterPhoto)
   // Photo recommandée mais plus bloquante à l'envoi (voir save()) : le gérant doit pouvoir
@@ -459,7 +468,10 @@ export default function Submit() {
   // vente actuel) — le gérant ne les retape plus. Uniquement quand la quantité vendue est
   // effectivement déclarée (showVenduLubGaz) ; sinon (station en mode "stock" seul) il n'y a
   // rien dont les déduire, et le champ reste une saisie manuelle (voir plus bas).
+  // Inclut les ventes de gaz promo (dépôt-vente) : même caisse physique que le gaz normal, même
+  // champ "Espèces gaz" — seul le stock et la commission restent séparés (voir gaz_promo_*).
   const gazEspeceCalc = GAZ.reduce((s, [k, lab]) => s + N(f['gaz_vendu_' + k]) * N(gazPrices[lab]), 0)
+    + gazPromoTypes.reduce((s, pr) => s + N(gazPromoVendu[pr.nom]) * N(pr.prix_vente), 0)
   const lubEspeceCalc = lubTypes.reduce((s, pr) => s + N(lubVendu[pr.nom]) * N(pr.prix_vente), 0)
   // Libellés des compteurs — réutilisés pour l'affichage (meterMachine) ET pour la vérification
   // "photo obligatoire" dans save() : doivent rester identiques aux deux endroits, sinon
@@ -637,7 +649,8 @@ export default function Submit() {
     }
     const sid = stationId
     try {
-      const payload = { lubrifiant_stock: Object.keys(lub).length ? lub : null, lubrifiant_vendu: Object.keys(lubVendu).length ? lubVendu : null }
+      const payload = { lubrifiant_stock: Object.keys(lub).length ? lub : null, lubrifiant_vendu: Object.keys(lubVendu).length ? lubVendu : null,
+        gaz_promo_stock: Object.keys(gazPromoStock).length ? gazPromoStock : null, gaz_promo_vendu: Object.keys(gazPromoVendu).length ? gazPromoVendu : null }
       NUMFIELDS.forEach(k => payload[k] = f[k] === '' ? null : numFR(f[k]))
       payload.note = f.note || null
       // Relevé du matin FIGÉ, distinct de ess_stock/gas_stock (qui continuent de refléter le
@@ -971,6 +984,17 @@ export default function Submit() {
               ))}
             </div>
           </FormSection>}
+          {has('gaz_promo') && gazPromoTypes.length > 0 && showStockLubGaz && <FormSection title="Gaz en dépôt-vente (promo) — stock" style={{ marginTop: 'var(--sp-4)' }}>
+            <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>Bouteilles reçues sans commande, à prix promotionnel — stock séparé du gaz normal.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+              {gazPromoTypes.map(pr => (
+                <div key={pr.nom} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+                  <span style={{ flex: 1, font: '400 15px/1.25 var(--font-ui)', color: 'var(--text-body)' }}>{pr.nom}</span>
+                  <NumericStepper value={Number(gazPromoStock[pr.nom]) || 0} onChange={v => setGazPromoStock(p => ({ ...p, [pr.nom]: v || undefined }))} suffix="b." />
+                </div>
+              ))}
+            </div>
+          </FormSection>}
           {activite('lubrifiant') && showStockLubGaz && <FormSection title="Lubrifiants en stock" style={{ marginTop: 'var(--sp-4)' }}>
             <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>Nombre de bidons en stock, par référence — c'est cette info que vous mettez à jour chaque matin.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 'var(--sp-4)' }}>
@@ -1121,6 +1145,19 @@ export default function Submit() {
                   </div>
                 )
               })}
+            </div>
+          </FormSection>}
+          {has('gaz_promo') && gazPromoTypes.length > 0 && showVenduLubGaz && <FormSection title="Gaz en dépôt-vente (promo) — vendues" style={{ marginTop: 'var(--sp-4)' }}>
+            <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
+              Prix promotionnel — l'espèce correspondante est déjà comptée dans « Espèces gaz » ci-dessous, pas à ressaisir.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+              {gazPromoTypes.map(pr => (
+                <div key={pr.nom} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+                  <span style={{ flex: 1, font: '400 15px/1.25 var(--font-ui)', color: 'var(--text-body)' }}>{pr.nom} — {fcfa(pr.prix_vente)}</span>
+                  <NumericStepper value={Number(gazPromoVendu[pr.nom]) || 0} onChange={v => setGazPromoVendu(p => ({ ...p, [pr.nom]: v || undefined }))} suffix="b." />
+                </div>
+              ))}
             </div>
           </FormSection>}
           {activite('lubrifiant') && showVenduLubGaz && <FormSection title="Lubrifiants vendus" style={{ marginTop: 'var(--sp-4)' }}>
