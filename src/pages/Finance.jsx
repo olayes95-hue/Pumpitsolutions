@@ -49,6 +49,7 @@ export default function Finance() {
   const [commissionReelle, setCommissionReelle] = useState([])   // v_commission_reelle_mensuelle — quantité vendue × (prix vente − prix achat), gaz + lubrifiant
   const [commissionSuperette, setCommissionSuperette] = useState([])   // v_commission_superette_mensuelle — idem, supérette (si settings.superette_commission_reelle)
   const [charges, setCharges] = useState([])
+  const [deliveries, setDeliveries] = useState([])   // achats hors carburant (gaz/lubrifiant/supérette/autre), pour le détail Achats/Ventes
   const [expenses, setExpenses] = useState([])
   const [pertes, setPertes] = useState([])
   const [stockVal, setStockVal] = useState([])
@@ -85,7 +86,7 @@ export default function Finance() {
 
   async function load() {
     if (!stationId) return
-    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc, crm] = await Promise.all([
+    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc, crm, dl] = await Promise.all([
       supabase.from('v_ventes_mensuelles').select('*').eq('station_id', stationId).order('mois'),
       supabase.from('charges').select('*').eq('station_id', stationId),
       supabase.from('expenses').select('report_date,categorie,montant').eq('station_id', stationId),
@@ -106,6 +107,7 @@ export default function Finance() {
       supabase.from('v_commission_superette_mensuelle').select('*').eq('station_id', stationId),
       supabase.from('v_solde_client').select('solde_du').eq('station_id', stationId),
       supabase.from('client_remboursements').select('report_date,montant').eq('station_id', stationId),
+      supabase.from('deliveries').select('report_date,type,montant').eq('station_id', stationId),
     ])
     setVentes(v.data || []); setCharges(c.data || []); setExpenses(e.data || []); setCommissionReelle(cr.data || []); setCommissionSuperette(cs.data || [])
     if (st.data) setSettings(st.data)
@@ -123,6 +125,7 @@ export default function Finance() {
     setMouvementsBanque(mb.data || [])
     setSoldeClients((sc.data || []).reduce((s, x) => s + N(x.solde_du), 0))
     setClientRemb(crm.data || [])
+    setDeliveries(dl.data || [])
   }
   useEffect(() => { load() }, [stationId])
   // Rafraîchit automatiquement si une saisie change pendant que la page est ouverte (ex. une
@@ -203,6 +206,9 @@ export default function Finance() {
   const autresProduits = chP.filter(c => c.categorie === REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
   const totManuel = chP.filter(c => c.categorie !== REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
   const chargesAPayer = chP.filter(c => c.categorie !== REVENU_CAT && c.statut !== 'paye').reduce((s, c) => s + N(c.montant), 0)
+  // Détail « Impôts et taxes » : déjà compté dans totManuel (catégorie IMPOTS, saisie à la main)
+  // — extrait ici uniquement pour l'affichage séparé demandé, ne change rien au calcul du résultat.
+  const impotsTaxes = chP.filter(c => c.categorie === 'IMPOTS').reduce((s, c) => s + N(c.montant), 0)
 
   // Pertes livraison sur la période — deux notions distinctes :
   // perteNaMontant (hors seuil de tolérance) sert de base à une éventuelle retenue sur le
@@ -216,6 +222,32 @@ export default function Finance() {
   const totCharges = totAuto + totManuel + perteMontant - rembClients
   const produits = commCarb + commGazLub + commSuperette + autresProduits
   const resultat = produits - totCharges
+
+  // Détail Achats / Ventes / Marge commerciale / Chiffre d'affaires, à la demande — en plus du
+  // Compte de résultat par commissions ci-dessus (celui qui fait foi pour RÉSULTAT, inchangé).
+  // Ventes = valeur brute vendue (prix de vente), Achats = coût d'acquisition correspondant.
+  // Carburant : achat déduit de ce qui est déjà fiable (CA brut − commission déjà calculée avec
+  // la marge réelle bon/espèces, migration_v151) plutôt que re-dérivé des prix d'achat courants
+  // (qui ne reflètent pas forcément le prix payé historiquement). Gaz/lubrifiant/supérette :
+  // achat = livraisons réceptionnées sur la période (deliveries.montant, déjà saisi).
+  const venteCarburant = sum('ca_carburant')
+  const achatCarburant = Math.max(venteCarburant - commCarb, 0)
+  const deliveriesP = deliveries.filter(d => inPeriod((d.report_date || '').slice(0, 7)))
+  const achatGaz = deliveriesP.filter(d => d.type === 'gaz').reduce((s, d) => s + N(d.montant), 0)
+  const achatLubrifiant = deliveriesP.filter(d => d.type === 'lubrifiant').reduce((s, d) => s + N(d.montant), 0)
+  const achatSuperette = deliveriesP.filter(d => d.type === 'superette').reduce((s, d) => s + N(d.montant), 0)
+  const achatAutre = deliveriesP.filter(d => d.type === 'autre').reduce((s, d) => s + N(d.montant), 0)
+  const venteGaz = sum('ventes_gaz') + sum('ventes_gaz_promo')
+  const venteLubrifiant = sum('ventes_lubrifiant')
+  const venteSuperette = sum('ventes_superette')
+  const chiffreAffaires = venteCarburant + venteGaz + venteLubrifiant + venteSuperette + autresProduits
+  const totalAchats = achatCarburant + achatGaz + achatLubrifiant + achatSuperette + achatAutre
+  const margeCommerciale = chiffreAffaires - totalAchats
+  // Impôt sur les résultats : 0,1 % du chiffre d'affaires (régime forfaitaire) — calculé
+  // automatiquement, jamais saisi à la main ; vient en plus de totCharges (RÉSULTAT ci-dessus
+  // reste le résultat AVANT cet impôt, comme c'est déjà montré/exporté ailleurs).
+  const impotResultat = chiffreAffaires * 0.001
+  const resultatNetApresIS = resultat - impotResultat
 
   // Seuil de rentabilité en litres : combien de litres de carburant faut-il vendre pour couvrir
   // les charges, les autres pôles restant à leur niveau actuel ? litres × marge = charges −
@@ -658,6 +690,7 @@ export default function Finance() {
         <Kpi label="Charges à payer" value={fcfa(chargesAPayer)} status={chargesAPayer > 0 ? 'warn' : 'ok'} />
         <Kpi label="Valeur du stock" value={fcfa(stockTotal)} sub="gaz + lubrifiant + supérette" />
         <Kpi label="RÉSULTAT" value={fcfa(resultat)} status={resultat < 0 ? 'alarm' : 'ok'} {...cmp(resultat, resultatPrev)} />
+        <Kpi label="Fonds de roulement" value={fcfa(situationNette)} sub="actif circulant − passif circulant, à ce jour" status={situationNette < 0 ? 'alarm' : 'ok'} />
       </div>
 
       <Panel title="Compte de résultat" meta={mois || annee} actions={<Button size="sm" onClick={exportCompteResultat}>Exporter (CSV)</Button>}>
@@ -674,13 +707,49 @@ export default function Finance() {
           {rembClients > 0 && <LedgerRow label="Remboursements clients à crédit reçus (annule la charge)" value={`− ${fcfa(rembClients)}`} />}
           {perteMontant > 0 && <LedgerRow label="Pertes livraison (auto)" value={fcfa(perteMontant)} />}
           <LedgerRow label="Charges fixes (saisies)" value={fcfa(totManuel)} />
+          {impotsTaxes > 0 && <LedgerRow label="dont impôts et taxes" value={fcfa(impotsTaxes)} />}
           <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--sp-3)', borderTop: '2px solid var(--border-default)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>
             <span>RÉSULTAT</span>
             <span style={{ color: resultat < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' }}>{fcfa(resultat)}</span>
           </div>
+          <LedgerRow label="Impôt sur les résultats (0,1 % du chiffre d'affaires)" value={`− ${fcfa(impotResultat)}`} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--sp-2)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>
+            <span>RÉSULTAT NET (après IS)</span>
+            <span style={{ color: resultatNetApresIS < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' }}>{fcfa(resultatNetApresIS)}</span>
+          </div>
         </div>
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 'var(--sp-4)', marginBottom: 0 }}>
-          SBEE, carburant/déplacement et les pertes sur livraisons sont <b>déduits automatiquement</b> (dépenses quotidiennes et livraisons réceptionnées). Les charges fixes se <b>reportent d'un mois sur l'autre</b> (bouton ci-dessous), tout reste modifiable.
+          SBEE, carburant/déplacement et les pertes sur livraisons sont <b>déduits automatiquement</b> (dépenses quotidiennes et livraisons réceptionnées). Les charges fixes se <b>reportent d'un mois sur l'autre</b> (bouton ci-dessous), tout reste modifiable. L'impôt sur les résultats (0,1 % du CA) est calculé automatiquement, jamais saisi.
+        </p>
+      </Panel>
+
+      <Panel title="Détail commercial — achats, ventes, marge" meta={mois || annee}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+          <LedgerHead>Ventes (chiffre d'affaires)</LedgerHead>
+          <LedgerRow label="Ventes carburant (prix de vente, brut)" value={fcfa(venteCarburant)} />
+          <LedgerRow label="Ventes gaz" value={fcfa(venteGaz)} />
+          <LedgerRow label="Ventes lubrifiant" value={fcfa(venteLubrifiant)} />
+          <LedgerRow label="Ventes supérette" value={fcfa(venteSuperette)} />
+          {autresProduits > 0 && <LedgerRow label="Autres produits" value={fcfa(autresProduits)} />}
+          <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 'var(--sp-5)', paddingTop: 'var(--sp-2)', borderTop: '1px solid var(--border-hairline)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)' }}>
+            <span>Chiffre d'affaires</span><span>{fcfa(chiffreAffaires)}</span>
+          </div>
+          <LedgerHead>Achats</LedgerHead>
+          <LedgerRow label="Achat carburant (coût, déduit de la marge réelle)" value={fcfa(achatCarburant)} />
+          <LedgerRow label="Achats gaz (livraisons réceptionnées)" value={fcfa(achatGaz)} />
+          <LedgerRow label="Achats lubrifiant (livraisons réceptionnées)" value={fcfa(achatLubrifiant)} />
+          <LedgerRow label="Achats supérette (livraisons réceptionnées)" value={fcfa(achatSuperette)} />
+          {achatAutre > 0 && <LedgerRow label="Autres achats" value={fcfa(achatAutre)} />}
+          <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 'var(--sp-5)', paddingTop: 'var(--sp-2)', borderTop: '1px solid var(--border-hairline)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)' }}>
+            <span>Total achats</span><span>{fcfa(totalAchats)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--sp-3)', borderTop: '2px solid var(--border-default)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>
+            <span>MARGE COMMERCIALE (ventes − achats)</span>
+            <span style={{ color: margeCommerciale < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' }}>{fcfa(margeCommerciale)}</span>
+          </div>
+        </div>
+        <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 'var(--sp-4)', marginBottom: 0 }}>
+          Vue achat/vente classique, en plus du Compte de résultat par commissions ci-dessus (qui reste la référence pour RÉSULTAT). Les deux marges peuvent différer légèrement : un achat ce mois-ci peut se vendre le mois suivant (décalage de stock non historisé ici).
         </p>
       </Panel>
 
@@ -832,9 +901,12 @@ export default function Finance() {
               <span>Total passif</span><span>{fcfa(totalPassif)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--sp-3)', marginTop: 'var(--sp-3)', borderTop: '2px solid var(--border-default)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>
-              <span>Situation nette</span>
+              <span>Situation nette = Fonds de roulement</span>
               <span style={{ color: situationNette < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' }}>{fcfa(situationNette)}</span>
             </div>
+            <p style={{ font: '400 12px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
+              Actif circulant − passif circulant : la station ne suit ici aucune immobilisation (locaux, matériel), donc le fonds de roulement se confond avec la situation nette — capacité à financer son cycle d'exploitation sans emprunt court terme. Négatif = la station avance de l'argent qu'elle n'a pas encore.
+            </p>
           </div>
         </div>
         <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 'var(--sp-4)', marginBottom: 0 }}>
