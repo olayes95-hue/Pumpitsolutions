@@ -43,7 +43,7 @@ const machineNums = (n) => Array.from({ length: n }, (_, i) => i + 1)
 const pumpKeys = (suffix) => [...machineNums(MAX_MACHINES).map(n => `e${n}${suffix}`), ...machineNums(MAX_MACHINES).map(n => `g${n}${suffix}`)]
 const NUMFIELDS = [
   'ess_litres','ess_pu','ess_bon','ess_espece','gas_litres','gas_pu','gas_bon','gas_espece',
-  'gaz_espece','superette_espece','lubrifiant_espece','mobile_money',
+  'gaz_espece','gaz_promo_espece','superette_espece','lubrifiant_espece','mobile_money',
   ...pumpKeys(''),   // relevés 16h (contrôle) : e1..e10, g1..g10
   ...pumpKeys('_m'), // relevés d'ouverture (matin) : e1_m..e10_m, g1_m..g10_m
   'total_bon_cumul',
@@ -91,6 +91,7 @@ export default function Submit() {
   // gazEspeceCalc/lubEspeceCalc), mais le gérant peut corriger (ex. bouteille offerte, rabais) —
   // dès qu'il touche le champ, le préremplissage s'arrête de l'écraser pour cette journée.
   const [gazEspeceTouched, setGazEspeceTouched] = useState(false)
+  const [gazPromoEspeceTouched, setGazPromoEspeceTouched] = useState(false)
   const [lubEspeceTouched, setLubEspeceTouched] = useState(false)
   // Suivi des bouteilles de gaz par état (pleines/vides/consignées, voir migration_v134) :
   // { [taille]: { consigneQte, consigneMontant } } — « avec consigne » est une part du total
@@ -252,7 +253,7 @@ export default function Submit() {
       // Valeurs déjà déclarées (espèces) : ne jamais les recalculer silencieusement par-dessus
       // à la relecture d'un jour passé (les prix peuvent avoir changé depuis) — seule une vraie
       // modification du gérant doit les changer, via le champ lui-même.
-      setGazEspeceTouched(true); setLubEspeceTouched(true)
+      setGazEspeceTouched(true); setLubEspeceTouched(true); setGazPromoEspeceTouched(true)
     }
     // Restauration silencieuse (pas de bannière) : un brouillon existe dès qu'une saisie du
     // jour est en cours, que la page ait redémarré ou non — l'afficher à chaque fois serait
@@ -260,11 +261,11 @@ export default function Submit() {
     else if (draft?.f) {
       setF(draft.f); setLub(draft.lub || {}); setLubVendu(draft.lubVendu || {})
       setGazPromoStock(draft.gazPromoStock || {}); setGazPromoVendu(draft.gazPromoVendu || {})
-      setGazEspeceTouched(false); setLubEspeceTouched(false)
+      setGazEspeceTouched(false); setLubEspeceTouched(false); setGazPromoEspeceTouched(false)
     } else {
       setF({ ...EMPTY, ess_pu: settings.essence_pv, gas_pu: settings.gasoil_pv }); setLub({}); setLubVendu({})
       setGazPromoStock({}); setGazPromoVendu({})
-      setGazEspeceTouched(false); setLubEspeceTouched(false)
+      setGazEspeceTouched(false); setLubEspeceTouched(false); setGazPromoEspeceTouched(false)
     }
     setLubVenduSplit({}); setLubStockSplit({})
     // Dépenses/versements/achats : la base fait autorité dès qu'il y a quelque chose ; sinon,
@@ -440,7 +441,7 @@ export default function Submit() {
   // Comme numProps, mais marque le champ "touché" dès la première frappe — pour que le
   // préremplissage (gaz/lubrifiant, voir plus haut) ne vienne plus écraser une correction du gérant.
   const touchedNumProps = (k, setTouched) => ({ value: f[k], onChange: e => { setTouched(true); set(k, e.target.value) }, onBlur: () => set(k, formatThousands(f[k])) })
-  const cashDeclare = N(f.ess_espece)+N(f.gas_espece)+N(f.gaz_espece)+N(f.superette_espece)+N(f.lubrifiant_espece)
+  const cashDeclare = N(f.ess_espece)+N(f.gas_espece)+N(f.gaz_espece)+N(f.gaz_promo_espece)+N(f.superette_espece)+N(f.lubrifiant_espece)
   const totDepense = expenses.reduce((s, e) => s + N(e.montant), 0)
   const totVerse = deposits.reduce((s, d) => s + N(d.montant), 0)
   const totLivr = deliveries.reduce((s, d) => s + N(d.montant), 0)
@@ -468,10 +469,10 @@ export default function Submit() {
   // vente actuel) — le gérant ne les retape plus. Uniquement quand la quantité vendue est
   // effectivement déclarée (showVenduLubGaz) ; sinon (station en mode "stock" seul) il n'y a
   // rien dont les déduire, et le champ reste une saisie manuelle (voir plus bas).
-  // Inclut les ventes de gaz promo (dépôt-vente) : même caisse physique que le gaz normal, même
-  // champ "Espèces gaz" — seul le stock et la commission restent séparés (voir gaz_promo_*).
   const gazEspeceCalc = GAZ.reduce((s, [k, lab]) => s + N(f['gaz_vendu_' + k]) * N(gazPrices[lab]), 0)
-    + gazPromoTypes.reduce((s, pr) => s + N(gazPromoVendu[pr.nom]) * N(pr.prix_vente), 0)
+  // Caisse séparée du gaz normal (gaz_promo_espece, migration_v150) — prix promotionnel différent,
+  // ne doit jamais se mélanger avec gazEspeceCalc.
+  const gazPromoEspeceCalc = gazPromoTypes.reduce((s, pr) => s + N(gazPromoVendu[pr.nom]) * N(pr.prix_vente), 0)
   const lubEspeceCalc = lubTypes.reduce((s, pr) => s + N(lubVendu[pr.nom]) * N(pr.prix_vente), 0)
   // Libellés des compteurs — réutilisés pour l'affichage (meterMachine) ET pour la vérification
   // "photo obligatoire" dans save() : doivent rester identiques aux deux endroits, sinon
@@ -495,6 +496,10 @@ export default function Submit() {
     if (!showVenduLubGaz || gazEspeceTouched) return
     set('gaz_espece', gazEspeceCalc ? formatThousands(String(Math.round(gazEspeceCalc))) : '0')
   }, [gazEspeceCalc, showVenduLubGaz, gazEspeceTouched])
+  useEffect(() => {
+    if (!showVenduLubGaz || gazPromoEspeceTouched) return
+    set('gaz_promo_espece', gazPromoEspeceCalc ? formatThousands(String(Math.round(gazPromoEspeceCalc))) : '0')
+  }, [gazPromoEspeceCalc, showVenduLubGaz, gazPromoEspeceTouched])
   useEffect(() => {
     if (!showVenduLubGaz || lubEspeceTouched) return
     set('lubrifiant_espece', lubEspeceCalc ? formatThousands(String(Math.round(lubEspeceCalc))) : '0')
@@ -1149,7 +1154,7 @@ export default function Submit() {
           </FormSection>}
           {has('gaz_promo') && gazPromoTypes.length > 0 && showVenduLubGaz && <FormSection title="Gaz en dépôt-vente (promo) — vendues" style={{ marginTop: 'var(--sp-4)' }}>
             <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
-              Prix promotionnel — l'espèce correspondante est déjà comptée dans « Espèces gaz » ci-dessous, pas à ressaisir.
+              Prix promotionnel — l'espèce correspondante se déclare séparément, dans « Espèces gaz promo » plus bas.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
               {gazPromoTypes.map(pr => (
@@ -1200,6 +1205,7 @@ export default function Submit() {
           </FormSection>}
           <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', marginTop: 'var(--sp-4)' }}>
             {activite('gaz') && <Field label="Espèces gaz" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...touchedNumProps('gaz_espece', setGazEspeceTouched)} /></Field>}
+            {has('gaz_promo') && gazPromoTypes.length > 0 && <Field label="Espèces gaz promo" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...touchedNumProps('gaz_promo_espece', setGazPromoEspeceTouched)} /></Field>}
             {activite('superette') && <Field label="Espèces supérette" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...numProps('superette_espece')} /></Field>}
             {activite('lubrifiant') && <Field label="Espèces lubrifiant" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric {...touchedNumProps('lubrifiant_espece', setLubEspeceTouched)} /></Field>}
             {/* Réglage par station (mobile_money_actif, migration_v146), pas une fonction d'offre :
@@ -1214,6 +1220,12 @@ export default function Submit() {
             <p style={{ font: '400 13px/1.4 var(--font-ui)', color: Math.abs(gazEspeceCalc - N(f.gaz_espece)) > 1 ? 'var(--state-alarm)' : 'var(--state-ok)', margin: 'var(--sp-2) 0 0' }}>
               Espèces gaz attendues (bouteilles vendues × prix) : {Math.round(gazEspeceCalc).toLocaleString('fr-FR')} F — déclaré {Math.round(N(f.gaz_espece)).toLocaleString('fr-FR')} F
               {Math.abs(gazEspeceCalc - N(f.gaz_espece)) > 1 ? ` (écart ${Math.round(N(f.gaz_espece) - gazEspeceCalc).toLocaleString('fr-FR')} F)` : ' ✓'}
+            </p>
+          )}
+          {has('gaz_promo') && gazPromoTypes.length > 0 && showVenduLubGaz && gazPromoEspeceCalc > 0 && (
+            <p style={{ font: '400 13px/1.4 var(--font-ui)', color: Math.abs(gazPromoEspeceCalc - N(f.gaz_promo_espece)) > 1 ? 'var(--state-alarm)' : 'var(--state-ok)', margin: 'var(--sp-2) 0 0' }}>
+              Espèces gaz promo attendues (bouteilles vendues × prix) : {Math.round(gazPromoEspeceCalc).toLocaleString('fr-FR')} F — déclaré {Math.round(N(f.gaz_promo_espece)).toLocaleString('fr-FR')} F
+              {Math.abs(gazPromoEspeceCalc - N(f.gaz_promo_espece)) > 1 ? ` (écart ${Math.round(N(f.gaz_promo_espece) - gazPromoEspeceCalc).toLocaleString('fr-FR')} F)` : ' ✓'}
             </p>
           )}
           {activite('lubrifiant') && showVenduLubGaz && lubEspeceCalc > 0 && (
