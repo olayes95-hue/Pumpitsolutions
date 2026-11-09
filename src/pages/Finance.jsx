@@ -3,7 +3,7 @@ import { supabase, BORDEREAUX_BUCKET } from '../lib/supabase'
 import { PhotoLink } from '../lib/photos.jsx'
 import { useAuth } from '../lib/auth.jsx'
 import { useStation } from '../lib/station.jsx'
-import { fcfa, frDate, today } from '../lib/format'
+import { fcfa, frDate, today, lastDayOfMonth } from '../lib/format'
 import { uploadEvidence } from '../lib/image'
 import { exportRowsToCsv } from '../lib/csv'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
@@ -19,6 +19,9 @@ import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.jsx'
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
+import RapportSheet from '../components/RapportSheet.jsx'
+
+const MOIS_LABEL_PLEIN = { '01': 'Janvier', '02': 'Février', '03': 'Mars', '04': 'Avril', '05': 'Mai', '06': 'Juin', '07': 'Juillet', '08': 'Août', '09': 'Septembre', '10': 'Octobre', '11': 'Novembre', '12': 'Décembre' }
 
 const TABS = [
   { value: 'apercu', label: 'Vue d’ensemble' },
@@ -41,7 +44,7 @@ const blankCharge = () => ({ categorie: 'LOYER', montant: '', note: '', statut: 
 
 export default function Finance() {
   const { session, can } = useAuth()
-  const { stationId } = useStation()
+  const { stationId, current } = useStation()
   const [ventes, setVentes] = useState([])
   const [commissionReelle, setCommissionReelle] = useState([])   // v_commission_reelle_mensuelle — quantité vendue × (prix vente − prix achat), gaz + lubrifiant
   const [commissionSuperette, setCommissionSuperette] = useState([])   // v_commission_superette_mensuelle — idem, supérette (si settings.superette_commission_reelle)
@@ -77,6 +80,8 @@ export default function Finance() {
   const [ncPhotoBusy, setNcPhotoBusy] = useState(false)
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [tab, setTab] = useState('apercu')
+  const [rapportExport, setRapportExport] = useState(null)   // {rapport, station} — ouvre RapportSheet quand renseigné
+  const [exportBusy, setExportBusy] = useState(false)
 
   async function load() {
     if (!stationId) return
@@ -530,6 +535,71 @@ export default function Finance() {
   }
   const resume = genererResume()
 
+  // Export PDF du mois sélectionné — fusion de l'ancienne page Rapport mensuel (RapportMensuel.jsx,
+  // supprimée) dans Point financier : même interface, deux fois, n'avait pas de raison d'exister.
+  // Réutilise toutes les valeurs déjà calculées ci-dessus pour le mois en cours (commCarb,
+  // totCharges, resultat, bilan…) — seul gapVerse/resultatAjuste et la liste d'alertes ne sont
+  // pas déjà chargés ici (Point financier ne suit pas le manque à verser par pôle au quotidien,
+  // contrairement à Dashboard.jsx), donc allés chercher à la demande, uniquement à l'export.
+  async function exportRapportPDF() {
+    if (!mois) { setErr('Choisissez un mois précis (pas une année entière) pour exporter le rapport.'); return }
+    setExportBusy(true); setErr('')
+    try {
+      const from = `${mois}-01`, to = lastDayOfMonth(mois)
+      const [recon, alertes] = await Promise.all([
+        supabase.from('v_pole_recon_jour').select('*').eq('station_id', stationId).gte('report_date', from).lte('report_date', to).order('report_date', { ascending: false }).limit(5000),
+        supabase.from('v_alerts').select('type,gravite').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
+      ])
+      const manqueByPole = { carburant: 0, gaz_lub: 0, superette: 0 }
+      for (const g of (recon.data || [])) {
+        if (!(g.pole_groupe in manqueByPole)) continue
+        if (N(g.nb_cloture) > 0 && g.recette_cloture != null) manqueByPole[g.pole_groupe] += N(g.recette_cloture) - N(g.verse)
+        else if (!g.couvert) manqueByPole[g.pole_groupe] += N(g.espece)
+      }
+      let depSuperette = 0, depGeneral = 0
+      for (const e of expenses) {
+        if ((e.report_date || '').slice(0, 7) !== mois) continue
+        if (e.categorie === 'SUPERETTE') depSuperette += N(e.montant)
+        else if (e.categorie !== 'CARBURANT') depGeneral += N(e.montant)
+      }
+      const gapVerse = (manqueByPole.carburant - depGeneral) + manqueByPole.gaz_lub + (manqueByPole.superette - depSuperette)
+      const resultatAjuste = resultat - gapVerse
+      const alertesHaute = (alertes.data || []).filter(a => a.gravite === 'haute').length
+
+      const label = `${MOIS_LABEL_PLEIN[mois.slice(5, 7)]} ${mois.slice(0, 4)}`
+      const resumeExport = []
+      if (resultat > 0) resumeExport.push(`La station a fait un bénéfice de ${fcfa(resultat)} en ${label}.`)
+      else if (resultat < 0) resumeExport.push(`La station est en perte de ${fcfa(Math.abs(resultat))} en ${label}.`)
+      else resumeExport.push(`La station est à l'équilibre en ${label} : ni gain ni perte.`)
+      if (gapVerse > 0) resumeExport.push(`En comptant le manque à verser (${fcfa(gapVerse)}) comme une charge, le résultat ajusté tombe à ${fcfa(resultatAjuste)}.`)
+      const poles = [{ name: 'Carburant', value: commCarb }, { name: 'Gaz + Lubrifiant', value: commGazLub }, { name: 'Supérette', value: commSuperette }].sort((a, b) => b.value - a.value)
+      if (poles[0].value > 0) resumeExport.push(`La plus grosse partie des revenus vient de ${poles[0].name} (${fcfa(poles[0].value)}).`)
+      if (totCharges > 0) resumeExport.push(`Les charges du mois s'élèvent à ${fcfa(totCharges)}.`)
+      if (perteMontant > 1000) resumeExport.push(`Sur ce total, ${fcfa(perteMontant)} viennent de carburant manquant à la livraison (pertes).`)
+      if (chargesAPayer > 0) resumeExport.push(`Il reste ${fcfa(chargesAPayer)} de charges pas encore payées.`)
+      if (alertesHaute > 0) resumeExport.push(`${alertesHaute} alerte(s) de gravité haute ont été détectées ce mois.`)
+
+      const conseils = []
+      if (gapVerse > 0) conseils.push(`relancer le recouvrement du manque à verser (${fcfa(gapVerse)}) auprès du gérant — c'est de l'argent dû à la station, pas encore remis`)
+      if (resultat < 0) conseils.push('réduire les charges ou augmenter les ventes pour repasser en bénéfice')
+      if (perteMontant > 1000) conseils.push('vérifier avec le gérant pourquoi les livraisons de carburant arrivent incomplètes — ça coûte cher')
+      if (chargesAPayer > 0) conseils.push('prévoir de régler les charges fixes encore impayées')
+      if (alertesHaute > 0) conseils.push('traiter les alertes de gravité haute du mois (voir la page Alertes)')
+      if (!conseils.length) conseils.push("Rien d'alarmant : continue sur cette lancée le mois prochain.")
+
+      setRapportExport({
+        moisLabel: label, genereLe: today(), bilanAu: periodeFinBilan,
+        commCarb, commGazLub, commSuperette, autresProduits, produits,
+        autoCharges: totAuto, perteMontant, totManuel, totCharges, resultat,
+        gapVerse, resultatAjuste, chargesAPayer,
+        stockTotal, stockCarburant, bonsRestant, cashCumule,
+        totalActif, totalPassif, situationNette, chargesAPayerCumule,
+        resume: resumeExport, conseils,
+      })
+    } catch (e) { setErr(e.message || String(e)) }
+    finally { setExportBusy(false) }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
@@ -541,6 +611,7 @@ export default function Finance() {
           setMonths={ms => setMois(ms.length ? `${annee}-${ms[0]}` : '')}
           availableYears={annees} />
         {mois && can('manage_finance') && <Button size="sm" tone={isLocked ? 'danger' : 'outline'} onClick={toggleLock}>{isLocked ? 'Déverrouiller le mois' : 'Verrouiller le mois'}</Button>}
+        {mois && <Button size="sm" tone="primary" disabled={exportBusy} onClick={exportRapportPDF}>{exportBusy ? 'Préparation…' : 'Exporter le rapport (PDF)'}</Button>}
       </>} />
 
       {isLocked && (
@@ -801,6 +872,8 @@ export default function Finance() {
           : <PanelEmpty icon="landmark" label="Aucune charge fixe pour cette période" />}
       </Panel>
       </>}
+
+      {rapportExport && <RapportSheet rapport={rapportExport} station={current} onDone={() => setRapportExport(null)} />}
     </div>
   )
 }

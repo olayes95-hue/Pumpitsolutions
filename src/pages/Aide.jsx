@@ -43,8 +43,7 @@ function useSectionsAccessibles() {
   return [
     ok('view_dashboard') && { to: '/tableau', label: 'Tableau de bord', desc: "Chiffres clés et alertes de la station, en direct." },
     ok('validate_orders') && { to: '/commandes', label: 'Commandes', desc: 'Valider ou refuser les commandes de carburant, gaz et lubrifiant proposées par le gérant.' },
-    (ok('view_finance') && has('finance')) && { to: '/finance', label: 'Point financier', desc: 'Produits, charges, résultat et bilan simplifié de la station.' },
-    (ok('view_finance') && has('finance')) && { to: '/rapport-mensuel', label: 'Rapport mensuel', desc: "Synthèse du mois (résultat, manque à verser, recommandations), exportable en PDF." },
+    (ok('view_finance') && has('finance')) && { to: '/finance', label: 'Point financier', desc: "Produits, charges, résultat et bilan simplifié de la station — avec export du rapport mensuel en PDF." },
     (ok('view_bank_recon') && has('finance')) && { to: '/rapprochement', label: 'Rapprochement bancaire', desc: 'Catégoriser les lignes du relevé bancaire importé et suivre le compte.' },
     (ok('view_ocr_check') && has('bordereaux')) && { to: '/verif-photos', label: 'Bordereaux', desc: 'Vérifier les photos de versement par lecture automatique.' },
     ok('view_alerts') && { to: '/alertes', label: 'Alertes', desc: 'Écarts de caisse, versements manquants, stocks bas.' },
