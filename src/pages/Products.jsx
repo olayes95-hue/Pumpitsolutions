@@ -42,11 +42,14 @@ export default function Products() {
   // passe par product_price_requests, jamais d'écriture directe sur products pour ce profil.
   const peutEditerDirect = isAdmin || can('manage_products')
   const peutProposer = !peutEditerDirect && can('propose_prices')
-  // Catalogue : réservé à qui gère les produits, ou qui peut proposer un prix. Historique
-  // des prix : aussi ouvert au directeur (permission séparée, voir migration_v101) — simple
-  // consultation, pas d'édition.
+  // view_price_history seul (ex. directeur) : le catalogue au complet, en pure lecture — ni
+  // édition directe, ni proposition (cette permission ne donne que la consultation de
+  // l'historique, voir migration_v101 ; étendu ici à la vue du catalogue lui-même).
+  const peutVoirSeul = !peutEditerDirect && !peutProposer && (isAdmin || can('view_price_history'))
+  // Catalogue : réservé à qui gère les produits, qui peut proposer un prix, ou qui peut au
+  // moins consulter (view_price_history). Historique des prix : même permission, autre onglet.
   const TABS = [
-    (peutEditerDirect || peutProposer) && { value: 'catalogue', label: 'Catalogue' },
+    (peutEditerDirect || peutProposer || peutVoirSeul) && { value: 'catalogue', label: 'Catalogue' },
     (isAdmin || can('view_price_history')) && { value: 'prix', label: 'Historique des prix' },
   ].filter(Boolean)
   const [tab, setTab] = useState(() => TABS[0]?.value || 'catalogue')
@@ -197,27 +200,29 @@ export default function Products() {
   // champ pour ce produit (évite les doublons), sinon un Input normal (passe par up(), lu
   // ensuite par proposer() au clic — jamais d'écriture directe sur products).
   function champPrix(p, champ, placeholder) {
+    if (peutVoirSeul) return texte(p[champ] ?? '—')
     const en_attente = peutProposer && pendingDemande(p.id, champ)
     if (en_attente) return <Badge tone="warn" title={`Proposé : ${fcfa(en_attente.prix_demande)}`}>En attente</Badge>
     return <Input size="sm" numeric value={p[champ] ?? ''} onChange={e => up(p.id, champ, e.target.value)} placeholder={placeholder} style={{ width: 90 }} />
   }
   const texte = (v) => <span style={{ font: '400 14px/1.3 var(--font-ui)', color: 'var(--text-body)' }}>{v}</span>
+  const lectureSeule = peutProposer || peutVoirSeul
   const columns = [
-    { key: 'nom', header: 'Nom', width: 280, render: p => peutProposer ? texte(p.nom) : <Input size="sm" value={p.nom || ''} onChange={e => up(p.id, 'nom', e.target.value)} style={{ width: '100%' }} /> },
-    { key: 'unite', header: 'Unité', render: p => peutProposer ? texte(p.unite) : <Select size="sm" value={p.unite || 'unité'} onChange={e => up(p.id, 'unite', e.target.value)} options={UNITE_OPTIONS} style={{ width: '100%' }} /> },
+    { key: 'nom', header: 'Nom', width: 280, render: p => lectureSeule ? texte(p.nom) : <Input size="sm" value={p.nom || ''} onChange={e => up(p.id, 'nom', e.target.value)} style={{ width: '100%' }} /> },
+    { key: 'unite', header: 'Unité', render: p => lectureSeule ? texte(p.unite) : <Select size="sm" value={p.unite || 'unité'} onChange={e => up(p.id, 'unite', e.target.value)} options={UNITE_OPTIONS} style={{ width: '100%' }} /> },
     ...(cat === 'lubrifiant' || cat === 'superette' ? [
-      { key: 'conditionnement_nom', header: 'Conditionnement', render: p => peutProposer ? texte(p.conditionnement_nom || '—') : <Input size="sm" value={p.conditionnement_nom || ''} onChange={e => up(p.id, 'conditionnement_nom', e.target.value)} placeholder="ex : carton" style={{ width: 100 }} /> },
-      { key: 'conditionnement_qte', header: 'Qté/condit.', align: 'right', render: p => peutProposer ? texte(p.conditionnement_qte ?? '—') : <Input size="sm" numeric value={p.conditionnement_qte ?? ''} onChange={e => up(p.id, 'conditionnement_qte', e.target.value)} placeholder="ex : 12" style={{ width: 70 }} /> },
-      { key: 'prix_achat_gros', header: 'Prix du gros', align: 'right', render: p => peutProposer ? texte(p.prix_achat_gros ?? '—') : <Input size="sm" numeric value={p.prix_achat_gros ?? ''} onChange={e => up(p.id, 'prix_achat_gros', e.target.value)} placeholder="carton" style={{ width: 90 }} /> },
+      { key: 'conditionnement_nom', header: 'Conditionnement', render: p => lectureSeule ? texte(p.conditionnement_nom || '—') : <Input size="sm" value={p.conditionnement_nom || ''} onChange={e => up(p.id, 'conditionnement_nom', e.target.value)} placeholder="ex : carton" style={{ width: 100 }} /> },
+      { key: 'conditionnement_qte', header: 'Qté/condit.', align: 'right', render: p => lectureSeule ? texte(p.conditionnement_qte ?? '—') : <Input size="sm" numeric value={p.conditionnement_qte ?? ''} onChange={e => up(p.id, 'conditionnement_qte', e.target.value)} placeholder="ex : 12" style={{ width: 70 }} /> },
+      { key: 'prix_achat_gros', header: 'Prix du gros', align: 'right', render: p => lectureSeule ? texte(p.prix_achat_gros ?? '—') : <Input size="sm" numeric value={p.prix_achat_gros ?? ''} onChange={e => up(p.id, 'prix_achat_gros', e.target.value)} placeholder="carton" style={{ width: 90 }} /> },
     ] : []),
     { key: 'prix_achat', header: 'Prix achat (unité)', align: 'right', render: p => champPrix(p, 'prix_achat') },
     { key: 'prix_vente', header: 'Prix vente', align: 'right', render: p => champPrix(p, 'prix_vente') },
     ...(cat === 'gaz' ? [
       { key: 'consigne_prix', header: 'Prix consigne', align: 'right', render: p => champPrix(p, 'consigne_prix', '—') },
     ] : []),
-    { key: 'seuil', header: 'Seuil', align: 'right', render: p => peutProposer ? texte(p.seuil ?? 0) : <Input size="sm" numeric value={p.seuil ?? ''} onChange={e => up(p.id, 'seuil', e.target.value)} style={{ width: 70 }} /> },
-    { key: 'actif', header: 'Actif', render: p => peutProposer ? texte(p.actif ? 'Oui' : 'Non') : <Checkbox checked={!!p.actif} onChange={v => up(p.id, 'actif', v)} /> },
-    { key: 'actions', header: '', align: 'right', render: p => peutProposer ? (
+    { key: 'seuil', header: 'Seuil', align: 'right', render: p => lectureSeule ? texte(p.seuil ?? 0) : <Input size="sm" numeric value={p.seuil ?? ''} onChange={e => up(p.id, 'seuil', e.target.value)} style={{ width: 70 }} /> },
+    { key: 'actif', header: 'Actif', render: p => lectureSeule ? texte(p.actif ? 'Oui' : 'Non') : <Checkbox checked={!!p.actif} onChange={v => up(p.id, 'actif', v)} /> },
+    { key: 'actions', header: '', align: 'right', render: p => peutVoirSeul ? null : peutProposer ? (
       dirty.has(p.id) && <Button size="sm" tone="dark" onClick={() => proposer(p)}>Proposer</Button>
     ) : (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
@@ -241,11 +246,13 @@ export default function Products() {
             ? "Prix de vente (pré-remplis dans la saisie), prix d'achat (coût des commandes) et marge, en FCFA/L."
             : peutProposer
             ? "Catalogue en lecture. Proposez un nouveau prix d'achat, de vente ou de consigne : il ne s'applique qu'après validation de votre hiérarchie."
+            : peutVoirSeul
+            ? "Catalogue en lecture seule."
             : "Catalogue par catégorie avec prix d'achat, prix de vente et seuil d'alerte."}
         </p>
         <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-            {((peutEditerDirect || peutProposer) ? DISPLAY_CATS : CATS).map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
+            {((peutEditerDirect || peutProposer || peutVoirSeul) ? DISPLAY_CATS : CATS).map(c => <Button key={c} size="sm" tone={cat === c ? 'dark' : 'neutral'} onClick={() => setCat(c)} style={{ textTransform: 'capitalize' }}>{c}</Button>)}
           </div>
           {peutEditerDirect && cat !== 'carburant' && <Button size="sm" tone="primary" onClick={() => setShowAddForm(s => !s)}>{showAddForm ? 'Annuler' : '+ Nouveau produit'}</Button>}
         </div>
@@ -270,7 +277,7 @@ export default function Products() {
 
       {cat === 'carburant' ? (
         settings && <Panel title="Carburant">
-          {peutProposer && (
+          {lectureSeule && (
             <AlertBanner tone="info" title="Lecture seule" style={{ marginBottom: 'var(--sp-4)' }}>
               Les prix carburant ne passent pas par le même circuit de proposition que les autres pôles — contactez votre hiérarchie pour un changement.
             </AlertBanner>
@@ -278,14 +285,14 @@ export default function Products() {
           <form onSubmit={saveCarburant} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
             <FormSection title="Prix de vente">
               <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={peutProposer} value={settings.essence_pv ?? ''} onChange={e => setSettings({ ...settings, essence_pv: e.target.value })} /></Field>
-                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={peutProposer} value={settings.gasoil_pv ?? ''} onChange={e => setSettings({ ...settings, gasoil_pv: e.target.value })} /></Field>
+                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={lectureSeule} value={settings.essence_pv ?? ''} onChange={e => setSettings({ ...settings, essence_pv: e.target.value })} /></Field>
+                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={lectureSeule} value={settings.gasoil_pv ?? ''} onChange={e => setSettings({ ...settings, gasoil_pv: e.target.value })} /></Field>
               </div>
             </FormSection>
             <FormSection title="Prix d'achat">
               <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={peutProposer} value={settings.essence_pa ?? ''} onChange={e => setSettings({ ...settings, essence_pa: e.target.value })} /></Field>
-                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={peutProposer} value={settings.gasoil_pa ?? ''} onChange={e => setSettings({ ...settings, gasoil_pa: e.target.value })} /></Field>
+                <Field label="Essence" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={lectureSeule} value={settings.essence_pa ?? ''} onChange={e => setSettings({ ...settings, essence_pa: e.target.value })} /></Field>
+                <Field label="Gasoil" style={{ flex: '1 1 140px' }}><Input type="number" numeric disabled={lectureSeule} value={settings.gasoil_pa ?? ''} onChange={e => setSettings({ ...settings, gasoil_pa: e.target.value })} /></Field>
               </div>
             </FormSection>
             <FormSection title="Marge (calculée automatiquement)">
@@ -299,7 +306,7 @@ export default function Products() {
                   : "Utilisée pour la commission carburant et le seuil de rentabilité."}
               </p>
             </FormSection>
-            {!peutProposer && <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>}
+            {!lectureSeule && <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>Enregistrer</Button>}
           </form>
         </Panel>
       ) : (<>
