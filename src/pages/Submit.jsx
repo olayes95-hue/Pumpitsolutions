@@ -105,6 +105,10 @@ export default function Submit() {
   const [gazPromoTypes, setGazPromoTypes] = useState([])
   const [gazPromoStock, setGazPromoStock] = useState({})
   const [gazPromoVendu, setGazPromoVendu] = useState({})
+  // Demandes d'explication (RH léger, migration_v152) adressées à MOI — l'employé répond
+  // directement ici, pas besoin d'un accès admin pour voir/répondre à sa propre demande (RLS).
+  const [mesDemandes, setMesDemandes] = useState([])
+  const [demandeReponses, setDemandeReponses] = useState({})   // {demande_id: texte en cours}
   const [expenses, setExpenses] = useState([])
   const [clients, setClients] = useState([])   // clients à crédit actifs de la station (migration_v143)
   const [newClientFor, setNewClientFor] = useState(null)   // index de dépense en cours de création de client
@@ -166,6 +170,18 @@ export default function Submit() {
   useEffect(() => { supabase.from('suppliers').select('id,nom,categorie').order('nom').then(({ data }) => setSuppliers(data || [])) }, [])
   useEffect(() => { supabase.from('products').select('nom, unite, conditionnement_nom, conditionnement_qte, prix_vente').eq('categorie', 'lubrifiant').eq('actif', true).order('ordre').then(({ data }) => { if (data && data.length) setLubTypes(data) }) }, [])
   useEffect(() => { if (!has('gaz_promo')) return; supabase.from('products').select('nom, prix_vente').eq('categorie', 'gaz_promo').eq('actif', true).order('ordre').then(({ data }) => setGazPromoTypes(data || [])) }, [])
+  useEffect(() => {
+    if (!has('rh_leger') || !session?.user?.id) return
+    supabase.from('demandes_explication').select('*').eq('employe_id', session.user.id).eq('statut', 'envoyee').order('created_at')
+      .then(({ data }) => setMesDemandes(data || []))
+  }, [session?.user?.id])
+  async function repondreDemande(d) {
+    const texte = (demandeReponses[d.id] || '').trim()
+    if (!texte) return
+    const { error } = await supabase.from('demandes_explication').update({ reponse: texte, reponse_at: new Date().toISOString(), statut: 'repondue' }).eq('id', d.id)
+    if (error) { fail(`Échec de l'envoi de la réponse : ${error.message}`, 'top'); return }
+    setMesDemandes(p => p.filter(x => x.id !== d.id))
+  }
   useEffect(() => { supabase.from('products').select('nom,prix_vente,consigne_prix').eq('categorie', 'gaz').then(({ data }) => {
     const m = {}, c = {}; (data || []).forEach(p => { m[p.nom] = N(p.prix_vente); c[p.nom] = N(p.consigne_prix) }); setGazPrices(m); setGazConsignePrices(c)
   }) }, [])
@@ -947,6 +963,16 @@ export default function Submit() {
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
       {locked && <AlertBanner tone="alarm" title="Verrouillé">{lockedMsg} Lecture seule.</AlertBanner>}
       {isPompiste && <AlertBanner tone="info" title="Mode pompiste">Vous saisissez les compteurs, le stock et les photos. Les ventes et versements sont gérés par le gérant.</AlertBanner>}
+      {mesDemandes.map(d => (
+        <Panel key={d.id} title="Demande d'explication" status="warn">
+          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-body)', marginTop: 0 }}>{d.motif}</p>
+          {d.date_limite && <p style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Réponse attendue avant le {frDate(d.date_limite)}.</p>}
+          <Field label="Votre réponse">
+            <Input value={demandeReponses[d.id] ?? ''} onChange={e => setDemandeReponses(p => ({ ...p, [d.id]: e.target.value }))} placeholder="Expliquez ici…" />
+          </Field>
+          <Button tone="primary" style={{ marginTop: 'var(--sp-3)' }} disabled={!(demandeReponses[d.id] || '').trim()} onClick={() => repondreDemande(d)}>Envoyer la réponse</Button>
+        </Panel>
+      ))}
 
       {/* ---- PHOTOS DU JOUR (vue seule, pour vérification admin) — accordéon replié par défaut ---- */}
       {attachments.length > 0 && (
