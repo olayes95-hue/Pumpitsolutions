@@ -4,23 +4,26 @@ import { useAuth } from '../lib/auth.jsx'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
-import { Tag } from '../ds/pumpit/components/core/Tag.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 
 const PERMISSION = {
   supervision: 'Supervision et statistiques', clients: 'Clients et essais', offres: 'Offres et fonctions', facturation: 'Factures et comptabilité',
-  assistance: 'Assistance', ouvrir_client: 'Entrer chez un client', reglages: 'Réglages', agents: 'Équipe PumpIT',
+  assistance: 'Assistance', ouvrir_client: 'Entrer chez un client', reglages: 'Réglages', agents: 'Équipe PumpIT', notifications: 'Notifications',
 }
+const PERMISSION_KEYS = Object.keys(PERMISSION)
 
 // Équipe PumpIT : les personnes qui gèrent la plateforme, et ce que chaque rôle autorise.
 export default function Agents() {
   const { session } = useAuth()
   const [agents, setAgents] = useState([])
   const [roles, setRoles] = useState([])
+  const [matrice, setMatrice] = useState({})   // role_key -> Set des permissions cochées (brouillon)
+  const [modifie, setModifie] = useState(false)
   const [f, setF] = useState({ email: '', role: 'support' })
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
@@ -32,8 +35,23 @@ export default function Agents() {
     const [a, r] = await Promise.all([supabase.rpc('bo_agents'), supabase.from('plateforme_roles').select('*').order('ordre')])
     if (a.error) fail(a.error)
     setAgents(a.data || []); setRoles(r.data || [])
+    setMatrice(Object.fromEntries((r.data || []).map(x => [x.key, new Set(x.permissions || [])])))
+    setModifie(false)
   }
   useEffect(() => { load() }, [])
+
+  function basculerPermission(roleKey, perm) {
+    setMatrice(m => { const s = new Set(m[roleKey]); s.has(perm) ? s.delete(perm) : s.add(perm); return { ...m, [roleKey]: s } })
+    setModifie(true)
+  }
+  async function enregistrerMatrice() {
+    for (const r of roles) {
+      const { error } = await supabase.from('plateforme_roles').update({ permissions: [...(matrice[r.key] || [])] }).eq('key', r.key)
+      if (error) return fail(error)
+    }
+    setErr(''); setMsg('Permissions enregistrées. Elles s\'appliquent à la prochaine connexion des agents concernés.')
+    await load()
+  }
 
   async function definir(email, role, message) {
     setBusy(true)
@@ -80,15 +98,36 @@ export default function Agents() {
         </form>
       </Panel>
 
-      <Panel title="Ce que chaque rôle autorise">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
-          {roles.map(r => (
-            <div key={r.key}>
-              <div style={{ font: '700 16px/1.3 var(--font-display)' }}>{r.label}</div>
-              {r.description && <div style={{ font: '400 14px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: '2px 0 var(--sp-3)' }}>{r.description}</div>}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>{(r.permissions || []).map(p => <Tag key={p}>{PERMISSION[p] || p}</Tag>)}</div>
-            </div>
-          ))}
+      <Panel title="Ce que chaque rôle autorise" actions={modifie && <Button size="sm" tone="primary" onClick={enregistrerMatrice}>Enregistrer</Button>}>
+        <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
+          Cochez les droits de chaque rôle — s'applique à la prochaine connexion des agents concernés. super_admin garde toujours tous les droits en pratique (vérifié côté code), mais reste modifiable ici comme les autres.
+        </p>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', font: '400 14px/1.3 var(--font-ui)' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', padding: 'var(--sp-2) var(--sp-3)', borderBottom: '1px solid var(--border-hairline)' }}>Rôle</th>
+                {PERMISSION_KEYS.map(p => (
+                  <th key={p} style={{ textAlign: 'center', padding: 'var(--sp-2) var(--sp-3)', borderBottom: '1px solid var(--border-hairline)', font: '600 12px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>{PERMISSION[p]}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {roles.map(r => (
+                <tr key={r.key}>
+                  <td style={{ padding: 'var(--sp-3)', borderBottom: '1px solid var(--border-hairline)' }}>
+                    <div style={{ font: '700 14px/1.3 var(--font-ui)' }}>{r.label}</div>
+                    {r.description && <div style={{ font: '400 12px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>{r.description}</div>}
+                  </td>
+                  {PERMISSION_KEYS.map(p => (
+                    <td key={p} style={{ textAlign: 'center', padding: 'var(--sp-3)', borderBottom: '1px solid var(--border-hairline)' }}>
+                      <Checkbox checked={!!matrice[r.key]?.has(p)} onChange={() => basculerPermission(r.key, p)} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </Panel>
     </div>
