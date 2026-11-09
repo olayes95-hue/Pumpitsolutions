@@ -103,6 +103,7 @@ export default function Stations() {
       nombre_machines: Math.min(10, Math.max(1, num(s.nombre_machines) ?? 4)),
       suivi_lub_gaz: s.suivi_lub_gaz || 'les_deux',
       mobile_money_actif: !!s.mobile_money_actif, mobile_money_operateurs: operateurs,
+      marge_bon: num(s.marge_bon),
     }).eq('id', s.id)
     error ? fail(error) : flash('Station enregistrée')
   }
@@ -380,6 +381,9 @@ export default function Stations() {
                   <Input type="number" numeric min={1} max={10} value={s.nombre_machines ?? 4} onChange={e => upS(s.id, 'nombre_machines', e.target.value)} />
                 </Field>
               </div>
+              <Field label="Marge réelle sur vente à bon (F/L)" hint="Laisser vide = même marge qu'en espèces (Entreprise > marge carburant). Une partie de la marge sur bon repart souvent à la maison mère." style={{ maxWidth: 280 }}>
+                <Input type="number" numeric value={s.marge_bon ?? ''} placeholder="= marge espèces" onChange={e => upS(s.id, 'marge_bon', e.target.value)} />
+              </Field>
               <Field label="Gaz &amp; lubrifiant — ce que le gérant déclare" hint="Stock (matin, anti-coulage) / Vendu (16h, commission réelle) / les deux (défaut)" style={{ maxWidth: 280 }}>
                 <Select value={s.suivi_lub_gaz || 'les_deux'} onChange={e => upS(s.id, 'suivi_lub_gaz', e.target.value)} style={{ width: '100%' }}
                   options={[{ value: 'les_deux', label: 'Stock + Vendu (défaut)' }, { value: 'stock', label: 'Stock seul' }, { value: 'vendu', label: 'Vendu seul' }]} />

@@ -217,12 +217,16 @@ export default function Finance() {
   const produits = commCarb + commGazLub + commSuperette + autresProduits
   const resultat = produits - totCharges
 
-  // Seuil de rentabilité en litres : combien de litres de carburant (essence + gasoil — même
-  // marge/L pour les deux, l'app ne distingue pas) faut-il vendre pour couvrir les charges,
-  // les autres pôles restant à leur niveau actuel ? litres × marge = charges − (autres produits).
+  // Seuil de rentabilité en litres : combien de litres de carburant faut-il vendre pour couvrir
+  // les charges, les autres pôles restant à leur niveau actuel ? litres × marge = charges −
+  // (autres produits). Marge EFFECTIVE (commCarb / litresActuels) plutôt que settings.marge_unitaire
+  // fixe — une partie des litres est vendue à bon, à une marge réduite propre à la station
+  // (stations.marge_bon, migration_v151) ; le ratio réellement observé ce mois reflète mieux le
+  // mix bon/espèces de la station que la marge espèces seule.
   const litresActuels = sum('litres_carburant')
-  const litresSeuilRentabilite = N(settings.marge_unitaire) > 0
-    ? Math.max(0, (totCharges - commGazLub - commSuperette - autresProduits) / N(settings.marge_unitaire))
+  const margeEffective = litresActuels > 0 ? commCarb / litresActuels : N(settings.marge_unitaire)
+  const litresSeuilRentabilite = margeEffective > 0
+    ? Math.max(0, (totCharges - commGazLub - commSuperette - autresProduits) / margeEffective)
     : null
 
   // Comparaison à la période précédente (mois précédent si un mois précis est sélectionné,

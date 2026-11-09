@@ -445,7 +445,15 @@ export default function Submit() {
   const totDepense = expenses.reduce((s, e) => s + N(e.montant), 0)
   const totVerse = deposits.reduce((s, d) => s + N(d.montant), 0)
   const totLivr = deliveries.reduce((s, d) => s + N(d.montant), 0)
-  const marge = (N(f.ess_litres) + N(f.gas_litres)) * N(settings.marge_unitaire)
+  // Marge carburant : litres vendus à bon à la marge réduite de la station (une partie repart à
+  // la maison mère, stations.marge_bon — migration_v151, fallback settings.marge_unitaire si non
+  // réglée), reste des litres déclarés (= espèces) à la marge pleine. Même calcul que
+  // v_ventes_mensuelles.commission_carburant, pour que cette estimation du jour ne diverge pas
+  // de ce qui remontera au Point financier.
+  const margeBonEff = current?.marge_bon != null ? N(current.marge_bon) : N(settings.marge_unitaire)
+  const litresBonCalc = (N(f.ess_pu) > 0 ? N(f.ess_bon) / N(f.ess_pu) : 0) + (N(f.gas_pu) > 0 ? N(f.gas_bon) / N(f.gas_pu) : 0)
+  const litresEspeceCalc = Math.max((N(f.ess_litres) + N(f.gas_litres)) - litresBonCalc, 0)
+  const marge = litresBonCalc * margeBonEff + litresEspeceCalc * N(settings.marge_unitaire)
   const show = (m) => showAll || moment === m
   // gérant/pompiste/vendeuse : verrouillage aligné sur la règle RLS réelle côté base
   // (migration v47, configurable par l'admin dans Stations & équipe — settings.jours_correction_gerant).
@@ -1077,7 +1085,7 @@ export default function Submit() {
               </p>
             )}
           </FormSection>
-          <AlertBanner tone="ok" title="Marge" style={{ marginTop: 'var(--sp-4)' }}>Marge carburant estimée : <b>{fcfa(marge)}</b> ({settings.marge_unitaire} F/L)</AlertBanner>
+          <AlertBanner tone="ok" title="Marge" style={{ marginTop: 'var(--sp-4)' }}>Marge carburant estimée : <b>{fcfa(marge)}</b> ({settings.marge_unitaire} F/L espèces{current?.marge_bon != null ? `, ${current.marge_bon} F/L à bon` : ''})</AlertBanner>
         </Panel>}
 
         {!isPompiste && <Panel>
