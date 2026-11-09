@@ -31,6 +31,7 @@ export default function Clients() {
   const [formules, setFormules] = useState([])
   const [orphans, setOrphans] = useState([])
   const [stations, setStations] = useState([])     // toutes les stations, avec leur offre et son prix (bo_stations)
+  const [commerciaux, setCommerciaux] = useState([])   // bo_commerciaux() — pour "Commercial référent" (commission, migration_v153)
   const [target, setTarget] = useState({})
   const [nouveau, setNouveau] = useState({ nom: '', formule: 'pro', essai: true })
   const [ficheId, setFicheId] = useState(null)
@@ -55,6 +56,8 @@ export default function Clients() {
     setOrgs(o.data || []); setFormules(f.data || []); setOrphans(p.data || [])
     const st = await supabase.rpc('bo_stations')
     setStations(st.data || [])
+    const cm = await supabase.rpc('bo_commerciaux')
+    setCommerciaux(cm.data || [])
     return o.data || []
   }
   useEffect(() => { load() }, [])
@@ -318,6 +321,17 @@ export default function Clients() {
               </div>
               <Button style={{ alignSelf: 'flex-start' }} disabled={!String(fiche.nom || '').trim()}
                 onClick={() => majClient({ nom: fiche.nom.trim(), adresse: fiche.adresse || null, telephone: fiche.telephone || null, ifu: fiche.ifu || null }, 'Coordonnées enregistrées.')}>Enregistrer les coordonnées</Button>
+            </div>
+
+            <div style={bloc}>
+              <h3 style={titre}>Commercial référent</h3>
+              <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 var(--sp-3)' }}>
+                Le commercial qui a ramené ce client — base du calcul de sa commission (Équipe PumpIT &gt; Fiche RH).
+              </p>
+              <Field label="Commercial">
+                <Select value={fiche.apporte_par || ''} onChange={e => majClient({ apporte_par: e.target.value || null }, 'Commercial référent enregistré.')} style={{ width: '100%' }}
+                  options={[{ value: '', label: '— aucun —' }, ...commerciaux.map(c => ({ value: c.id, label: c.full_name }))]} />
+              </Field>
             </div>
 
             <div style={bloc}>
