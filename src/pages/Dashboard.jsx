@@ -113,7 +113,7 @@ export default function Dashboard() {
     const { from, to } = periodBounds(year, month)
     ;(async () => {
       const [dr, recon, exp, sup, lub] = await Promise.all([
-        supabase.from('daily_reports').select('ess_litres,ess_pu,gas_litres,gas_pu,gaz_vendu_3,gaz_vendu_6,gaz_vendu_12,gaz_vendu_38').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
+        supabase.from('daily_reports').select('ess_litres,ess_pu,ess_bon,ess_espece,gas_litres,gas_pu,gas_bon,gas_espece,gaz_vendu_3,gaz_vendu_6,gaz_vendu_12,gaz_vendu_38').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
         // 3 lignes/jour (une par pôle) : sur "Toutes années", sans tri+limite explicites, la
         // limite par défaut de l'API (1000 lignes) tronque arbitrairement (cf. bug Historique).
         supabase.from('v_pole_recon_jour').select('*').eq('station_id', stationId).gte('report_date', from).lte('report_date', to).order('report_date', { ascending: false }).limit(5000),
@@ -286,8 +286,10 @@ export default function Dashboard() {
         { name: 'Gasoil', value: polePeriod.dr.reduce((s, r) => s + N(r.gas_litres), 0) },
       ]
     : [
-        { name: 'Essence', value: polePeriod.dr.reduce((s, r) => s + N(r.ess_litres) * N(r.ess_pu), 0) },
-        { name: 'Gasoil', value: polePeriod.dr.reduce((s, r) => s + N(r.gas_litres) * N(r.gas_pu), 0) },
+        // Repli bons+espèces si le prix n'a pas été enregistré ce jour-là (ess_pu/gas_pu vides —
+        // voir le fix Submit.jsx) : litres × prix reste privilégié quand il est connu, plus précis.
+        { name: 'Essence', value: polePeriod.dr.reduce((s, r) => s + (N(r.ess_pu) > 0 ? N(r.ess_litres) * N(r.ess_pu) : N(r.ess_bon) + N(r.ess_espece)), 0) },
+        { name: 'Gasoil', value: polePeriod.dr.reduce((s, r) => s + (N(r.gas_pu) > 0 ? N(r.gas_litres) * N(r.gas_pu) : N(r.gas_bon) + N(r.gas_espece)), 0) },
       ]).filter(r => r.value > 0)
   const CARBURANT_MIX_COLORS = { Essence: 'var(--accent)', Gasoil: 'var(--state-info)' }
 
