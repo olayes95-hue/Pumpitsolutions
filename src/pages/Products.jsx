@@ -65,7 +65,7 @@ export default function Products() {
   const [dirty, setDirty] = useState(() => new Set())
   const [saving, setSaving] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [nf, setNf] = useState({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '', consigne_prix: '' })
+  const [nf, setNf] = useState({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '', consigne_prix: '', consigne_prix_achat: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [settings, setSettings] = useState(null)
   // Mode "proposition" : valeur d'origine (pour calculer prix_actuel) + mes demandes en
@@ -76,7 +76,7 @@ export default function Products() {
   async function load() {
     const { data } = await supabase.from('products').select('*').order('categorie').order('ordre')
     setList(data || [])
-    setOriginal(Object.fromEntries((data || []).map(p => [p.id, { prix_achat: p.prix_achat, prix_vente: p.prix_vente, consigne_prix: p.consigne_prix }])))
+    setOriginal(Object.fromEntries((data || []).map(p => [p.id, { prix_achat: p.prix_achat, prix_vente: p.prix_vente, consigne_prix: p.consigne_prix, consigne_prix_achat: p.consigne_prix_achat }])))
   }
   async function loadMesDemandes() {
     if (!peutProposer || !session?.user?.id) return
@@ -126,15 +126,16 @@ export default function Products() {
       categorie: cat, nom: nf.nom, unite: nf.unite,
       prix_achat: numFR(nf.prix_achat), prix_vente: numFR(nf.prix_vente), seuil: numFR(nf.seuil) ?? 0,
       consigne_prix: cat === 'gaz' ? numFR(nf.consigne_prix) : null,
+      consigne_prix_achat: cat === 'gaz' ? numFR(nf.consigne_prix_achat) : null,
       ordre: (list.filter(p => p.categorie === cat).length + 1) * 10 })
-    if (error) setErr(error.message); else { setNf({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '', consigne_prix: '' }); flash('Produit ajouté'); load() }
+    if (error) setErr(error.message); else { setNf({ nom: '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '', consigne_prix: '', consigne_prix_achat: '' }); flash('Produit ajouté'); load() }
   }
   const productPayload = (p) => ({
     nom: p.nom, unite: p.unite, prix_achat: numFR(p.prix_achat), prix_vente: numFR(p.prix_vente),
     seuil: numFR(p.seuil) ?? 0, actif: p.actif, ordre: numFR(p.ordre),
     unite_stock: p.unite_stock || null, conditionnement_nom: p.conditionnement_nom || null,
     conditionnement_qte: numFR(p.conditionnement_qte), prix_achat_gros: numFR(p.prix_achat_gros),
-    consigne_prix: numFR(p.consigne_prix) })
+    consigne_prix: numFR(p.consigne_prix), consigne_prix_achat: numFR(p.consigne_prix_achat) })
   async function save(p) {
     const { error } = await supabase.from('products').update(productPayload(p)).eq('id', p.id)
     if (error) setErr(error.message)
@@ -156,7 +157,7 @@ export default function Products() {
   // par champ de prix réellement changé dans product_price_requests (migration_v139), que la
   // hiérarchie devra valider. prix_actuel vient de `original` (valeur au chargement), pas de
   // la valeur en cours de saisie dans `list`, pour rester correct même après plusieurs frappes.
-  const PRICE_FIELDS = ['prix_achat', 'prix_vente', 'consigne_prix']
+  const PRICE_FIELDS = ['prix_achat', 'prix_vente', 'consigne_prix', 'consigne_prix_achat']
   function pendingDemande(productId, champ) {
     return mesDemandes.find(d => d.product_id === productId && d.champ === champ && d.statut === 'en_attente')
   }
@@ -222,7 +223,8 @@ export default function Products() {
     { key: 'prix_achat', header: 'Prix achat (unité)', align: 'right', render: p => champPrix(p, 'prix_achat') },
     { key: 'prix_vente', header: 'Prix vente', align: 'right', render: p => champPrix(p, 'prix_vente') },
     ...(cat === 'gaz' ? [
-      { key: 'consigne_prix', header: 'Prix consigne', align: 'right', render: p => champPrix(p, 'consigne_prix', '—') },
+      { key: 'consigne_prix_achat', header: 'Consigne (achat)', align: 'right', render: p => champPrix(p, 'consigne_prix_achat', '—') },
+      { key: 'consigne_prix', header: 'Consigne (vente)', align: 'right', render: p => champPrix(p, 'consigne_prix', '—') },
     ] : []),
     { key: 'seuil', header: 'Seuil', align: 'right', render: p => lectureSeule ? texte(p.seuil ?? 0) : <Input size="sm" numeric value={p.seuil ?? ''} onChange={e => up(p.id, 'seuil', e.target.value)} style={{ width: 70 }} /> },
     { key: 'actif', header: 'Actif', render: p => lectureSeule ? texte(p.actif ? 'Oui' : 'Non') : <Checkbox checked={!!p.actif} onChange={v => up(p.id, 'actif', v)} /> },
@@ -271,7 +273,10 @@ export default function Products() {
             <Field label="Prix vente" style={{ flex: '1 1 100px' }}>
               <Input numeric value={nf.prix_vente} onChange={e => setNf({ ...nf, prix_vente: e.target.value })} />
             </Field>
-            {cat === 'gaz' && <Field label="Prix consigne" style={{ flex: '1 1 100px' }}>
+            {cat === 'gaz' && <Field label="Consigne (achat)" style={{ flex: '1 1 100px' }}>
+              <Input numeric value={nf.consigne_prix_achat} onChange={e => setNf({ ...nf, consigne_prix_achat: e.target.value })} />
+            </Field>}
+            {cat === 'gaz' && <Field label="Consigne (vente)" style={{ flex: '1 1 100px' }}>
               <Input numeric value={nf.consigne_prix} onChange={e => setNf({ ...nf, consigne_prix: e.target.value })} />
             </Field>}
             <Button type="submit" tone="primary">+ Ajouter à « {cat} »</Button>
@@ -344,7 +349,7 @@ export default function Products() {
           {mesDemandes.length
             ? <DataTable columns={[
                 { key: 'produit', header: 'Produit', render: d => d.products?.nom || '—' },
-                { key: 'champ', header: 'Champ', render: d => ({ prix_achat: "Prix d'achat", prix_vente: 'Prix de vente', consigne_prix: 'Prix de consigne' }[d.champ] || d.champ) },
+                { key: 'champ', header: 'Champ', render: d => ({ prix_achat: "Prix d'achat", prix_vente: 'Prix de vente', consigne_prix: 'Consigne (vente)', consigne_prix_achat: 'Consigne (achat)' }[d.champ] || d.champ) },
                 { key: 'prix_actuel', header: 'Actuel', align: 'right', render: d => d.prix_actuel != null ? fcfa(d.prix_actuel) : '—' },
                 { key: 'prix_demande', header: 'Demandé', align: 'right', render: d => fcfa(d.prix_demande) },
                 { key: 'statut', header: 'Statut', render: d => <Badge tone={d.statut === 'validee' ? 'ok' : d.statut === 'refusee' ? 'alarm' : 'warn'}>{d.statut === 'validee' ? 'Validée' : d.statut === 'refusee' ? 'Refusée' : 'En attente'}</Badge> },

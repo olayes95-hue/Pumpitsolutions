@@ -102,7 +102,7 @@ export default function Journal() {
     const monthEnd = lastDayOfMonth(moisManque)
     const [recon, exp] = await Promise.all([
       supabase.from('v_pole_recon_jour').select('*').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
-      supabase.from('expenses').select('categorie,montant,non_cash').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
+      supabase.from('expenses').select('categorie,montant,non_cash,poles').eq('station_id', stationId).gte('report_date', monthStart).lte('report_date', monthEnd),
     ])
     // Même décomposition que « Cash non tracé » du Tableau de bord admin (recettes − versé,
     // éclatée par pôle), MAIS attribuée période par période (via v_pole_recon_jour) et non plus
@@ -121,28 +121,40 @@ export default function Journal() {
       else if (!g.couvert) manqueByPole[g.pole_groupe] += N(g.espece)
     }
 
-    // SBEE/AUTRE sont payées en pratique depuis la caisse carburant (c'est elle qui encaisse le
-    // plus de cash au quotidien) — les déduire du carburant, pas seulement du total, sinon le
-    // bâton "Carburant" affiche un manque qui ignore une charge réellement sortie de cette caisse.
-    let depSuperette = 0, depGen = 0
+    // Déduit chaque dépense du (ou des) pôle(s) réellement sorti(s) de caisse — exactement
+    // comme v_recette_groupe_jour (Finance.jsx/Dashboard.jsx) : si le gérant a coché un ou
+    // plusieurs pôles pour cette dépense (expenses.poles), on répartit selon ce choix ; sinon
+    // (ancienne saisie, ou catégorie sans pôle renseigné) on retombe sur l'ancienne déduction
+    // par défaut (supérette si catégorie SUPERETTE, carburant sinon). Avant ce correctif, le
+    // pôle choisi par le gérant était ignoré et tout retombait sur carburant/supérette par
+    // catégorie — bug réel repéré en prod.
+    let depCarburant = 0, depGazLub = 0, depSuperette = 0
     for (const e of (exp.data || [])) {
       if (e.non_cash) continue // prélèvement carburant propriétaire : non-cash, jamais décompté
-      if (e.categorie === 'SUPERETTE') depSuperette += N(e.montant)
-      else if (e.categorie !== 'CARBURANT') depGen += N(e.montant) // SBEE, AUTRE
+      if (Array.isArray(e.poles) && e.poles.length > 0) {
+        for (const po of e.poles) {
+          const g = po.pole === 'carburant' ? 'carburant' : (['gaz', 'lubrifiant', 'gaz_lubrifiant'].includes(po.pole) ? 'gaz_lub' : 'superette')
+          if (g === 'superette') depSuperette += N(po.montant)
+          else if (g === 'gaz_lub') depGazLub += N(po.montant)
+          else depCarburant += N(po.montant)
+        }
+      } else if (String(e.categorie || '').toUpperCase() === 'SUPERETTE') depSuperette += N(e.montant)
+      else depCarburant += N(e.montant)
     }
 
     setManque({
-      carburant: manqueByPole.carburant - depGen,
-      gaz_lub: manqueByPole.gaz_lub,
+      carburant: manqueByPole.carburant - depCarburant,
+      gaz_lub: manqueByPole.gaz_lub - depGazLub,
       superette: manqueByPole.superette - depSuperette,
     })
-    setDepGeneral(depGen)
+    setDepGeneral(depCarburant)
   })() }, [stationId, moisManque])
 
   if (loading) return <Panel><p style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Chargement…</p></Panel>
 
-  // depGeneral (SBEE/AUTRE) est déjà déduit de manque.carburant (voir le chargement des données) —
-  // ne pas le soustraire une seconde fois ici.
+  // depGeneral (dépenses attribuées au pôle carburant, poles ou à défaut catégorie) est déjà
+  // déduit de manque.carburant (voir le chargement des données) — ne pas le soustraire une
+  // seconde fois ici.
   const manqueTotal = manque.carburant + manque.gaz_lub + manque.superette
   // Jours passés sans aucune saisie — mis en avant séparément (pas juste noyés dans la liste
   // d'alertes) : c'est précisément ce que le gérant ne voit pas spontanément autrement.
@@ -209,7 +221,7 @@ export default function Journal() {
         actions={<Input type="month" size="sm" value={moisManque} max={today().slice(0, 7)} onChange={e => e.target.value && setMoisManque(e.target.value)} style={{ width: 160 }} />}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
           <PoleLine label="Carburant" value={manque.carburant} />
-          {depGeneral > 0 && <p style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 0 var(--sp-4)' }}>dont {fcfa(depGeneral)} de charges générales (SBEE, autre) déjà déduites</p>}
+          {depGeneral > 0 && <p style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 0 var(--sp-4)' }}>dont {fcfa(depGeneral)} de dépenses payées depuis cette caisse déjà déduites</p>}
           <PoleLine label="Gaz + Lubrifiant" value={manque.gaz_lub} />
           <PoleLine label="Supérette" value={manque.superette} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--sp-3) var(--sp-4)', borderTop: '1px solid var(--border-default)', marginTop: 'var(--sp-2)' }}>
