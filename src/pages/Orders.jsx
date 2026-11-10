@@ -171,21 +171,26 @@ export default function Orders() {
   function changeCat(cat) {
     let rows = []
     if (cat === 'carburant') rows = carbRows()
-    else if (cat === 'gaz' || cat === 'lubrifiant') rows = prodOf(cat).map(p => ({ produit: p.nom, product_id: p.id, qte: '', montant: '', qteCartons: '', qteUnites: '', avecConsigne: false }))
+    else if (cat === 'gaz' || cat === 'lubrifiant') rows = prodOf(cat).map(p => ({ produit: p.nom, product_id: p.id, qte: '', montant: '', qteCartons: '', qteUnites: '', consigneMode: 'aucune' }))
     setNf({ ...blankNf(), categorie: cat, rows })
   }
   const setRow = (i, k, v) => setNf(p => ({ ...p, rows: p.rows.map((r, j) => j === i ? { ...r, [k]: v } : r) }))
   // Prix d'achat catalogue courant pour gaz/lubrifiant — le montant de la commande en découle,
   // il ne se tape plus à la main (voir setQte) : s'il est faux, on corrige le catalogue via une
   // demande validée par le directeur/admin (product_price_requests), pas la commande elle-même.
-  // Gaz "avec consigne" (bouteilles neuves, pas un échange) : coût additionné, pas remplacé —
-  // même logique que côté vente (prix_vente + consigne perçue si pas de vide rendu).
-  const pxAchat = (cat, produit, avecConsigne) => {
+  // Gaz — 3 modes de commande (migration_v155 + v157) :
+  // - 'aucune' (recharge seule, défaut) : échange, coût = prix_achat.
+  // - 'avec' (recharge + consigne, bouteilles neuves) : coût additionné, même logique
+  //   que côté vente (prix_vente + consigne perçue si pas de vide rendu).
+  // - 'seule' (consigne seule) : reconstituer un stock de bouteilles vides, sans
+  //   remplissage — coût = consigne_prix_achat seul, pas de prix_achat.
+  const pxAchat = (cat, produit, consigneMode) => {
     const pr = prodOf(cat).find(p => p.nom === produit) || {}
-    return N(pr.prix_achat) + (avecConsigne ? N(pr.consigne_prix_achat) : 0)
+    if (consigneMode === 'seule') return N(pr.consigne_prix_achat)
+    return N(pr.prix_achat) + (consigneMode === 'avec' ? N(pr.consigne_prix_achat) : 0)
   }
-  const setQte = (i, cat, v) => setNf(p => ({ ...p, rows: p.rows.map((r, j) => j === i ? { ...r, qte: v, montant: N(v) > 0 ? String(N(v) * pxAchat(cat, r.produit, r.avecConsigne)) : '' } : r) }))
-  const setAvecConsigne = (i, cat, v) => setNf(p => ({ ...p, rows: p.rows.map((r, j) => j === i ? { ...r, avecConsigne: v, montant: N(r.qte) > 0 ? String(N(r.qte) * pxAchat(cat, r.produit, v)) : '' } : r) }))
+  const setQte = (i, cat, v) => setNf(p => ({ ...p, rows: p.rows.map((r, j) => j === i ? { ...r, qte: v, montant: N(v) > 0 ? String(N(v) * pxAchat(cat, r.produit, r.consigneMode)) : '' } : r) }))
+  const setConsigneMode = (i, cat, v) => setNf(p => ({ ...p, rows: p.rows.map((r, j) => j === i ? { ...r, consigneMode: v, montant: N(r.qte) > 0 ? String(N(r.qte) * pxAchat(cat, r.produit, v)) : '' } : r) }))
   // Lubrifiant : on commande au fournisseur en cartons, mais le stock et les ventes se suivent à
   // l'unité (même logique qu'à la réception, via packagingSplit) — la quantité commandée se déduit
   // du détail carton + unité plutôt que d'être tapée directement.
@@ -195,7 +200,7 @@ export default function Orders() {
     const pr = prodOf(cat).find(x => x.nom === r.produit)
     const { quantite_recue } = packagingSplit({ pr, qteCartons: next.qteCartons, qteUnites: next.qteUnites })
     const qte = quantite_recue || ''
-    return { ...next, qte, montant: N(qte) > 0 ? String(N(qte) * pxAchat(cat, r.produit, r.avecConsigne)) : '' }
+    return { ...next, qte, montant: N(qte) > 0 ? String(N(qte) * pxAchat(cat, r.produit, r.consigneMode)) : '' }
   }) }))
   const setLigne = (i, patch) => setNf(p => ({ ...p, lignes: p.lignes.map((l, j) => j === i ? { ...l, ...patch } : l) }))
   // Prix d'achat supérette au détail (unité) ou au gros (carton), selon le choix de la ligne.
@@ -218,7 +223,8 @@ export default function Orders() {
     } else if (c === 'gaz' || c === 'lubrifiant') {
       toInsert = nf.rows.filter(r => N(r.qte) > 0).map(r => ({
         ...base, produit: r.produit, quantite_commandee: numFR(r.qte),
-        avec_consigne: c === 'gaz' ? !!r.avecConsigne : false,
+        avec_consigne: c === 'gaz' ? r.consigneMode === 'avec' : false,
+        consigne_seule: c === 'gaz' ? r.consigneMode === 'seule' : false,
         mode_paiement: bonsOn ? nf.mode_paiement : (nf.mode_paiement === 'bons' ? 'cheque' : nf.mode_paiement),
         montant_paiement: r.montant ? numFR(r.montant) : null }))
       if (!toInsert.length) { setErr('Renseignez au moins une quantité.'); return }
@@ -422,7 +428,7 @@ export default function Orders() {
     { key: 'categorie', header: 'Catégorie', render: o => (CATS.find(c => c[0] === (o.categorie || 'carburant')) || [, o.categorie])[1] },
     { key: 'produit', header: 'Produit / détail', render: o => (o.categorie || 'carburant') === 'superette'
       ? <span title={(o.lignes || []).map(l => `${l.article} ${l.detail ? '('+l.detail+')' : '×'+l.qte}`).join(' · ')}>{(o.lignes || []).length} article(s)</span>
-      : <>{o.produit}{o.avec_consigne && <span style={{ marginLeft: 6, color: 'var(--text-muted)', font: '400 12px/1.25 var(--font-ui)' }}>(avec consigne)</span>}</> },
+      : <>{o.produit}{(o.avec_consigne || o.consigne_seule) && <span style={{ marginLeft: 6, color: 'var(--text-muted)', font: '400 12px/1.25 var(--font-ui)' }}>({o.consigne_seule ? 'consigne seule' : 'avec consigne'})</span>}</> },
     { key: 'qte', header: 'Qté', numeric: true, align: 'right', render: o => (o.categorie || 'carburant') !== 'superette' && N(o.quantite_commandee) ? N(o.quantite_commandee).toLocaleString('fr-FR') : '—' },
     { key: 'statut', header: 'Statut', render: o => { const st = ORDER_STATUS_TONES[o.statut] || { label: o.statut, tone: 'idle' }; return <Badge tone={st.tone}>{st.label}</Badge> } },
     { key: 'actions', header: '', align: 'right', render: o => {
@@ -597,11 +603,16 @@ export default function Orders() {
               {nf.rows.length > 0 && (
                 <DataTable columns={[
                   { key: 'produit', header: 'Produit' },
-                  ...(nf.categorie === 'gaz' ? [{ key: 'consigne', header: 'Avec consigne (neuves)', render: r => (
-                    <Checkbox checked={!!r.avecConsigne} onChange={v => setAvecConsigne(r.id, nf.categorie, v)} />
+                  ...(nf.categorie === 'gaz' ? [{ key: 'consigne', header: 'Type de commande', render: r => (
+                    <Select size="sm" value={r.consigneMode || 'aucune'} onChange={e => setConsigneMode(r.id, nf.categorie, e.target.value)} style={{ minWidth: 170 }}
+                      options={[
+                        { value: 'aucune', label: 'Recharge seule' },
+                        { value: 'avec', label: 'Recharge + consigne (neuves)' },
+                        { value: 'seule', label: 'Consigne seule' },
+                      ]} />
                   ) }] : []),
                   { key: 'pa', header: 'Prix d\'achat', numeric: true, align: 'right', render: r => {
-                    const pa = pxAchat(nf.categorie, r.produit, r.avecConsigne)
+                    const pa = pxAchat(nf.categorie, r.produit, r.consigneMode)
                     return <span style={{ color: pa ? 'var(--text-muted)' : 'var(--state-alarm)' }}>{pa ? fcfa(pa) : 'manquant'}</span>
                   } },
                   { key: 'qte', header: 'Quantité', numeric: true, align: 'right', render: r => {
