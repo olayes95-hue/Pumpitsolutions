@@ -337,6 +337,8 @@ export default function Stations() {
       </div>
     ) }] : []),
   ]
+  const pendingUsers = users.filter(u => !u.approved)
+  const activeUsers = users.filter(u => u.approved)
   const rhDetail = activeUsers.find(u => u.id === rhDetailId)
   const vmRh = rhDetail && etatVisiteMedicale(rhDetail, today())
   const ctRh = rhDetail && etatContrat(rhDetail, today())
@@ -345,8 +347,6 @@ export default function Stations() {
   const personnelASurveiller = has('rh_leger') ? activeUsers.map(u => ({
     u, vm: etatVisiteMedicale(u, today()), ct: etatContrat(u, today()),
   })).filter(x => x.vm.enRetard || x.ct.echeanceProche || x.ct.expire) : []
-  const pendingUsers = users.filter(u => !u.approved)
-  const activeUsers = users.filter(u => u.approved)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
