@@ -34,7 +34,7 @@ export default function DemandesExplication() {
   async function load() {
     if (peutGerer) {
       const [p, d] = await Promise.all([
-        supabase.from('profiles').select('id,full_name,role,station_id').in('role', ['gerant', 'pompiste', 'vendeuse']).eq('approved', true).is('plateforme_role', null),
+        supabase.from('profiles').select('id,full_name,role,station_id').in('role', ['gerant', 'pompiste', 'vendeuse']).eq('approved', true).or('plateforme_role.is.null,membre_equipe_malgre_agent.eq.true'),
         supabase.from('demandes_explication').select('*').order('created_at', { ascending: false }),
       ])
       setProfiles(p.data || []); setDemandes(d.data || [])
