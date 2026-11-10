@@ -42,7 +42,7 @@ export default function DettesPersonnel({ stationId, mois }) {
   async function load() {
     if (!stationId) return
     const [p, vr, pl, dis, dp, sc] = await Promise.all([
-      supabase.from('profiles').select('id,full_name,role,station_id,approved').eq('station_id', stationId).in('role', ['gerant', 'pompiste']).eq('approved', true),
+      supabase.from('profiles').select('id,full_name,role,station_id,approved').eq('station_id', stationId).in('role', ['gerant', 'pompiste']).eq('approved', true).is('plateforme_role', null),
       supabase.from('v_verse_recon').select('*').eq('station_id', stationId).gt('ecart', 1000),
       supabase.from('v_pertes_livraison').select('*').eq('station_id', stationId).gt('perte_na_montant', 0),
       supabase.from('alert_dismissals').select('station_id,report_date,type').eq('station_id', stationId).in('type', ['VERSEMENT_INCOMPLET', 'PERTE_LIVRAISON_NA']),

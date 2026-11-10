@@ -63,7 +63,10 @@ export default function Stations() {
   async function load() {
     const [s, u, st, r, p, rp, ps, ec, fo, bc, em] = await Promise.all([
       supabase.from('stations').select('*').order('id'),
-      supabase.from('profiles').select('id, full_name, role, station_id, approved, contrat_type, contrat_fin, cnss_declare, assurance_maladie_fin, visite_medicale_le, visite_medicale_mois, salaire_mensuel').order('full_name'),
+      // plateforme_role IS NULL : le personnel PumpIT (super_admin compris, même testé "dans" un
+      // tenant, et les agents commerciaux/support/comptable) ne doit JAMAIS apparaître dans
+      // l'équipe d'un client, même quand son profil est par ailleurs visible/légitime (RLS v163).
+      supabase.from('profiles').select('id, full_name, role, station_id, approved, contrat_type, contrat_fin, cnss_declare, assurance_maladie_fin, visite_medicale_le, visite_medicale_mois, salaire_mensuel').is('plateforme_role', null).order('full_name'),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
       supabase.from('roles').select('*').order('created_at'),
       supabase.from('permissions').select('*').order('category').order('label'),
