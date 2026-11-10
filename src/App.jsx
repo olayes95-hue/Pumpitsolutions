@@ -24,6 +24,7 @@ const AlertsPage = lazy(() => import('./pages/Alerts.jsx'))
 const History = lazy(() => import('./pages/History.jsx'))
 const Suppliers = lazy(() => import('./pages/Suppliers.jsx'))
 const Stations = lazy(() => import('./pages/Stations.jsx'))
+const Demandes = lazy(() => import('./pages/Demandes.jsx'))
 const BankRecon = lazy(() => import('./pages/BankRecon.jsx'))
 const Orders = lazy(() => import('./pages/Orders.jsx'))
 const Inspections = lazy(() => import('./pages/Inspections.jsx'))
@@ -103,6 +104,7 @@ function useSpaces() {
       can('manage_finance') && has('clients_credit') && { to: '/clients', icon: 'users', label: 'Clients à crédit' },
     ] },
     { key: 'reglages', label: 'Réglages', icon: 'settings', items: [
+      has('rh_leger') && { to: '/demandes', icon: 'inbox', label: 'Demandes' },
       (can('manage_stations_config') || can('manage_team')) && { to: '/stations', icon: 'building-2', label: 'Stations et équipe' },
       (org || can('view_finance')) && { to: '/entreprise', icon: 'landmark', label: 'Entreprise' },
       can('view_audit_log') && has('audit') && { to: '/audit', icon: 'search', label: "Journal d'audit" },
@@ -321,6 +323,7 @@ function AppRoutes() {
           <Route path="/clients" element={guard(can('manage_finance') && has('clients_credit'), <Clients />)} />
           <Route path="/verif-photos" element={<Navigate to="/rapprochement" />} />
           <Route path="/stations" element={guard(can('manage_stations_config') || can('manage_team'), <Stations />)} />
+          <Route path="/demandes" element={guard(has('rh_leger'), <Demandes />)} />
           <Route path="/entreprise" element={guard(org || can('view_finance'), <Entreprise />)} />
           <Route path="/audit" element={guard(can('view_audit_log') && has('audit'), <AuditLog />)} />
           <Route path="/aide" element={<Aide />} />

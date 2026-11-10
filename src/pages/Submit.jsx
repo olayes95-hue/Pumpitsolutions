@@ -14,7 +14,6 @@ import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { IconButton } from '../ds/pumpit/components/core/IconButton.jsx'
 import { Icon } from '../ds/pumpit/components/core/Icon.jsx'
 import { Tag } from '../ds/pumpit/components/core/Tag.jsx'
-import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
@@ -28,7 +27,6 @@ const N = (v) => (v === '' || v === null || v === undefined ? 0 : (numFR(v) ?? 0
 const LUB_TYPES = ['5W30 1L','5W30 5L','20W50 5L','15W40 5L','80W90 1L','50 SAE 5L','Dexron 1L','Dot4 1L','10W40 5L','5W40 5L','Graisse','Liquide refroid.','Nettoyant injecteur','Nettoyant essence']
   .map(nom => ({ nom, conditionnement_nom: null, conditionnement_qte: null, unite: 'bidon' }))
 const GAZ = [['3','3 kg'],['6','6 kg'],['12','12 kg'],['38','38 kg']]
-const CONGE_BADGE = { en_attente: { tone: 'warn', label: 'En attente' }, validee: { tone: 'ok', label: 'Validée' }, refusee: { tone: 'alarm', label: 'Refusée' }, annulee: { tone: 'idle', label: 'Annulée' } }
 // Repli affiché le temps que expense_categories charge (catalogue admin, voir migration_v100) —
 // jamais utilisé une fois la requête terminée, même si elle revient vide.
 const FALLBACK_EXP_CATS = [
@@ -117,12 +115,6 @@ export default function Submit() {
   const [gazPromoVendu, setGazPromoVendu] = useState({})
   // Demandes d'explication (RH léger, migration_v152) adressées à MOI — l'employé répond
   // directement ici, pas besoin d'un accès admin pour voir/répondre à sa propre demande (RLS).
-  const [mesDemandes, setMesDemandes] = useState([])
-  const [demandeReponses, setDemandeReponses] = useState({})   // {demande_id: texte en cours}
-  // Congés/absences (RH léger, migration_v158) — demande par l'employé, validée par manage_team.
-  const [mesConges, setMesConges] = useState([])
-  const [congeForm, setCongeForm] = useState({ type: 'conge', date_debut: '', date_fin: '', motif: '' })
-  const [congeBusy, setCongeBusy] = useState(false)
   const [expenses, setExpenses] = useState([])
   const [clients, setClients] = useState([])   // clients à crédit actifs de la station (migration_v143)
   const [newClientFor, setNewClientFor] = useState(null)   // index de dépense en cours de création de client
@@ -184,42 +176,6 @@ export default function Submit() {
   useEffect(() => { supabase.from('suppliers').select('id,nom,categorie').order('nom').then(({ data }) => setSuppliers(data || [])) }, [])
   useEffect(() => { supabase.from('products').select('nom, unite, conditionnement_nom, conditionnement_qte, prix_vente').eq('categorie', 'lubrifiant').eq('actif', true).order('ordre').then(({ data }) => { if (data && data.length) setLubTypes(data) }) }, [])
   useEffect(() => { if (!has('gaz_promo')) return; supabase.from('products').select('nom, prix_vente').eq('categorie', 'gaz_promo').eq('actif', true).order('ordre').then(({ data }) => setGazPromoTypes(data || [])) }, [])
-  useEffect(() => {
-    if (!has('rh_leger') || !session?.user?.id) return
-    supabase.from('demandes_explication').select('*').eq('employe_id', session.user.id).eq('statut', 'envoyee').order('created_at')
-      .then(({ data }) => setMesDemandes(data || []))
-  }, [session?.user?.id])
-  async function repondreDemande(d) {
-    const texte = (demandeReponses[d.id] || '').trim()
-    if (!texte) return
-    const { error } = await supabase.from('demandes_explication').update({ reponse: texte, reponse_at: new Date().toISOString(), statut: 'repondue' }).eq('id', d.id)
-    if (error) { fail(`Échec de l'envoi de la réponse : ${error.message}`, 'top'); return }
-    setMesDemandes(p => p.filter(x => x.id !== d.id))
-  }
-  function loadMesConges() {
-    if (!has('rh_leger') || !session?.user?.id) return
-    supabase.from('conges_demandes').select('*').eq('employe_id', session.user.id).order('created_at', { ascending: false }).limit(8)
-      .then(({ data }) => setMesConges(data || []))
-  }
-  useEffect(loadMesConges, [session?.user?.id])
-  async function demanderConge(e) {
-    e.preventDefault()
-    if (!congeForm.date_debut || !congeForm.date_fin) return
-    setCongeBusy(true)
-    const { error } = await supabase.from('conges_demandes').insert({
-      station_id: stationId, employe_id: session.user.id, type: congeForm.type,
-      date_debut: congeForm.date_debut, date_fin: congeForm.date_fin, motif: congeForm.motif.trim() || null,
-    })
-    setCongeBusy(false)
-    if (error) { fail(`Échec de la demande : ${error.message}`, 'top'); return }
-    setCongeForm({ type: 'conge', date_debut: '', date_fin: '', motif: '' })
-    loadMesConges()
-  }
-  async function annulerConge(id) {
-    const { error } = await supabase.from('conges_demandes').update({ statut: 'annulee' }).eq('id', id)
-    if (error) { fail(`Échec de l'annulation : ${error.message}`, 'top'); return }
-    loadMesConges()
-  }
   useEffect(() => { supabase.from('products').select('nom,prix_vente,consigne_prix').eq('categorie', 'gaz').then(({ data }) => {
     const m = {}, c = {}; (data || []).forEach(p => { m[p.nom] = N(p.prix_vente); c[p.nom] = N(p.consigne_prix) }); setGazPrices(m); setGazConsignePrices(c)
   }) }, [])
@@ -1017,50 +973,6 @@ export default function Submit() {
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
       {locked && <AlertBanner tone="alarm" title="Verrouillé">{lockedMsg} Lecture seule.</AlertBanner>}
       {isPompiste && <AlertBanner tone="info" title="Mode pompiste">Vous saisissez les compteurs, le stock et les photos. Les ventes et versements sont gérés par le gérant.</AlertBanner>}
-      {mesDemandes.map(d => (
-        <Panel key={d.id} title="Demande d'explication" status="warn">
-          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-body)', marginTop: 0 }}>{d.motif}</p>
-          {d.date_limite && <p style={{ font: '400 13px/1.3 var(--font-ui)', color: 'var(--text-muted)' }}>Réponse attendue avant le {frDate(d.date_limite)}.</p>}
-          <Field label="Votre réponse">
-            <Input value={demandeReponses[d.id] ?? ''} onChange={e => setDemandeReponses(p => ({ ...p, [d.id]: e.target.value }))} placeholder="Expliquez ici…" />
-          </Field>
-          <Button tone="primary" style={{ marginTop: 'var(--sp-3)' }} disabled={!(demandeReponses[d.id] || '').trim()} onClick={() => repondreDemande(d)}>Envoyer la réponse</Button>
-        </Panel>
-      ))}
-
-      {has('rh_leger') && (
-        <Panel title="Mes congés &amp; absences" flush>
-          <form onSubmit={demanderConge} style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)', alignItems: 'end', margin: '0 var(--gutter-panel) var(--sp-4)' }}>
-            <Field label="Type" style={{ flex: '1 1 140px' }}>
-              <Select value={congeForm.type} onChange={e => setCongeForm(p => ({ ...p, type: e.target.value }))}
-                options={[{ value: 'conge', label: 'Congé' }, { value: 'absence', label: 'Absence' }]} style={{ width: '100%' }} />
-            </Field>
-            <Field label="Du" style={{ flex: '1 1 140px' }}>
-              <Input type="date" value={congeForm.date_debut} onChange={e => setCongeForm(p => ({ ...p, date_debut: e.target.value }))} />
-            </Field>
-            <Field label="Au" style={{ flex: '1 1 140px' }}>
-              <Input type="date" value={congeForm.date_fin} min={congeForm.date_debut || undefined} onChange={e => setCongeForm(p => ({ ...p, date_fin: e.target.value }))} />
-            </Field>
-            <Field label="Motif (optionnel)" style={{ flex: '2 1 200px' }}>
-              <Input value={congeForm.motif} onChange={e => setCongeForm(p => ({ ...p, motif: e.target.value }))} placeholder="ex : mariage, maladie…" />
-            </Field>
-            <Button type="submit" tone="primary" disabled={congeBusy || !congeForm.date_debut || !congeForm.date_fin}>Demander</Button>
-          </form>
-          {mesConges.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', margin: '0 var(--gutter-panel) var(--sp-4)' }}>
-              {mesConges.map(c => (
-                <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-3)', padding: 'var(--sp-3)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)' }}>
-                  <span style={{ font: '400 14px/1.4 var(--font-ui)' }}>{c.type === 'conge' ? 'Congé' : 'Absence'} du {frDate(c.date_debut)} au {frDate(c.date_fin)}{c.motif ? ` — ${c.motif}` : ''}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-                    <Badge tone={CONGE_BADGE[c.statut]?.tone}>{CONGE_BADGE[c.statut]?.label || c.statut}</Badge>
-                    {c.statut === 'en_attente' && <Button size="sm" onClick={() => annulerConge(c.id)}>Annuler</Button>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
-      )}
 
       {/* ---- PHOTOS DU JOUR (vue seule, pour vérification admin) — accordéon replié par défaut ---- */}
       {attachments.length > 0 && (
