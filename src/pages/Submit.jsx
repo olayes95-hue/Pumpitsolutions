@@ -85,6 +85,14 @@ export default function Submit() {
   const [moment, setMoment] = useState(['matin', 'apres-midi', 'soir'].includes(params.get('moment')) ? params.get('moment') : defaultMoment())
   const [showAll, setShowAll] = useState(!!params.get('date'))
   const [f, setF] = useState(EMPTY)
+  // Garde-fou contre une course avec le brouillon local (voir l'effet d'auto-sauvegarde plus
+  // bas) : sans ça, l'auto-sauvegarde écrit un brouillon avec `f` encore à EMPTY (ess_pu/gas_pu
+  // vides) AVANT que load() n'ait eu le temps de répondre — load() retrouve alors CE brouillon
+  // tout juste écrit et le restaure comme s'il s'agissait d'une vraie saisie en cours, au lieu
+  // d'appliquer les prix par défaut de Entreprise (branche `else`, voir load()). Bug réel
+  // constaté : ess_pu/gas_pu enregistrés vides depuis des semaines, chiffre d'affaires carburant
+  // à 0 dans les rapports alors que les litres sont bien saisis.
+  const loadedKeyRef = useRef(null)
   const [lub, setLub] = useState({})
   const [lubVendu, setLubVendu] = useState({})   // {nom: quantité vendue aujourd'hui} — pour la commission réelle (prix vente − prix achat), plus une estimation à %
   const [lubVenduSplit, setLubVenduSplit] = useState({})
@@ -305,7 +313,10 @@ export default function Submit() {
     // jour est en cours, que la page ait redémarré ou non — l'afficher à chaque fois serait
     // trompeur (laisserait croire à un incident alors que c'est le cas normal).
     else if (draft?.f) {
-      setF(draft.f); setLub(draft.lub || {}); setLubVendu(draft.lubVendu || {})
+      // Rattrapage d'un brouillon déjà corrompu par la course décrite plus haut (ess_pu/gas_pu
+      // vides) — jamais un vrai choix du gérant, qui ne voit/modifie jamais ce champ lui-même.
+      setF({ ...draft.f, ess_pu: draft.f.ess_pu || settings.essence_pv, gas_pu: draft.f.gas_pu || settings.gasoil_pv })
+      setLub(draft.lub || {}); setLubVendu(draft.lubVendu || {})
       setGazPromoStock(draft.gazPromoStock || {}); setGazPromoVendu(draft.gazPromoVendu || {})
       setGazEspeceTouched(false); setLubEspeceTouched(false); setGazPromoEspeceTouched(false)
     } else {
@@ -324,6 +335,7 @@ export default function Submit() {
     const tmap = {}; for (const x of (rt.data || [])) tmap[x.order_id] = x; setRecvTotals(tmap)
     setMeterPhotoBusy({})
     setOpenReception(false)
+    loadedKeyRef.current = `${stationId}_${d}`
   }
 
   // Sauvegarde continue du brouillon local — voir le commentaire sur saveDraft plus haut.
@@ -331,7 +343,19 @@ export default function Submit() {
   // récupérable après un rechargement inattendu de l'onglet.
   useEffect(() => {
     if (!stationId || !date) return
-    saveDraft(stationId, date, { f, lub, lubVendu, gazPromoStock, gazPromoVendu, expenses: stripFiles(expenses), deposits: stripFiles(deposits), deliveries: stripFiles(deliveries) })
+    // N'écrit le brouillon qu'une fois load() terminé pour CE jour — sinon on écrirait un
+    // brouillon avec `f` encore à EMPTY pendant le chargement, que load() retrouverait et
+    // restaurerait à tort juste après (voir le commentaire sur loadedKeyRef).
+    if (loadedKeyRef.current !== `${stationId}_${date}`) return
+    // Débouncé — sans ça, chaque frappe clavier (sur N'IMPORTE QUEL champ du formulaire, `f`
+    // étant un seul gros objet) resérialise tout le brouillon (y compris dépenses/versements/
+    // livraisons) en JSON et réécrit localStorage de façon synchrone. Perceptible comme de la
+    // lenteur sur un gros formulaire/mobile bas de gamme ; 600ms ne change rien à la protection
+    // (le but est de survivre à un rechargement inattendu, pas à chaque caractère).
+    const t = setTimeout(() => {
+      saveDraft(stationId, date, { f, lub, lubVendu, gazPromoStock, gazPromoVendu, expenses: stripFiles(expenses), deposits: stripFiles(deposits), deliveries: stripFiles(deliveries) })
+    }, 600)
+    return () => clearTimeout(t)
   }, [f, lub, lubVendu, gazPromoStock, gazPromoVendu, expenses, deposits, deliveries, stationId, date])
 
   // champ compteur avec photo-preuve par pompe — envoyée immédiatement à la sélection (voir handleMeterPhoto)
