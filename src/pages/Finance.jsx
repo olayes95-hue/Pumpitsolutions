@@ -35,9 +35,15 @@ const N = (v) => (v ? Number(v) : 0)
 // charges saisies à la main (les récurrentes se reportent d'un mois sur l'autre)
 // FRAIS_BANCAIRE : alimentée automatiquement depuis Rapprochement (bouton "Mettre à jour Point
 // financier", voir BankRecon.jsx) — reste modifiable à la main comme les autres si besoin.
-const MANUAL_CATS = ['LOYER','SALAIRES','PRELEVEMENT_GERANT','IMPOTS','HONORAIRES','PRESTATIONS','PERTE_VENTE_CARBURANT','SONEB','TELEPHONE','ABONNEMENT_PUMPIT','FRAIS_BANCAIRE','AUTRE']
+const MANUAL_CATS = ['LOYER','SALAIRES','PRELEVEMENT_GERANT','IMPOTS','HONORAIRES','PRESTATIONS','PERTE_VENTE_CARBURANT','SONEB','TELEPHONE','ABONNEMENT_PUMPIT','FRAIS_BANCAIRE','IMPOT_RESULTAT','AUTRE']
+// IMPOT_RESULTAT : catégorie à part, jamais comptée dans les charges d'exploitation (totManuel) —
+// c'est une correction du montant PRÉ-CALCULÉ (0,1% du CA, voir impotResultat) pour le Compte de
+// résultat, pas une charge de plus. Présente dans Charges fixes pour pouvoir être ajoutée/modifiée/
+// supprimée avec les outils déjà là (photo, note...), mais exclue du total charges partout ailleurs.
+const CAT_IMPOT_RESULTAT = 'IMPOT_RESULTAT'
 const REVENU_CAT = 'AUTRES_PRODUITS'
-const CAT_OPTIONS = [...MANUAL_CATS.map(c => ({ value: c, label: c.replace(/_/g, ' ') })), { value: REVENU_CAT, label: '+ AUTRES PRODUITS (revenu)' }]
+const CAT_LABELS = { [CAT_IMPOT_RESULTAT]: 'IMPÔT SUR LES RÉSULTATS (corrige le 0,1% du CA)' }
+const CAT_OPTIONS = [...MANUAL_CATS.map(c => ({ value: c, label: CAT_LABELS[c] || c.replace(/_/g, ' ') })), { value: REVENU_CAT, label: '+ AUTRES PRODUITS (revenu)' }]
 const STATUT_OPTIONS = [{ value: 'a_payer', label: 'À payer' }, { value: 'paye', label: 'Payé' }]
 const MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12']
 const ML = { '01':'Janv','02':'Févr','03':'Mars','04':'Avril','05':'Mai','06':'Juin','07':'Juil','08':'Août','09':'Sept','10':'Oct','11':'Nov','12':'Déc' }
@@ -205,7 +211,7 @@ export default function Finance() {
   // charges MANUELLES
   const chP = charges.filter(c => inPeriod(c.mois))
   const autresProduits = chP.filter(c => c.categorie === REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
-  const totManuel = chP.filter(c => c.categorie !== REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
+  const totManuel = chP.filter(c => c.categorie !== REVENU_CAT && c.categorie !== CAT_IMPOT_RESULTAT).reduce((s, c) => s + N(c.montant), 0)
   const chargesAPayer = chP.filter(c => c.categorie !== REVENU_CAT && c.statut !== 'paye').reduce((s, c) => s + N(c.montant), 0)
   // Détail « Impôts et taxes » : déjà compté dans totManuel (catégorie IMPOTS, saisie à la main)
   // — extrait ici uniquement pour l'affichage séparé demandé, ne change rien au calcul du résultat.
@@ -248,7 +254,64 @@ export default function Finance() {
   // automatiquement, jamais saisi à la main ; vient en plus de totCharges (RÉSULTAT ci-dessus
   // reste le résultat AVANT cet impôt, comme c'est déjà montré/exporté ailleurs).
   const impotResultat = chiffreAffaires * 0.001
-  const resultatNetApresIS = resultat - impotResultat
+  // Montant pré-calculé (0,1% du CA), mais modifiable : une charge catégorie IMPOT_RESULTAT pour
+  // le mois (saisie dans Charges fixes) remplace le calcul automatique — demande explicite de
+  // l'utilisateur (le forfaitaire réel peut différer du calcul théorique).
+  const impotResultatManuel = chP.filter(c => c.categorie === CAT_IMPOT_RESULTAT)
+  const impotResultatOverride = impotResultatManuel.length > 0
+  const impotResultatRetenu = impotResultatOverride ? impotResultatManuel.reduce((s, c) => s + N(c.montant), 0) : impotResultat
+  const resultatNetApresIS = resultat - impotResultatRetenu
+
+  // Compte de résultat / Détail commercial en tableau (plus lisible qu'une liste de lignes) —
+  // kind distingue l'en-tête de section (gras, pas de montant), la ligne normale et le total
+  // (gras, séparateur au-dessus) ; color override le total quand il peut être négatif.
+  const compteResultatRows = [
+    { id: 'h1', kind: 'head', label: 'Produits (commissions, auto)' },
+    { id: 'commCarb', label: 'Commission carburant', value: fcfa(commCarb) },
+    { id: 'commGazLub', label: 'Commission gaz + lubrifiant (prix vente − prix achat)', value: fcfa(commGazLub) },
+    ...(commGazPromo > 0 ? [{ id: 'commGazPromo', label: 'dont gaz en dépôt-vente (promo)', value: fcfa(commGazPromo) }] : []),
+    { id: 'commSup', label: settings.superette_commission_reelle ? 'Commission supérette (prix vente − prix achat)' : `Commission supérette (${settings.taux_superette}%)`, value: fcfa(commSuperette) },
+    ...(autresProduits > 0 ? [{ id: 'autresProduits1', label: 'Autres produits (saisis)', value: fcfa(autresProduits) }] : []),
+    { id: 'h2', kind: 'head', label: 'Charges' },
+    { id: 'sbee', label: 'SBEE (auto, depuis dépenses)', value: fcfa(autoCharges.SBEE) },
+    { id: 'carb', label: 'Carburant / déplacement (auto)', value: fcfa(autoCharges.CARBURANT) },
+    ...(rembClients > 0 ? [{ id: 'remb', label: 'Remboursements clients à crédit reçus (annule la charge)', value: `− ${fcfa(rembClients)}` }] : []),
+    ...(perteMontant > 0 ? [{ id: 'perte', label: 'Pertes livraison (auto)', value: fcfa(perteMontant) }] : []),
+    { id: 'chargesFixes', label: 'Charges fixes (saisies)', value: fcfa(totManuel) },
+    ...(impotsTaxes > 0 ? [{ id: 'impotsTaxes', label: 'dont impôts et taxes', value: fcfa(impotsTaxes) }] : []),
+    { id: 'resultat', kind: 'total', label: 'RÉSULTAT', value: fcfa(resultat), color: resultat < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' },
+    { id: 'is', label: impotResultatOverride ? 'Impôt sur les résultats (corrigé, au lieu de 0,1 % du CA)' : 'Impôt sur les résultats (0,1 % du chiffre d\'affaires)', value: `− ${fcfa(impotResultatRetenu)}` },
+    { id: 'resultatNet', kind: 'total', label: 'RÉSULTAT NET (après IS)', value: fcfa(resultatNetApresIS), color: resultatNetApresIS < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' },
+  ]
+  const detailCommercialRows = [
+    { id: 'h1', kind: 'head', label: 'Ventes (chiffre d\'affaires)' },
+    { id: 'venteCarb', label: 'Ventes carburant (prix de vente, brut)', value: fcfa(venteCarburant) },
+    { id: 'venteGaz', label: 'Ventes gaz', value: fcfa(venteGaz) },
+    { id: 'venteLub', label: 'Ventes lubrifiant', value: fcfa(venteLubrifiant) },
+    { id: 'venteSup', label: 'Ventes supérette', value: fcfa(venteSuperette) },
+    ...(autresProduits > 0 ? [{ id: 'autresProduits2', label: 'Autres produits', value: fcfa(autresProduits) }] : []),
+    { id: 'ca', kind: 'subtotal', label: 'Chiffre d\'affaires', value: fcfa(chiffreAffaires) },
+    { id: 'h2', kind: 'head', label: 'Achats' },
+    { id: 'achatCarb', label: 'Achat carburant (coût, déduit de la marge réelle)', value: fcfa(achatCarburant) },
+    { id: 'achatGaz', label: 'Achats gaz (livraisons réceptionnées)', value: fcfa(achatGaz) },
+    { id: 'achatLub', label: 'Achats lubrifiant (livraisons réceptionnées)', value: fcfa(achatLubrifiant) },
+    { id: 'achatSup', label: 'Achats supérette (livraisons réceptionnées)', value: fcfa(achatSuperette) },
+    ...(achatAutre > 0 ? [{ id: 'achatAutre', label: 'Autres achats', value: fcfa(achatAutre) }] : []),
+    { id: 'totalAchats', kind: 'subtotal', label: 'Total achats', value: fcfa(totalAchats) },
+    { id: 'marge', kind: 'total', label: 'MARGE COMMERCIALE (ventes − achats)', value: fcfa(margeCommerciale), color: margeCommerciale < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' },
+  ]
+  const ledgerColumns = [
+    { key: 'label', header: 'Poste', render: r => (
+      <span style={{
+        font: r.kind === 'head' ? '700 12px/1.2 var(--font-ui)' : (r.kind === 'total' || r.kind === 'subtotal') ? 'var(--fw-semibold) 14px/1.3 var(--font-ui)' : '400 14px/1.3 var(--font-ui)',
+        textTransform: r.kind === 'head' ? 'uppercase' : 'none', letterSpacing: r.kind === 'head' ? '.02em' : 'normal',
+        color: r.kind === 'head' ? 'var(--text-muted)' : 'var(--text-body)',
+      }}>{r.label}</span>
+    ) },
+    { key: 'value', header: 'Montant', align: 'right', numeric: true, render: r => (
+      <span style={{ font: (r.kind === 'total' || r.kind === 'subtotal') ? '700 14px/1.3 var(--font-ui)' : '500 14px/1.3 var(--font-ui)', fontVariantNumeric: 'tabular-nums', color: r.color || 'var(--text-body)' }}>{r.value ?? ''}</span>
+    ) },
+  ]
 
   // Seuil de rentabilité en litres : combien de litres de carburant faut-il vendre pour couvrir
   // les charges, les autres pôles restant à leur niveau actuel ? litres × marge = charges −
@@ -278,7 +341,7 @@ export default function Finance() {
   const totAutoPrev = Object.values(autoChargesPrev).reduce((s, v) => s + v, 0)
   const chPprev = charges.filter(c => prevInPeriod(c.mois))
   const autresProduitsPrev = chPprev.filter(c => c.categorie === REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
-  const totManuelPrev = chPprev.filter(c => c.categorie !== REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
+  const totManuelPrev = chPprev.filter(c => c.categorie !== REVENU_CAT && c.categorie !== CAT_IMPOT_RESULTAT).reduce((s, c) => s + N(c.montant), 0)
   const perteMontantPrev = pertes.filter(p => prevInPeriod(p.mois)).reduce((s, p) => s + N(p.perte_montant), 0)
   const rembClientsPrev = rembClientsFor(prevInPeriod)
   const produitsPrev = commCarbPrev + commGazLubPrev + commSuperettePrev + autresProduitsPrev
@@ -426,7 +489,7 @@ export default function Finance() {
     if (locked.has(mois)) { setErr('Ce mois est verrouillé.'); return }
     const [y, m] = mois.split('-').map(Number)
     const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
-    const prevRows = charges.filter(c => c.mois === prev && c.categorie !== REVENU_CAT && c.categorie !== 'PERTE_VENTE_CARBURANT')
+    const prevRows = charges.filter(c => c.mois === prev && c.categorie !== REVENU_CAT && c.categorie !== 'PERTE_VENTE_CARBURANT' && c.categorie !== CAT_IMPOT_RESULTAT)
     if (!prevRows.length) { setErr(`Aucune charge sur ${prev} à reporter.`); return }
     const rows = prevRows.map(c => ({
       station_id: stationId, mois, categorie: c.categorie, montant: c.montant, note: 'proposé (report ' + prev + ')',
@@ -449,6 +512,8 @@ export default function Finance() {
       { poste: 'Charges fixes', montant: Math.round(totManuel) },
       { poste: '= CHARGES', montant: Math.round(totCharges) },
       { poste: 'RÉSULTAT', montant: Math.round(resultat) },
+      { poste: "Impôt sur les résultats" + (impotResultatOverride ? ' (corrigé)' : ' (0,1% du CA)'), montant: -Math.round(impotResultatRetenu) },
+      { poste: 'RÉSULTAT NET (après IS)', montant: Math.round(resultatNetApresIS) },
     ]
     exportRowsToCsv(`compte-resultat-${mois || annee}.csv`, columns, data)
   }
@@ -687,62 +752,23 @@ export default function Finance() {
         <Kpi label="Fonds de roulement" value={fcfa(situationNette)} sub="actif circulant − passif circulant, à ce jour" status={situationNette < 0 ? 'alarm' : 'ok'} />
       </div>
 
-      <Panel title="Compte de résultat" meta={mois || annee} actions={<Button size="sm" onClick={exportCompteResultat}>Exporter (CSV)</Button>}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-          <LedgerHead>Produits (commissions, auto)</LedgerHead>
-          <LedgerRow label="Commission carburant" value={fcfa(commCarb)} />
-          <LedgerRow label="Commission gaz + lubrifiant (prix vente − prix achat)" value={fcfa(commGazLub)} />
-          {commGazPromo > 0 && <LedgerRow label="dont gaz en dépôt-vente (promo)" value={fcfa(commGazPromo)} />}
-          <LedgerRow label={settings.superette_commission_reelle ? 'Commission supérette (prix vente − prix achat)' : `Commission supérette (${settings.taux_superette}%)`} value={fcfa(commSuperette)} />
-          {autresProduits > 0 && <LedgerRow label="Autres produits (saisis)" value={fcfa(autresProduits)} />}
-          <LedgerHead>Charges</LedgerHead>
-          <LedgerRow label="SBEE (auto, depuis dépenses)" value={fcfa(autoCharges.SBEE)} />
-          <LedgerRow label="Carburant / déplacement (auto)" value={fcfa(autoCharges.CARBURANT)} />
-          {rembClients > 0 && <LedgerRow label="Remboursements clients à crédit reçus (annule la charge)" value={`− ${fcfa(rembClients)}`} />}
-          {perteMontant > 0 && <LedgerRow label="Pertes livraison (auto)" value={fcfa(perteMontant)} />}
-          <LedgerRow label="Charges fixes (saisies)" value={fcfa(totManuel)} />
-          {impotsTaxes > 0 && <LedgerRow label="dont impôts et taxes" value={fcfa(impotsTaxes)} />}
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--sp-3)', borderTop: '2px solid var(--border-default)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>
-            <span>RÉSULTAT</span>
-            <span style={{ color: resultat < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' }}>{fcfa(resultat)}</span>
-          </div>
-          <LedgerRow label="Impôt sur les résultats (0,1 % du chiffre d'affaires)" value={`− ${fcfa(impotResultat)}`} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--sp-2)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>
-            <span>RÉSULTAT NET (après IS)</span>
-            <span style={{ color: resultatNetApresIS < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' }}>{fcfa(resultatNetApresIS)}</span>
-          </div>
-        </div>
-        <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 'var(--sp-4)', marginBottom: 0 }}>
-          SBEE, carburant/déplacement et les pertes sur livraisons sont <b>déduits automatiquement</b> (dépenses quotidiennes et livraisons réceptionnées). Les charges fixes se <b>reportent d'un mois sur l'autre</b> (bouton ci-dessous), tout reste modifiable. L'impôt sur les résultats (0,1 % du CA) est calculé automatiquement, jamais saisi.
+      <Panel title="Compte de résultat" meta={mois || annee} actions={<Button size="sm" onClick={exportCompteResultat}>Exporter (CSV)</Button>} flush>
+        <DataTable columns={ledgerColumns} rows={compteResultatRows} />
+        <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+          SBEE, carburant/déplacement et les pertes sur livraisons sont <b>déduits automatiquement</b> (dépenses quotidiennes et livraisons réceptionnées). Les charges fixes se <b>reportent d'un mois sur l'autre</b> (bouton ci-dessous), tout reste modifiable. L'impôt sur les résultats est pré-calculé (0,1 % du CA) mais {impotResultatOverride ? 'a été corrigé pour ce mois' : 'reste modifiable'}.
         </p>
+        {can('manage_finance') && mois && (
+          <div style={{ margin: '0 var(--gutter-panel) var(--sp-4)' }}>
+            <Button size="sm" onClick={() => { setNc({ ...blankCharge(), categorie: CAT_IMPOT_RESULTAT, montant: String(Math.round(impotResultatOverride ? impotResultatRetenu : impotResultat)) }); setTab('charges') }}>
+              {impotResultatOverride ? 'Modifier le montant de l\'impôt' : 'Corriger le montant de l\'impôt'}
+            </Button>
+          </div>
+        )}
       </Panel>
 
-      <Panel title="Détail commercial — achats, ventes, marge" meta={mois || annee}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-          <LedgerHead>Ventes (chiffre d'affaires)</LedgerHead>
-          <LedgerRow label="Ventes carburant (prix de vente, brut)" value={fcfa(venteCarburant)} />
-          <LedgerRow label="Ventes gaz" value={fcfa(venteGaz)} />
-          <LedgerRow label="Ventes lubrifiant" value={fcfa(venteLubrifiant)} />
-          <LedgerRow label="Ventes supérette" value={fcfa(venteSuperette)} />
-          {autresProduits > 0 && <LedgerRow label="Autres produits" value={fcfa(autresProduits)} />}
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 'var(--sp-5)', paddingTop: 'var(--sp-2)', borderTop: '1px solid var(--border-hairline)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)' }}>
-            <span>Chiffre d'affaires</span><span>{fcfa(chiffreAffaires)}</span>
-          </div>
-          <LedgerHead>Achats</LedgerHead>
-          <LedgerRow label="Achat carburant (coût, déduit de la marge réelle)" value={fcfa(achatCarburant)} />
-          <LedgerRow label="Achats gaz (livraisons réceptionnées)" value={fcfa(achatGaz)} />
-          <LedgerRow label="Achats lubrifiant (livraisons réceptionnées)" value={fcfa(achatLubrifiant)} />
-          <LedgerRow label="Achats supérette (livraisons réceptionnées)" value={fcfa(achatSuperette)} />
-          {achatAutre > 0 && <LedgerRow label="Autres achats" value={fcfa(achatAutre)} />}
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 'var(--sp-5)', paddingTop: 'var(--sp-2)', borderTop: '1px solid var(--border-hairline)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)' }}>
-            <span>Total achats</span><span>{fcfa(totalAchats)}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 'var(--sp-3)', borderTop: '2px solid var(--border-default)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)', color: 'var(--text-primary)' }}>
-            <span>MARGE COMMERCIALE (ventes − achats)</span>
-            <span style={{ color: margeCommerciale < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' }}>{fcfa(margeCommerciale)}</span>
-          </div>
-        </div>
-        <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 'var(--sp-4)', marginBottom: 0 }}>
+      <Panel title="Détail commercial — achats, ventes, marge" meta={mois || annee} flush>
+        <DataTable columns={ledgerColumns} rows={detailCommercialRows} />
+        <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
           Vue achat/vente classique, en plus du Compte de résultat par commissions ci-dessus (qui reste la référence pour RÉSULTAT). Les deux marges peuvent différer légèrement : un achat ce mois-ci peut se vendre le mois suivant (décalage de stock non historisé ici).
         </p>
       </Panel>

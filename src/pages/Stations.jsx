@@ -14,7 +14,7 @@ import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { Drawer, DrawerRow } from '../ds/pumpit/components/feedback/Drawer.jsx'
 import { etatVisiteMedicale, etatContrat } from '../lib/formules.js'
-import { today, frDate } from '../lib/format'
+import { today, frDate, fcfa } from '../lib/format'
 
 // Rôles historiques : une seule station (profiles.station_id), non modifiables/supprimables
 // (gelés par trigger côté base — voir migration_v65). Tout autre rôle (directeur/comptable,
@@ -63,7 +63,7 @@ export default function Stations() {
   async function load() {
     const [s, u, st, r, p, rp, ps, ec, fo, bc, em] = await Promise.all([
       supabase.from('stations').select('*').order('id'),
-      supabase.from('profiles').select('id, full_name, role, station_id, approved, contrat_type, contrat_fin, cnss_declare, assurance_maladie_fin, visite_medicale_le, visite_medicale_mois').order('full_name'),
+      supabase.from('profiles').select('id, full_name, role, station_id, approved, contrat_type, contrat_fin, cnss_declare, assurance_maladie_fin, visite_medicale_le, visite_medicale_mois, salaire_mensuel').order('full_name'),
       supabase.from('settings').select('*').eq('id', 1).maybeSingle(),
       supabase.from('roles').select('*').order('created_at'),
       supabase.from('permissions').select('*').order('category').order('label'),
@@ -153,15 +153,18 @@ export default function Stations() {
       contrat_type: u.contrat_type || '', contrat_fin: u.contrat_fin || '',
       cnss_declare: u.cnss_declare == null ? '' : String(u.cnss_declare),
       assurance_maladie_fin: u.assurance_maladie_fin || '', visite_medicale_le: u.visite_medicale_le || '',
-      visite_medicale_mois: u.visite_medicale_mois || 12,
+      visite_medicale_mois: u.visite_medicale_mois || 12, salaire_mensuel: u.salaire_mensuel ?? '',
     })
   }
   async function saveRh() {
     const patch = {
       contrat_type: rhForm.contrat_type || null, contrat_fin: rhForm.contrat_fin || null,
-      cnss_declare: rhForm.cnss_declare === '' ? null : rhForm.cnss_declare === 'true',
+      // Prestataire : jamais soumis à la CNSS — champ sans objet, on ne stocke pas une valeur
+      // qui n'a pas de sens (voir aussi le Select masqué dans le formulaire ci-dessous).
+      cnss_declare: rhForm.contrat_type === 'prestataire' ? null : (rhForm.cnss_declare === '' ? null : rhForm.cnss_declare === 'true'),
       assurance_maladie_fin: rhForm.assurance_maladie_fin || null, visite_medicale_le: rhForm.visite_medicale_le || null,
       visite_medicale_mois: Number(rhForm.visite_medicale_mois) || 12,
+      salaire_mensuel: rhForm.salaire_mensuel === '' ? null : Number(rhForm.salaire_mensuel),
     }
     const { error } = await supabase.from('profiles').update(patch).eq('id', rhDetailId)
     if (error) { fail(error); return }
@@ -457,7 +460,8 @@ export default function Stations() {
             <DrawerRow label="Type de contrat" mono={false} value={CONTRAT_TYPES.find(c => c.value === rhDetail.contrat_type)?.label || '—'} />
             <DrawerRow label="Fin de contrat" mono={false} value={rhDetail.contrat_fin ? frDate(rhDetail.contrat_fin) : '—'}
               status={ctRh?.expire ? 'alarm' : ctRh?.echeanceProche ? 'warn' : undefined} />
-            <DrawerRow label="CNSS déclaré" mono={false} value={rhDetail.cnss_declare == null ? 'Non renseigné' : (rhDetail.cnss_declare ? 'Oui' : 'Non')} />
+            <DrawerRow label="CNSS déclaré" mono={false} value={rhDetail.contrat_type === 'prestataire' ? 'Non applicable (prestataire)' : (rhDetail.cnss_declare == null ? 'Non renseigné' : (rhDetail.cnss_declare ? 'Oui' : 'Non'))} />
+            <DrawerRow label="Salaire mensuel" mono={false} value={rhDetail.salaire_mensuel ? fcfa(rhDetail.salaire_mensuel) : '—'} />
             <DrawerRow label="Assurance maladie — expiration" mono={false} value={rhDetail.assurance_maladie_fin ? frDate(rhDetail.assurance_maladie_fin) : '—'} />
             <DrawerRow label="Dernière visite médicale" mono={false} value={rhDetail.visite_medicale_le ? frDate(rhDetail.visite_medicale_le) : 'Jamais faite'}
               status={vmRh?.enRetard ? 'alarm' : undefined} />
@@ -474,9 +478,16 @@ export default function Stations() {
                   <Input type="date" value={rhForm.contrat_fin} onChange={e => setRhForm(p => ({ ...p, contrat_fin: e.target.value }))} />
                 </Field>
               )}
-              <Field label="CNSS déclaré">
-                <Select value={rhForm.cnss_declare} onChange={e => setRhForm(p => ({ ...p, cnss_declare: e.target.value }))} style={{ width: '100%' }}
-                  options={[{ value: '', label: 'Non renseigné' }, { value: 'true', label: 'Oui' }, { value: 'false', label: 'Non' }]} />
+              {rhForm.contrat_type === 'prestataire' ? (
+                <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Un prestataire n'est pas soumis à la CNSS.</p>
+              ) : (
+                <Field label="CNSS déclaré">
+                  <Select value={rhForm.cnss_declare} onChange={e => setRhForm(p => ({ ...p, cnss_declare: e.target.value }))} style={{ width: '100%' }}
+                    options={[{ value: '', label: 'Non renseigné' }, { value: 'true', label: 'Oui' }, { value: 'false', label: 'Non' }]} />
+                </Field>
+              )}
+              <Field label="Salaire mensuel (F CFA)" hint="Utilisé comme base pour la charge SALAIRES dans Point financier.">
+                <Input type="number" inputMode="decimal" numeric value={rhForm.salaire_mensuel} onChange={e => setRhForm(p => ({ ...p, salaire_mensuel: e.target.value }))} />
               </Field>
               <Field label="Assurance maladie — expiration">
                 <Input type="date" value={rhForm.assurance_maladie_fin} onChange={e => setRhForm(p => ({ ...p, assurance_maladie_fin: e.target.value }))} />
