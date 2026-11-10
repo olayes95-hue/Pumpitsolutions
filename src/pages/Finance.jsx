@@ -233,12 +233,13 @@ export default function Finance() {
   // Détail Achats / Ventes / Marge commerciale / Chiffre d'affaires, à la demande — en plus du
   // Compte de résultat par commissions ci-dessus (celui qui fait foi pour RÉSULTAT, inchangé).
   // Ventes = valeur brute vendue (prix de vente), Achats = coût d'acquisition correspondant.
-  // Carburant : achat déduit de ce qui est déjà fiable (CA brut − commission déjà calculée avec
-  // la marge réelle bon/espèces, migration_v151) plutôt que re-dérivé des prix d'achat courants
-  // (qui ne reflètent pas forcément le prix payé historiquement). Gaz/lubrifiant/supérette :
-  // achat = livraisons réceptionnées sur la période (deliveries.montant, déjà saisi).
+  // Carburant : achat = commandes réceptionnées sur la période (v_pertes_mensuelles.achat_carburant,
+  // migration_v162 — quantité livrée × prix d'achat, même source que les pertes livraison) —
+  // PAS déduit de la marge réelle (vente − commission) comme avant : demande explicite de
+  // l'utilisateur, un résidu théorique n'est pas un achat. Gaz/lubrifiant/supérette : achat =
+  // livraisons réceptionnées sur la période (deliveries.montant, déjà saisi) — même logique.
   const venteCarburant = sum('ca_carburant')
-  const achatCarburant = Math.max(venteCarburant - commCarb, 0)
+  const achatCarburant = pertesP.reduce((s, p) => s + N(p.achat_carburant), 0)
   const deliveriesP = deliveries.filter(d => inPeriod((d.report_date || '').slice(0, 7)))
   const achatGaz = deliveriesP.filter(d => d.type === 'gaz').reduce((s, d) => s + N(d.montant), 0)
   const achatLubrifiant = deliveriesP.filter(d => d.type === 'lubrifiant').reduce((s, d) => s + N(d.montant), 0)
@@ -292,25 +293,13 @@ export default function Finance() {
     ...(autresProduits > 0 ? [{ id: 'autresProduits2', label: 'Autres produits', value: fcfa(autresProduits) }] : []),
     { id: 'ca', kind: 'subtotal', label: 'Chiffre d\'affaires', value: fcfa(chiffreAffaires) },
     { id: 'h2', kind: 'head', label: 'Achats' },
-    { id: 'achatCarb', label: 'Achat carburant (coût, déduit de la marge réelle)', value: fcfa(achatCarburant) },
+    { id: 'achatCarb', label: 'Achat carburant (commandes réceptionnées)', value: fcfa(achatCarburant) },
     { id: 'achatGaz', label: 'Achats gaz (livraisons réceptionnées)', value: fcfa(achatGaz) },
     { id: 'achatLub', label: 'Achats lubrifiant (livraisons réceptionnées)', value: fcfa(achatLubrifiant) },
     { id: 'achatSup', label: 'Achats supérette (livraisons réceptionnées)', value: fcfa(achatSuperette) },
     ...(achatAutre > 0 ? [{ id: 'achatAutre', label: 'Autres achats', value: fcfa(achatAutre) }] : []),
     { id: 'totalAchats', kind: 'subtotal', label: 'Total achats', value: fcfa(totalAchats) },
     { id: 'marge', kind: 'total', label: 'MARGE COMMERCIALE (ventes − achats)', value: fcfa(margeCommerciale), color: margeCommerciale < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' },
-  ]
-  const ledgerColumns = [
-    { key: 'label', header: 'Poste', render: r => (
-      <span style={{
-        font: r.kind === 'head' ? '700 12px/1.2 var(--font-ui)' : (r.kind === 'total' || r.kind === 'subtotal') ? 'var(--fw-semibold) 14px/1.3 var(--font-ui)' : '400 14px/1.3 var(--font-ui)',
-        textTransform: r.kind === 'head' ? 'uppercase' : 'none', letterSpacing: r.kind === 'head' ? '.02em' : 'normal',
-        color: r.kind === 'head' ? 'var(--text-muted)' : 'var(--text-body)',
-      }}>{r.label}</span>
-    ) },
-    { key: 'value', header: 'Montant', align: 'right', numeric: true, render: r => (
-      <span style={{ font: (r.kind === 'total' || r.kind === 'subtotal') ? '700 14px/1.3 var(--font-ui)' : '500 14px/1.3 var(--font-ui)', fontVariantNumeric: 'tabular-nums', color: r.color || 'var(--text-body)' }}>{r.value ?? ''}</span>
-    ) },
   ]
 
   // Seuil de rentabilité en litres : combien de litres de carburant faut-il vendre pour couvrir
@@ -753,7 +742,7 @@ export default function Finance() {
       </div>
 
       <Panel title="Compte de résultat" meta={mois || annee} actions={<Button size="sm" onClick={exportCompteResultat}>Exporter (CSV)</Button>} flush>
-        <DataTable columns={ledgerColumns} rows={compteResultatRows} />
+        <LedgerTable rows={compteResultatRows} />
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
           SBEE, carburant/déplacement et les pertes sur livraisons sont <b>déduits automatiquement</b> (dépenses quotidiennes et livraisons réceptionnées). Les charges fixes se <b>reportent d'un mois sur l'autre</b> (bouton ci-dessous), tout reste modifiable. L'impôt sur les résultats est pré-calculé (0,1 % du CA) mais {impotResultatOverride ? 'a été corrigé pour ce mois' : 'reste modifiable'}.
         </p>
@@ -767,7 +756,7 @@ export default function Finance() {
       </Panel>
 
       <Panel title="Détail commercial — achats, ventes, marge" meta={mois || annee} flush>
-        <DataTable columns={ledgerColumns} rows={detailCommercialRows} />
+        <LedgerTable rows={detailCommercialRows} />
         <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
           Vue achat/vente classique, en plus du Compte de résultat par commissions ci-dessus (qui reste la référence pour RÉSULTAT). Les deux marges peuvent différer légèrement : un achat ce mois-ci peut se vendre le mois suivant (décalage de stock non historisé ici).
         </p>
@@ -991,4 +980,55 @@ function LedgerRow({ label, value }) {
   return <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 'var(--sp-5)', font: '400 15px/1.3 var(--font-ui)', color: 'var(--text-body)' }}>
     <span>{label}</span><span style={{ font: '500 15px/1.25 var(--font-data)', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
   </div>
+}
+
+// Tableau de compte de résultat — pas le DataTable générique (zebra + bordure sur chaque ligne) :
+// un relevé financier a besoin que les en-têtes de section et les totaux SE DÉTACHENT visuellement
+// (espace + filet au-dessus), pas d'un quadrillage uniforme qui noie tout au même niveau. kind :
+// 'head' (en-tête de section, pleine largeur, pas de montant), 'subtotal' (filet fin au-dessus),
+// 'total' (filet marqué, plus grand, gras), undefined = ligne normale.
+function LedgerTable({ rows }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left', padding: '0 var(--gutter-panel) var(--sp-2)', font: '600 12px/1.2 var(--font-ui)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.02em', borderBottom: '1px solid var(--border-default)' }}>Poste</th>
+            <th style={{ textAlign: 'right', padding: '0 var(--gutter-panel) var(--sp-2)', font: '600 12px/1.2 var(--font-ui)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.02em', borderBottom: '1px solid var(--border-default)', width: 180 }}>Montant</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            if (r.kind === 'head') {
+              return (
+                <tr key={r.id}>
+                  <td colSpan={2} style={{
+                    padding: i === 0 ? 'var(--sp-3) var(--gutter-panel) var(--sp-2)' : 'var(--sp-5) var(--gutter-panel) var(--sp-2)',
+                    font: '700 12px/1.2 var(--font-ui)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em',
+                  }}>{r.label}</td>
+                </tr>
+              )
+            }
+            const isTotal = r.kind === 'total'
+            const isSubtotal = r.kind === 'subtotal'
+            return (
+              <tr key={r.id} style={{ borderTop: isTotal ? '2px solid var(--border-default)' : isSubtotal ? '1px solid var(--border-hairline)' : 'none' }}>
+                <td style={{
+                  padding: isTotal ? 'var(--sp-3) var(--gutter-panel) var(--sp-2)' : 'var(--sp-2) var(--gutter-panel)',
+                  font: isTotal ? 'var(--fw-semibold) 15px/1.3 var(--font-ui)' : isSubtotal ? 'var(--fw-semibold) 14px/1.3 var(--font-ui)' : '400 14px/1.4 var(--font-ui)',
+                  color: 'var(--text-body)',
+                }}>{r.label}</td>
+                <td style={{
+                  padding: isTotal ? 'var(--sp-3) var(--gutter-panel) var(--sp-2)' : 'var(--sp-2) var(--gutter-panel)',
+                  textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+                  font: isTotal ? 'var(--fw-semibold) 15px/1.3 var(--font-ui)' : isSubtotal ? 'var(--fw-semibold) 14px/1.3 var(--font-ui)' : '500 14px/1.4 var(--font-ui)',
+                  color: r.color || 'var(--text-body)',
+                }}>{r.value}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
 }
