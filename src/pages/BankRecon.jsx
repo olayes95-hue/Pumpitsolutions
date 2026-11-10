@@ -2,15 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth.jsx'
+import { useOffre } from '../lib/offre.jsx'
 import { useStation } from '../lib/station.jsx'
+import { PhotoImage } from '../lib/photos.jsx'
 import { fcfa, frDate, today } from '../lib/format'
 import { readCsvFile, parseCsv, detectColumns, buildBankLines, categoriser } from '../lib/bankImport'
 import { Panel, PanelEmpty } from '../ds/pumpit/components/core/Panel.jsx'
 import { Button } from '../ds/pumpit/components/core/Button.jsx'
 import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
+import { Tag } from '../ds/pumpit/components/core/Tag.jsx'
 import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
+import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
@@ -39,8 +43,11 @@ const matchFieldOf = (cfg) => cfg.source === 'deposits' ? 'matched_deposit_id' :
 
 export default function BankRecon() {
   const nav = useNavigate()
-  const { session } = useAuth()
+  const { session, can } = useAuth()
+  const { has } = useOffre()
   const { stationId } = useStation()
+  const voitBordereaux = can('view_ocr_check') && has('bordereaux')
+  const voitRapprochement = can('view_bank_recon') && has('finance')
   const [deposits, setDeposits] = useState([])
   const [bank, setBank] = useState([])
   const [charges, setCharges] = useState([])   // Point financier — pour comparer/synchroniser FRAIS_BANCAIRE
@@ -72,6 +79,14 @@ export default function BankRecon() {
   const [pageFlat, setPageFlat] = useState(1)
   const [pageDoublons, setPageDoublons] = useState(1)
   const [pageSize, setPageSize] = useState(PAGE_DEFAULT)
+  // Vérification des bordereaux (déclaré vs photo) — fusionné depuis l'ancien écran séparé
+  // "Bordereaux" : un versement déjà rapproché avec la banque ci-dessous est vérifié
+  // automatiquement (voir l'effet isVersementTab plus bas) ; il ne reste ici que ce que la
+  // banque n'a pas encore confirmé, à vérifier à l'œil.
+  const [bordereauxOnlyUnverified, setBordereauxOnlyUnverified] = useState(true)
+  const [bordereauxSelectedIds, setBordereauxSelectedIds] = useState([])
+  const [pageBordereaux, setPageBordereaux] = useState(1)
+  const [busyVerif, setBusyVerif] = useState(null)
 
   async function load() {
     if (!stationId) return
@@ -262,6 +277,23 @@ export default function BankRecon() {
   }
   async function delDeposit(d) { await supabase.from('deposits').delete().eq('id', d.id); load() }
 
+  // Validation visuelle manuelle (bordereaux) : l'admin/comptable regarde la photo à l'œil et
+  // confirme que le montant déclaré correspond — pour les versements pas encore rapprochés avec
+  // la banque (verifie_source='manuel', par opposition à 'rapprochement' ci-dessus).
+  async function setVerifieBordereau(ids, verifie) {
+    setErr(''); setBusyVerif('batch')
+    try {
+      const patch = verifie
+        ? { verifie: true, verifie_par: session.user.id, verifie_at: new Date().toISOString(), verifie_source: 'manuel' }
+        : { verifie: false, verifie_par: null, verifie_at: null, verifie_source: null }
+      const { error } = await supabase.from('deposits').update(patch).in('id', ids)
+      if (error) throw error
+      setBordereauxSelectedIds(p => p.filter(id => !ids.includes(id)))
+      await load()
+    } catch (e) { setErr("Échec de l'enregistrement : " + (e.message || e)) }
+    finally { setBusyVerif(null) }
+  }
+
   // Déclarations doublons : le gérant a pu valider deux fois le même versement (même jour,
   // même montant) — on les regroupe pour que l'admin vérifie et supprime le(s) doublon(s).
   const doublons = useMemo(() => {
@@ -332,6 +364,28 @@ export default function BankRecon() {
     { key: 'manuel', header: '', render: m => m.bank[matchFieldOf(matchCfg)] ? <Button size="sm" onClick={() => dissocier(m.bank)}>Dissocier</Button> : null },
   ]
 
+  const bordereauxRows = useMemo(() => deposits.filter(d => d.photo_path), [deposits])
+  const bordereauxVerifies = bordereauxRows.filter(r => r.verifie).length
+  const bordereauxShown = bordereauxOnlyUnverified ? bordereauxRows.filter(r => !r.verifie) : bordereauxRows
+  const bordereauxColumns = [
+    { key: 'photo', header: 'Photo', render: r => <PhotoImage path={r.photo_path} size={64} /> },
+    { key: 'date', header: 'Date', render: r => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span>{frDate(r.deposit_date || r.report_date)}</span>
+        <Tag>{r.pole}</Tag>
+      </div>
+    ) },
+    { key: 'montant', header: 'Déclaré', numeric: true, align: 'right', render: r => fcfa(r.montant) },
+    { key: 'verifie', header: 'Vérifié', render: r => r.verifie
+      ? <Badge tone="ok">✓ {r.verifie_source === 'rapprochement' ? 'Rapprochement bancaire' : 'À l\'œil'}{r.verifie_at ? ` — ${frDate(r.verifie_at.slice(0, 10))}` : ''}</Badge>
+      : <Badge tone="idle">Non vérifié</Badge> },
+    { key: 'actions', header: '', align: 'right', render: r => (
+      <Button size="sm" tone={r.verifie ? 'outline' : 'primary'} disabled={busyVerif === 'batch'}
+        onClick={() => setVerifieBordereau([r.id], !r.verifie)}>{r.verifie ? 'Dévérifier' : 'Vérifier'}</Button>
+    ) },
+  ]
+  const bordereauxPage = paginate(bordereauxShown, pageBordereaux)
+
   const matchedPage = paginate(recon.matched, pageMatched)
   const unBankPage = paginate(recon.unmatchedBank, pageUnBank)
   const unTargetPage = paginate(recon.unmatchedTarget, pageUnDep)
@@ -379,6 +433,7 @@ export default function BankRecon() {
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
       {err && <AlertBanner tone="alarm" title="Erreur">{err}</AlertBanner>}
 
+      {voitRapprochement && <>
       <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
         <Button tone={showImport ? 'dark' : 'neutral'} icon="upload" onClick={() => { setShowImport(v => !v); setShowManual(false) }}>Importer un relevé (CSV)</Button>
         <Button tone={showManual ? 'dark' : 'neutral'} icon="plus" onClick={() => { setShowManual(v => !v); setShowImport(false) }}>Saisir une ligne manuellement</Button>
@@ -476,7 +531,41 @@ export default function BankRecon() {
           {pager(doublonPage, setPageDoublons)}
         </Panel>
       )}
+      </>}
 
+      {voitBordereaux && (
+        <Panel title="Vérification des bordereaux (déclaré vs photo)" flush>
+          <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+            Un versement déjà rapproché avec la banque (ci-dessous) est vérifié automatiquement. Il ne reste ici que ce que la banque n'a pas encore confirmé — regardez la photo et comparez au montant déclaré. Sélectionnez plusieurs lignes pour les valider d'un coup.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-3)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+            <Checkbox label="N'afficher que les non vérifiés" checked={bordereauxOnlyUnverified} onChange={v => { setBordereauxOnlyUnverified(v); setPageBordereaux(1) }} />
+            {bordereauxSelectedIds.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+                <span style={{ font: '400 14px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>{bordereauxSelectedIds.length} sélectionné(s)</span>
+                <Button size="sm" tone="dark" disabled={busyVerif === 'batch'} onClick={() => setVerifieBordereau(bordereauxSelectedIds, true)}>
+                  {busyVerif === 'batch' ? 'Enregistrement…' : `Valider la sélection (${bordereauxSelectedIds.length})`}
+                </Button>
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)', margin: '0 var(--gutter-panel) var(--sp-4)' }}>
+            <Kpi label="Bordereaux avec photo" value={bordereauxRows.length} />
+            <Kpi label="Vérifiés" value={bordereauxVerifies} status={bordereauxVerifies === bordereauxRows.length && bordereauxRows.length > 0 ? 'ok' : undefined} />
+            <Kpi label="Restant à vérifier" value={bordereauxRows.length - bordereauxVerifies} status={bordereauxRows.length - bordereauxVerifies > 0 ? 'alarm' : 'ok'} />
+          </div>
+          <div style={{ marginTop: 'var(--sp-4)' }}>
+            {bordereauxRows.length
+              ? <>
+                  <DataTable columns={bordereauxColumns} rows={bordereauxPage.rows} selectable selectedIds={bordereauxSelectedIds} onSelectionChange={setBordereauxSelectedIds} />
+                  {pager(bordereauxPage, setPageBordereaux)}
+                </>
+              : <PanelEmpty icon="camera" label="Aucun bordereau avec photo pour cette station" />}
+          </div>
+        </Panel>
+      )}
+
+      {voitRapprochement && <>
       <Panel title="Comparaison avec Point financier" flush>
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
           Frais bancaires du relevé réel comparés à la charge « Frais bancaire » du Point financier, pour le mois choisi (un seul mois à la fois — pas une sélection multiple). Indépendant de la catégorie sélectionnée ci-dessous.
@@ -555,6 +644,7 @@ export default function BankRecon() {
           {pager(flatPage, setPageFlat)}
         </Panel>
       )}
+      </>}
     </div>
   )
 }

@@ -28,6 +28,7 @@ export default function DemandesExplication() {
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [detailId, setDetailId] = useState(null)
   const [decisionTxt, setDecisionTxt] = useState('')
+  const [showForm, setShowForm] = useState(false)
 
   async function load() {
     const [p, d] = await Promise.all([
@@ -49,7 +50,7 @@ export default function DemandesExplication() {
       station_id: employe?.station_id, employe_id: f.employe_id, motif: f.motif.trim(), date_limite: f.date_limite || null,
     })
     if (error) { setErr(error.message); return }
-    setF({ employe_id: '', motif: '', date_limite: '' }); flash('Demande envoyée'); load()
+    setF({ employe_id: '', motif: '', date_limite: '' }); setShowForm(false); flash('Demande envoyée'); load()
   }
   async function marquerSansReponse(d) {
     const { error } = await supabase.from('demandes_explication').update({ statut: 'sans_reponse' }).eq('id', d.id)
@@ -83,12 +84,20 @@ export default function DemandesExplication() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
+      {err && <AlertBanner tone="alarm" title="Erreur">{err}</AlertBanner>}
+      {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
+
+      <div>
+        <Button tone={showForm ? 'dark' : 'primary'} icon="plus" onClick={() => setShowForm(v => !v)}>
+          {showForm ? 'Annuler' : 'Nouvelle demande d\'explication'}
+        </Button>
+      </div>
+
+      {showForm && (
       <Panel title="Demander une explication">
         <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
           Pour tout motif (manque de caisse, retard, absence...) — l'employé verra la demande et pourra y répondre directement dans l'application.
         </p>
-        {err && <AlertBanner tone="alarm" title="Erreur" style={{ marginBottom: 'var(--sp-4)' }}>{err}</AlertBanner>}
-        {msg && <AlertBanner tone="ok" title="Succès" style={{ marginBottom: 'var(--sp-4)' }}>{msg}</AlertBanner>}
         <form onSubmit={creer} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
           <Field label="Employé" required>
             <Select value={f.employe_id} onChange={e => setF(p => ({ ...p, employe_id: e.target.value }))} style={{ width: '100%' }}
@@ -99,6 +108,7 @@ export default function DemandesExplication() {
           <Button type="submit" tone="primary" style={{ alignSelf: 'flex-start' }}>Envoyer la demande</Button>
         </form>
       </Panel>
+      )}
 
       {aSuivre > 0 && (
         <AlertBanner tone="warn" title={`${aSuivre} demande${aSuivre > 1 ? 's' : ''} répondue${aSuivre > 1 ? 's' : ''} en attente de clôture`}>

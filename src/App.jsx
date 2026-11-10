@@ -27,7 +27,6 @@ const Stations = lazy(() => import('./pages/Stations.jsx'))
 const BankRecon = lazy(() => import('./pages/BankRecon.jsx'))
 const Orders = lazy(() => import('./pages/Orders.jsx'))
 const Inspections = lazy(() => import('./pages/Inspections.jsx'))
-const OcrCheck = lazy(() => import('./pages/OcrCheck.jsx'))
 const AuditLog = lazy(() => import('./pages/AuditLog.jsx'))
 const Finance = lazy(() => import('./pages/Finance.jsx'))
 const Clients = lazy(() => import('./pages/Clients.jsx'))
@@ -100,8 +99,7 @@ function useSpaces() {
     ] },
     { key: 'finance', label: 'Finance', icon: 'wallet', items: [
       can('view_finance') && has('finance') && { to: '/finance', icon: 'chart-column', label: 'Point financier' },
-      can('view_bank_recon') && has('finance') && { to: '/rapprochement', icon: 'landmark', label: 'Rapprochement' },
-      can('view_ocr_check') && has('bordereaux') && { to: '/verif-photos', icon: 'camera', label: 'Bordereaux' },
+      ((can('view_bank_recon') && has('finance')) || (can('view_ocr_check') && has('bordereaux'))) && { to: '/rapprochement', icon: 'landmark', label: 'Rapprochement & bordereaux' },
       can('manage_finance') && has('clients_credit') && { to: '/clients', icon: 'users', label: 'Clients à crédit' },
     ] },
     { key: 'reglages', label: 'Réglages', icon: 'settings', items: [
@@ -319,9 +317,9 @@ function AppRoutes() {
           <Route path="/produits" element={guard(can('manage_products') || can('view_price_history') || can('propose_prices'), <Products />)} />
           <Route path="/fournisseurs" element={guard(can('manage_suppliers'), <Suppliers />)} />
           <Route path="/finance" element={guard(can('view_finance') && has('finance'), <Finance />)} />
-          <Route path="/rapprochement" element={guard(can('view_bank_recon') && has('finance'), <BankRecon />)} />
+          <Route path="/rapprochement" element={guard((can('view_bank_recon') && has('finance')) || (can('view_ocr_check') && has('bordereaux')), <BankRecon />)} />
           <Route path="/clients" element={guard(can('manage_finance') && has('clients_credit'), <Clients />)} />
-          <Route path="/verif-photos" element={guard(can('view_ocr_check') && has('bordereaux'), <OcrCheck />)} />
+          <Route path="/verif-photos" element={<Navigate to="/rapprochement" />} />
           <Route path="/stations" element={guard(can('manage_stations_config') || can('manage_team'), <Stations />)} />
           <Route path="/entreprise" element={guard(org || can('view_finance'), <Entreprise />)} />
           <Route path="/audit" element={guard(can('view_audit_log') && has('audit'), <AuditLog />)} />
