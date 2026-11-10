@@ -140,6 +140,10 @@ export default function Clients() {
   const optionsFormule = formules.filter(f => f.actif !== false).map(f => ({ value: f.key, label: libelleOffre(f) }))
   const optionsFiche = formules.filter(f => f.actif !== false || f.key === fiche?.formule).map(f => ({ value: f.key, label: libelleOffre(f) }))
   const essaiJours = Number(emetteur.essai_jours ?? 30)
+  // Plafond d'essai : 120 jours à partir d'aujourd'hui, pour éviter une date fixée trop loin
+  // par erreur — s'applique à la fois au réglage global (Reglages.jsx) et à l'édition manuelle
+  // de la date d'un client ici.
+  const essaiMaxDate = (() => { const d = new Date(); d.setDate(d.getDate() + 120); return d.toISOString().slice(0, 10) })()
   // Le prix d'une offre s'entend par station et par mois : le montant mensuel d'un client
   // est la somme des offres de ses stations.
   const stationsDe = (id) => stations.filter(s => s.organisation_id === id)
@@ -254,8 +258,13 @@ export default function Clients() {
             <div style={bloc}>
               <h3 style={titre}>Essai gratuit</h3>
               <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
-                <Field label="Essai jusqu'au"><Input type="date" value={fiche.essai_jusqu_au || ''} onChange={e => setFiche({ ...fiche, essai_jusqu_au: e.target.value || null })} /></Field>
-                <Button onClick={() => majClient({ essai_jusqu_au: fiche.essai_jusqu_au || null }, fiche.essai_jusqu_au ? `Essai fixé jusqu'au ${frDate(fiche.essai_jusqu_au)}.` : 'Essai retiré.')}>Enregistrer la date</Button>
+                <Field label="Essai jusqu'au" hint={`Maximum ${frDate(essaiMaxDate)} (120 jours)`}>
+                  <Input type="date" max={essaiMaxDate} value={fiche.essai_jusqu_au || ''} onChange={e => setFiche({ ...fiche, essai_jusqu_au: e.target.value || null })} />
+                </Field>
+                <Button onClick={() => {
+                  if (fiche.essai_jusqu_au && fiche.essai_jusqu_au > essaiMaxDate) { fail(`La date d'essai ne peut pas dépasser 120 jours (max ${frDate(essaiMaxDate)}).`); return }
+                  majClient({ essai_jusqu_au: fiche.essai_jusqu_au || null }, fiche.essai_jusqu_au ? `Essai fixé jusqu'au ${frDate(fiche.essai_jusqu_au)}.` : 'Essai retiré.')
+                }}>Enregistrer la date</Button>
                 {fiche.essai_jusqu_au && <Button tone="ghost" onClick={() => majClient({ essai_jusqu_au: null }, 'Essai retiré : le client suit maintenant le régime normal.')}>Retirer l'essai</Button>}
               </div>
               <p style={{ font: '400 13px/1.45 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>

@@ -104,10 +104,10 @@ export default function Reglages() {
       </Panel>
 
       <Panel title="Période d'essai gratuit">
-        <form onSubmit={e => { e.preventDefault(); const j = nombre(p.essai_jours); if (j === null || j < 0 || j > 365) { setErr('Durée d\'essai invalide (0 à 365 jours).'); return } enregistrer({ essai_jours: Math.round(j), essai_formule: p.essai_formule || null, suspendre_fin_essai: p.suspendre_fin_essai !== false }, 'Réglages de l\'essai enregistrés.') }}
+        <form onSubmit={e => { e.preventDefault(); const j = nombre(p.essai_jours); if (j === null || j < 0 || j > 120) { setErr('Durée d\'essai invalide (0 à 120 jours).'); return } enregistrer({ essai_jours: Math.round(j), essai_formule: p.essai_formule || null, suspendre_fin_essai: p.suspendre_fin_essai !== false }, 'Réglages de l\'essai enregistrés.') }}
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
           <div style={grille}>
-            <Field label="Durée de l'essai" hint="0 pour ne pas proposer d'essai."><Input numeric inputMode="numeric" suffix="jours" value={p.essai_jours ?? 30} onChange={set('essai_jours')} /></Field>
+            <Field label="Durée de l'essai" hint="0 pour ne pas proposer d'essai, 120 jours maximum."><Input numeric inputMode="numeric" suffix="jours" value={p.essai_jours ?? 30} onChange={set('essai_jours')} /></Field>
             <Field label="Fonctions pendant l'essai" hint="Ce que le client peut utiliser avant de payer.">
               <Select value={p.essai_formule || ''} onChange={set('essai_formule')} style={{ width: '100%' }}
                 options={[{ value: '', label: 'Celles de l\'offre choisie' }, ...formules.map(f => ({ value: f.key, label: `Celles de l'offre ${f.label}` }))]} />
