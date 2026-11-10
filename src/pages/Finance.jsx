@@ -20,6 +20,7 @@ import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
 import RapportSheet from '../components/RapportSheet.jsx'
+import DettesPersonnel from '../components/DettesPersonnel.jsx'
 
 const MOIS_LABEL_PLEIN = { '01': 'Janvier', '02': 'Février', '03': 'Mars', '04': 'Avril', '05': 'Mai', '06': 'Juin', '07': 'Juillet', '08': 'Août', '09': 'Septembre', '10': 'Octobre', '11': 'Novembre', '12': 'Décembre' }
 
@@ -765,6 +766,8 @@ export default function Finance() {
       </>}
 
       {tab === 'controles' && <>
+      <DettesPersonnel stationId={stationId} mois={mois} />
+
       <Panel title="Pertes sur livraisons" meta={mois || annee} status={perteNaMontant > 0 ? 'alarm' : 'ok'}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
           <Kpi label="Pertes totales" value={fcfa(perteMontant)} sub="comptées en charge, seuil inclus" />

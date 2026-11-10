@@ -12,18 +12,22 @@ import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Drawer, DrawerRow } from '../ds/pumpit/components/feedback/Drawer.jsx'
 
-const STATUT_BADGE = { envoyee: { tone: 'warn', label: 'En attente de réponse' }, repondue: { tone: 'ok', label: 'Répondue' }, sans_reponse: { tone: 'alarm', label: 'Sans réponse' } }
+const STATUT_BADGE = { envoyee: { tone: 'warn', label: 'En attente de réponse' }, repondue: { tone: 'warn', label: 'Répondue — à clôturer' }, sans_reponse: { tone: 'alarm', label: 'Sans réponse — à clôturer' }, cloturee: { tone: 'idle', label: 'Clôturée' } }
 
 // Autonome (pas liée à une dette_personnel précise) : l'admin/manage_team crée une demande pour
 // n'importe quel employé et motif ; l'employé répond lui-même (voir la bannière dans Submit.jsx).
+// Cycle complet (demande utilisateur) : envoyée → répondue/sans réponse → CLÔTURÉE — une demande
+// répondue n'est pas terminée tant que la direction n'a pas statué (décision + clôture explicite),
+// pour ne jamais laisser un dossier ouvert sans suite.
 export default function DemandesExplication() {
-  const { can, isAdmin } = useAuth()
+  const { can, isAdmin, session } = useAuth()
   const peutGerer = isAdmin || can('manage_team')
   const [profiles, setProfiles] = useState([])
   const [demandes, setDemandes] = useState([])
   const [f, setF] = useState({ employe_id: '', motif: '', date_limite: '' })
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [detailId, setDetailId] = useState(null)
+  const [decisionTxt, setDecisionTxt] = useState('')
 
   async function load() {
     const [p, d] = await Promise.all([
@@ -52,9 +56,17 @@ export default function DemandesExplication() {
     if (error) { setErr(error.message); return }
     load()
   }
+  async function cloturer(d) {
+    const { error } = await supabase.from('demandes_explication').update({
+      statut: 'cloturee', decision: decisionTxt.trim() || null, decided_at: new Date().toISOString(), decided_by: session?.user?.id,
+    }).eq('id', d.id)
+    if (error) { setErr(error.message); return }
+    setDecisionTxt(''); flash('Demande clôturée'); load()
+  }
 
   if (!peutGerer) return null
   const detail = demandes.find(d => d.id === detailId)
+  const aSuivre = demandes.filter(d => d.statut === 'repondue' || d.statut === 'sans_reponse').length
 
   const columns = [
     { key: 'employe', header: 'Employé', render: d => employeNom(d.employe_id) },
@@ -88,12 +100,18 @@ export default function DemandesExplication() {
         </form>
       </Panel>
 
+      {aSuivre > 0 && (
+        <AlertBanner tone="warn" title={`${aSuivre} demande${aSuivre > 1 ? 's' : ''} répondue${aSuivre > 1 ? 's' : ''} en attente de clôture`}>
+          Une demande n'est close que lorsque la direction a statué — ouvrez-la (« Voir ») pour enregistrer la décision et la clôturer.
+        </AlertBanner>
+      )}
+
       <Panel title="Demandes d'explication" meta={`${demandes.length}`} flush>
         {demandes.length ? <DataTable columns={columns} rows={demandes} /> : <PanelEmpty icon="file-pen-line" label="Aucune demande" />}
       </Panel>
 
-      <Drawer open={!!detailId} onClose={() => setDetailId(null)} title={detail ? employeNom(detail.employe_id) : ''}
-        meta={detail ? STATUT_BADGE[detail.statut]?.label : ''} status={detail?.statut === 'repondue' ? 'ok' : detail?.statut === 'sans_reponse' ? 'alarm' : 'warn'}>
+      <Drawer open={!!detailId} onClose={() => { setDetailId(null); setDecisionTxt('') }} title={detail ? employeNom(detail.employe_id) : ''}
+        meta={detail ? STATUT_BADGE[detail.statut]?.label : ''} status={detail?.statut === 'cloturee' ? 'ok' : detail?.statut === 'sans_reponse' ? 'alarm' : 'warn'}>
         {detail && <>
           <DrawerRow label="Motif" mono={false} value={detail.motif} />
           {detail.date_limite && <DrawerRow label="Date limite" mono={false} value={frDate(detail.date_limite)} />}
@@ -102,6 +120,22 @@ export default function DemandesExplication() {
           {detail.reponse
             ? <p style={{ font: '400 14px/1.5 var(--font-ui)', color: 'var(--text-body)' }}>{detail.reponse}</p>
             : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Pas encore de réponse.</p>}
+
+          {detail.statut === 'cloturee' ? (
+            <>
+              <p style={{ font: '700 13px/1.3 var(--font-ui)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.02em', margin: 'var(--sp-5) 0 var(--sp-2)' }}>Décision</p>
+              <p style={{ font: '400 14px/1.5 var(--font-ui)', color: 'var(--text-body)' }}>{detail.decision || '—'}</p>
+              <p style={{ font: '400 12px/1.4 var(--font-ui)', color: 'var(--text-muted)' }}>Clôturée le {frDate(detail.decided_at?.slice(0, 10))}</p>
+            </>
+          ) : (detail.statut === 'repondue' || detail.statut === 'sans_reponse') && (
+            <>
+              <p style={{ font: '700 13px/1.3 var(--font-ui)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.02em', margin: 'var(--sp-5) 0 var(--sp-2)' }}>Clôturer le dossier</p>
+              <Field label="Décision (justifié, avertissement, sanction…)">
+                <Input value={decisionTxt} onChange={e => setDecisionTxt(e.target.value)} placeholder="ex : justifié, classé sans suite" />
+              </Field>
+              <Button tone="primary" style={{ marginTop: 'var(--sp-3)' }} onClick={() => cloturer(detail)}>Clôturer</Button>
+            </>
+          )}
         </>}
       </Drawer>
     </div>

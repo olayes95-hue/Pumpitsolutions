@@ -13,8 +13,8 @@ import { Badge } from '../ds/pumpit/components/core/Badge.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { Drawer, DrawerRow } from '../ds/pumpit/components/feedback/Drawer.jsx'
-import DettesPersonnel from '../components/DettesPersonnel.jsx'
 import DemandesExplication from '../components/DemandesExplication.jsx'
+import CongesAbsences from '../components/CongesAbsences.jsx'
 import { etatVisiteMedicale, etatContrat } from '../lib/formules.js'
 import { today, frDate } from '../lib/format'
 
@@ -425,8 +425,8 @@ export default function Stations() {
             </div>
           </Panel>
         )}
-        {has('rh_leger') && isAdmin && <DettesPersonnel />}
         {has('rh_leger') && <DemandesExplication />}
+        {has('rh_leger') && <CongesAbsences />}
         {peutGererEquipe && pendingUsers.length > 0 && (
           <Panel title="Comptes en attente de validation" meta={`${pendingUsers.length}`} status="alarm" flush>
             <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
