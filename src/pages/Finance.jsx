@@ -65,6 +65,7 @@ export default function Finance() {
   const [clientRemb, setClientRemb] = useState([])      // client_remboursements — annule la charge le mois où le remboursement est reçu
   const [stockCuve, setStockCuve] = useState({ ess_stock: 0, gas_stock: 0 })
   const [commandesEnCours, setCommandesEnCours] = useState([])   // fuel_orders lancée/partielle
+  const [commandesCarburant, setCommandesCarburant] = useState([])   // fuel_orders carburant, tout statut réellement passé (référence "commandé", voir achatCarburantCommande)
   const [receptionsTotaux, setReceptionsTotaux] = useState({})  // {order_id: quantite_recue_total}
   const [settings, setSettings] = useState({ taux_gaz: 8, taux_superette: 8 })
   const [profiles, setProfiles] = useState({})     // {id: full_name} — traçabilité
@@ -93,7 +94,7 @@ export default function Finance() {
 
   async function load() {
     if (!stationId) return
-    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc, crm, dl] = await Promise.all([
+    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc, crm, dl, fc] = await Promise.all([
       supabase.from('v_ventes_mensuelles').select('*').eq('station_id', stationId).order('mois'),
       supabase.from('charges').select('*').eq('station_id', stationId),
       supabase.from('expenses').select('report_date,categorie,montant').eq('station_id', stationId),
@@ -115,6 +116,9 @@ export default function Finance() {
       supabase.from('v_solde_client').select('solde_du').eq('station_id', stationId),
       supabase.from('client_remboursements').select('report_date,montant').eq('station_id', stationId),
       supabase.from('deliveries').select('report_date,type,montant').eq('station_id', stationId),
+      // Référence "commandé" (voir achatCarburantCommande) — tout statut réellement passé
+      // (hors simple proposition interne non encore lancée, et hors annulée).
+      supabase.from('fuel_orders').select('report_date,quantite_commandee,prix_achat,categorie,statut').eq('station_id', stationId).in('statut', ['lancee', 'partielle', 'recue']),
     ])
     setVentes(v.data || []); setCharges(c.data || []); setExpenses(e.data || []); setCommissionReelle(cr.data || []); setCommissionSuperette(cs.data || [])
     if (st.data) setSettings(st.data)
@@ -133,6 +137,7 @@ export default function Finance() {
     setSoldeClients((sc.data || []).reduce((s, x) => s + N(x.solde_du), 0))
     setClientRemb(crm.data || [])
     setDeliveries(dl.data || [])
+    setCommandesCarburant(fc.data || [])
   }
   useEffect(() => { load() }, [stationId])
   // Rafraîchit automatiquement si une saisie change pendant que la page est ouverte (ex. une
@@ -240,6 +245,12 @@ export default function Finance() {
   // livraisons réceptionnées sur la période (deliveries.montant, déjà saisi) — même logique.
   const venteCarburant = sum('ca_carburant')
   const achatCarburant = pertesP.reduce((s, p) => s + N(p.achat_carburant), 0)
+  // Référence "commandé" (demande utilisateur) — même si une commande n'est pas encore reçue,
+  // la somme engagée ce mois-ci. Purement informatif : n'entre PAS dans totalAchats/marge (sinon
+  // double compte avec "Commandes en cours", actif du Bilan pour ce qui n'est pas encore reçu).
+  const achatCarburantCommande = commandesCarburant
+    .filter(o => inPeriod((o.report_date || '').slice(0, 7)) && (o.categorie || 'carburant') === 'carburant')
+    .reduce((s, o) => s + N(o.quantite_commandee) * N(o.prix_achat), 0)
   const deliveriesP = deliveries.filter(d => inPeriod((d.report_date || '').slice(0, 7)))
   const achatGaz = deliveriesP.filter(d => d.type === 'gaz').reduce((s, d) => s + N(d.montant), 0)
   const achatLubrifiant = deliveriesP.filter(d => d.type === 'lubrifiant').reduce((s, d) => s + N(d.montant), 0)
@@ -294,6 +305,7 @@ export default function Finance() {
     { id: 'ca', kind: 'subtotal', label: 'Chiffre d\'affaires', value: fcfa(chiffreAffaires) },
     { id: 'h2', kind: 'head', label: 'Achats' },
     { id: 'achatCarb', label: 'Achat carburant (commandes réceptionnées)', value: fcfa(achatCarburant) },
+    { id: 'achatCarbCommande', label: 'dont commandé sur la période (référence, inclut le non encore reçu)', value: fcfa(achatCarburantCommande) },
     { id: 'achatGaz', label: 'Achats gaz (livraisons réceptionnées)', value: fcfa(achatGaz) },
     { id: 'achatLub', label: 'Achats lubrifiant (livraisons réceptionnées)', value: fcfa(achatLubrifiant) },
     { id: 'achatSup', label: 'Achats supérette (livraisons réceptionnées)', value: fcfa(achatSuperette) },
