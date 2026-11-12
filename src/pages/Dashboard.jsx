@@ -376,12 +376,12 @@ export default function Dashboard() {
               {showGazDetail && (
                 <div style={{ marginTop: 'var(--sp-3)' }}>
                   <DataTable columns={[
-                    { key: 'taille', header: 'Taille', render: g => `${g.taille} kg` },
+                    { key: 'taille', header: 'Taille', render: g => g.taille },
                     { key: 'pleines', header: 'Pleines', numeric: true, align: 'right', render: g => Math.round(N(g.pleines_stock)) },
                     { key: 'vides', header: 'Vides', numeric: true, align: 'right', render: g => N(g.vides_stock) },
                     { key: 'consignees', header: 'Consignées en circulation', numeric: true, align: 'right', render: g => N(g.consignees_circulation) },
                     { key: 'consigne_f', header: 'Consigne nette (F)', numeric: true, align: 'right', render: g => fcfa(g.consigne_nette_f) },
-                  ]} rows={[...gazEtats].sort((a, b) => N(a.taille) - N(b.taille)).map(g => ({ ...g, id: g.taille }))} />
+                  ]} rows={[...gazEtats].sort((a, b) => parseInt(a.taille) - parseInt(b.taille)).map(g => ({ ...g, id: g.taille }))} />
                 </div>
               )}
             </div>
