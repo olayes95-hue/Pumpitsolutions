@@ -389,12 +389,14 @@ export default function Dashboard() {
         </>)}
       </Panel>
 
-      <Panel bodyStyle={{ display: 'none' }} actions={<>
-        <PeriodPicker multiple={false} years={year === 'all' ? [] : [year]} months={month === 'all' ? [] : [month]}
-          setYears={ys => setYear(ys[0] || 'all')} setMonths={ms => setMonth(ms[0] || 'all')} availableYears={years} />
-        {(year !== 'all' || month !== 'all') && <Button size="sm" onClick={() => { setYear('all'); setMonth('all') }}>Réinitialiser</Button>}
-        <Tag>{sum('jours')} jour(s)</Tag>
-      </>} />
+      <Panel bodyStyle={{ display: 'none' }} actions={
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-3)', paddingBottom: 'var(--gutter-panel)' }}>
+          <PeriodPicker multiple={false} years={year === 'all' ? [] : [year]} months={month === 'all' ? [] : [month]}
+            setYears={ys => setYear(ys[0] || 'all')} setMonths={ms => setMonth(ms[0] || 'all')} availableYears={years} />
+          {(year !== 'all' || month !== 'all') && <Button size="sm" onClick={() => { setYear('all'); setMonth('all') }}>Réinitialiser</Button>}
+          <Tag>{sum('jours')} jour(s)</Tag>
+        </div>
+      } />
 
       {/* Bandeau financier principal : les 4 chiffres qui comptent le plus, tout de suite visibles. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
