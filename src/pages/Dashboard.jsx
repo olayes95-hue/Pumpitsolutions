@@ -53,6 +53,7 @@ export default function Dashboard() {
   const [year, setYear] = useState(today.slice(0, 4))
   const [month, setMonth] = useState(today.slice(5, 7))
   const [refreshedAt, setRefreshedAt] = useState('')
+  const [showGazDetail, setShowGazDetail] = useState(false)
   const [openRecon, setOpenRecon] = useState(false)
   const [polePeriod, setPolePeriod] = useState({ dr: [], recon: [], exp: [], sup: [], lub: [] })   // brut, pour manque-à-verser et détail par pôle/catégorie sur la période sélectionnée
   const [charges, setCharges] = useState([])   // table "charges" du Point financier (Finance.jsx) — loyer, salaires, impôts...
@@ -369,14 +370,20 @@ export default function Dashboard() {
           </div>
           {gazEtats.length > 0 && (
             <div style={{ marginTop: 'var(--sp-5)' }}>
-              <p style={{ font: 'var(--fw-semibold) 13px/1.25 var(--font-ui)', color: 'var(--text-muted)', margin: '0 0 var(--sp-2)' }}>Détail du stock de gaz par taille</p>
-              <DataTable columns={[
-                { key: 'taille', header: 'Taille', render: g => `${g.taille} kg` },
-                { key: 'pleines', header: 'Pleines', numeric: true, align: 'right', render: g => Math.round(N(g.pleines_stock)) },
-                { key: 'vides', header: 'Vides', numeric: true, align: 'right', render: g => N(g.vides_stock) },
-                { key: 'consignees', header: 'Consignées en circulation', numeric: true, align: 'right', render: g => N(g.consignees_circulation) },
-                { key: 'consigne_f', header: 'Consigne nette (F)', numeric: true, align: 'right', render: g => fcfa(g.consigne_nette_f) },
-              ]} rows={[...gazEtats].sort((a, b) => N(a.taille) - N(b.taille)).map(g => ({ ...g, id: g.taille }))} />
+              <Button size="sm" onClick={() => setShowGazDetail(v => !v)}>
+                {showGazDetail ? 'Masquer le détail par taille' : 'Voir le détail du stock de gaz par taille'}
+              </Button>
+              {showGazDetail && (
+                <div style={{ marginTop: 'var(--sp-3)' }}>
+                  <DataTable columns={[
+                    { key: 'taille', header: 'Taille', render: g => `${g.taille} kg` },
+                    { key: 'pleines', header: 'Pleines', numeric: true, align: 'right', render: g => Math.round(N(g.pleines_stock)) },
+                    { key: 'vides', header: 'Vides', numeric: true, align: 'right', render: g => N(g.vides_stock) },
+                    { key: 'consignees', header: 'Consignées en circulation', numeric: true, align: 'right', render: g => N(g.consignees_circulation) },
+                    { key: 'consigne_f', header: 'Consigne nette (F)', numeric: true, align: 'right', render: g => fcfa(g.consigne_nette_f) },
+                  ]} rows={[...gazEtats].sort((a, b) => N(a.taille) - N(b.taille)).map(g => ({ ...g, id: g.taille }))} />
+                </div>
+              )}
             </div>
           )}
         </>)}
