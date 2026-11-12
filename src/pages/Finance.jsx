@@ -66,7 +66,7 @@ export default function Finance() {
   const [clientRemb, setClientRemb] = useState([])      // client_remboursements — annule la charge le mois où le remboursement est reçu
   const [stockCuve, setStockCuve] = useState({ ess_stock: 0, gas_stock: 0 })
   const [commandesEnCours, setCommandesEnCours] = useState([])   // fuel_orders lancée/partielle
-  const [commandesCarburant, setCommandesCarburant] = useState([])   // fuel_orders carburant, tout statut réellement passé (référence "commandé", voir achatCarburantCommande)
+  const [commandesTousPoles, setCommandesTousPoles] = useState([])   // fuel_orders tous pôles, tout statut réellement passé ("commandé", voir achat*Commande)
   const [receptionsTotaux, setReceptionsTotaux] = useState({})  // {order_id: quantite_recue_total}
   const [settings, setSettings] = useState({ taux_gaz: 8, taux_superette: 8 })
   const [profiles, setProfiles] = useState({})     // {id: full_name} — traçabilité
@@ -121,9 +121,12 @@ export default function Finance() {
       supabase.from('v_solde_client').select('solde_du').eq('station_id', stationId),
       supabase.from('client_remboursements').select('report_date,montant').eq('station_id', stationId),
       supabase.from('deliveries').select('report_date,type,montant').eq('station_id', stationId),
-      // Référence "commandé" (voir achatCarburantCommande) — tout statut réellement passé
-      // (hors simple proposition interne non encore lancée, et hors annulée).
-      supabase.from('fuel_orders').select('report_date,quantite_commandee,prix_achat,categorie,statut').eq('station_id', stationId).in('statut', ['lancee', 'partielle', 'recue']),
+      // "Commandé" tous pôles (carburant, gaz, lubrifiant, supérette — voir achat*Commande) —
+      // tout statut réellement passé (hors simple proposition interne non encore lancée, et
+      // hors annulée). Carburant coûte quantite_commandee × prix_achat (pas de montant_paiement
+      // sur ces lignes) ; gaz/lubrifiant/supérette ont déjà montant_paiement précalculé (y
+      // compris consigne gaz, prix au détail/gros supérette) — pas besoin de le recalculer.
+      supabase.from('fuel_orders').select('report_date,quantite_commandee,prix_achat,montant_paiement,categorie,statut').eq('station_id', stationId).in('statut', ['lancee', 'partielle', 'recue']),
     ])
     setVentes(v.data || []); setCharges(c.data || []); setExpenses(e.data || []); setCommissionReelle(cr.data || []); setCommissionSuperette(cs.data || [])
     if (st.data) setSettings(st.data)
@@ -142,7 +145,7 @@ export default function Finance() {
     setSoldeClients((sc.data || []).reduce((s, x) => s + N(x.solde_du), 0))
     setClientRemb(crm.data || [])
     setDeliveries(dl.data || [])
-    setCommandesCarburant(fc.data || [])
+    setCommandesTousPoles(fc.data || [])
   }
   useEffect(() => { load() }, [stationId])
   // Rafraîchit automatiquement si une saisie change pendant que la page est ouverte (ex. une
@@ -250,13 +253,18 @@ export default function Finance() {
   // livraisons réceptionnées sur la période (deliveries.montant, déjà saisi) — même logique.
   const venteCarburant = sum('ca_carburant')
   const achatCarburant = pertesP.reduce((s, p) => s + N(p.achat_carburant), 0)
-  // "Commandé" (toggle utilisateur) — même si une commande n'est pas encore reçue, la somme
-  // engagée ce mois-ci. Attention si inclus dans le total : double compte possible avec
+  const commandesP = commandesTousPoles.filter(o => inPeriod((o.report_date || '').slice(0, 7)))
+  // "Commandé" (toggle utilisateur, tous pôles) — même si une commande n'est pas encore reçue,
+  // la somme engagée ce mois-ci. Attention si inclus dans le total : double compte possible avec
   // "Commandes en cours" (actif du Bilan pour ce qui n'est pas encore reçu) — choix assumé de
-  // l'utilisateur quand il active la bascule, pas le réglage par défaut.
-  const achatCarburantCommande = commandesCarburant
-    .filter(o => inPeriod((o.report_date || '').slice(0, 7)) && (o.categorie || 'carburant') === 'carburant')
+  // l'utilisateur quand il active la bascule, pas le réglage par défaut. Carburant coûte
+  // quantite_commandee × prix_achat (pas de montant_paiement sur ces lignes-là) ; gaz/lubrifiant/
+  // supérette utilisent directement montant_paiement (déjà calculé avec consigne/détail/gros).
+  const achatCarburantCommande = commandesP.filter(o => (o.categorie || 'carburant') === 'carburant')
     .reduce((s, o) => s + N(o.quantite_commandee) * N(o.prix_achat), 0)
+  const achatGazCommande = commandesP.filter(o => o.categorie === 'gaz').reduce((s, o) => s + N(o.montant_paiement), 0)
+  const achatLubrifiantCommande = commandesP.filter(o => o.categorie === 'lubrifiant').reduce((s, o) => s + N(o.montant_paiement), 0)
+  const achatSuperetteCommande = commandesP.filter(o => o.categorie === 'superette').reduce((s, o) => s + N(o.montant_paiement), 0)
   const achatCarburantNonRecu = Math.max(achatCarburantCommande - achatCarburant, 0)
   const achatCarburantRetenu = achatCarburantInclutNonRecu ? achatCarburantCommande : achatCarburant
   const deliveriesP = deliveries.filter(d => inPeriod((d.report_date || '').slice(0, 7)))
@@ -264,11 +272,17 @@ export default function Finance() {
   const achatLubrifiant = deliveriesP.filter(d => d.type === 'lubrifiant').reduce((s, d) => s + N(d.montant), 0)
   const achatSuperette = deliveriesP.filter(d => d.type === 'superette').reduce((s, d) => s + N(d.montant), 0)
   const achatAutre = deliveriesP.filter(d => d.type === 'autre').reduce((s, d) => s + N(d.montant), 0)
+  const achatGazNonRecu = Math.max(achatGazCommande - achatGaz, 0)
+  const achatLubrifiantNonRecu = Math.max(achatLubrifiantCommande - achatLubrifiant, 0)
+  const achatSuperetteNonRecu = Math.max(achatSuperetteCommande - achatSuperette, 0)
+  const achatGazRetenu = achatCarburantInclutNonRecu ? achatGazCommande : achatGaz
+  const achatLubrifiantRetenu = achatCarburantInclutNonRecu ? achatLubrifiantCommande : achatLubrifiant
+  const achatSuperetteRetenu = achatCarburantInclutNonRecu ? achatSuperetteCommande : achatSuperette
   const venteGaz = sum('ventes_gaz') + sum('ventes_gaz_promo')
   const venteLubrifiant = sum('ventes_lubrifiant')
   const venteSuperette = sum('ventes_superette')
   const chiffreAffaires = venteCarburant + venteGaz + venteLubrifiant + venteSuperette + autresProduits
-  const totalAchats = achatCarburantRetenu + achatGaz + achatLubrifiant + achatSuperette + achatAutre
+  const totalAchats = achatCarburantRetenu + achatGazRetenu + achatLubrifiantRetenu + achatSuperetteRetenu + achatAutre
   const margeCommerciale = chiffreAffaires - totalAchats
   // Impôt sur les résultats : 0,1 % du chiffre d'affaires (régime forfaitaire) — calculé
   // automatiquement, jamais saisi à la main ; vient en plus de totCharges (RÉSULTAT ci-dessus
@@ -314,11 +328,15 @@ export default function Finance() {
     { id: 'h2', kind: 'head', label: 'Achats' },
     { id: 'achatCarb', label: achatCarburantInclutNonRecu ? 'Achat carburant (commandé, y compris non reçu)' : 'Achat carburant (commandes réceptionnées)', value: fcfa(achatCarburantRetenu) },
     // Visible seulement quand la case est décochée : une fois le non-reçu inclus dans la ligne
-    // du dessus, cette précision n'a plus d'objet (plus rien d'exclu à signaler).
+    // du dessus, cette précision n'a plus d'objet (plus rien d'exclu à signaler). Même principe
+    // pour gaz/lubrifiant/supérette ci-dessous — un seul interrupteur pour tous les pôles.
     ...(!achatCarburantInclutNonRecu && achatCarburantNonRecu > 0 ? [{ id: 'achatCarbNonRecu', label: 'dont commandé non encore reçu (en plus, hors total)', value: fcfa(achatCarburantNonRecu) }] : []),
-    { id: 'achatGaz', label: 'Achats gaz (livraisons réceptionnées)', value: fcfa(achatGaz) },
-    { id: 'achatLub', label: 'Achats lubrifiant (livraisons réceptionnées)', value: fcfa(achatLubrifiant) },
-    { id: 'achatSup', label: 'Achats supérette (livraisons réceptionnées)', value: fcfa(achatSuperette) },
+    { id: 'achatGaz', label: achatCarburantInclutNonRecu ? 'Achats gaz (commandé, y compris non reçu)' : 'Achats gaz (livraisons réceptionnées)', value: fcfa(achatGazRetenu) },
+    ...(!achatCarburantInclutNonRecu && achatGazNonRecu > 0 ? [{ id: 'achatGazNonRecu', label: 'dont commandé non encore reçu (en plus, hors total)', value: fcfa(achatGazNonRecu) }] : []),
+    { id: 'achatLub', label: achatCarburantInclutNonRecu ? 'Achats lubrifiant (commandé, y compris non reçu)' : 'Achats lubrifiant (livraisons réceptionnées)', value: fcfa(achatLubrifiantRetenu) },
+    ...(!achatCarburantInclutNonRecu && achatLubrifiantNonRecu > 0 ? [{ id: 'achatLubNonRecu', label: 'dont commandé non encore reçu (en plus, hors total)', value: fcfa(achatLubrifiantNonRecu) }] : []),
+    { id: 'achatSup', label: achatCarburantInclutNonRecu ? 'Achats supérette (commandé, y compris non reçu)' : 'Achats supérette (livraisons réceptionnées)', value: fcfa(achatSuperetteRetenu) },
+    ...(!achatCarburantInclutNonRecu && achatSuperetteNonRecu > 0 ? [{ id: 'achatSupNonRecu', label: 'dont commandé non encore reçu (en plus, hors total)', value: fcfa(achatSuperetteNonRecu) }] : []),
     ...(achatAutre > 0 ? [{ id: 'achatAutre', label: 'Autres achats', value: fcfa(achatAutre) }] : []),
     { id: 'totalAchats', kind: 'subtotal', label: 'Total achats', value: fcfa(totalAchats) },
     { id: 'marge', kind: 'total', label: 'MARGE COMMERCIALE (ventes − achats)', value: fcfa(margeCommerciale), color: margeCommerciale < 0 ? 'var(--state-alarm)' : 'var(--state-ok)' },
@@ -778,11 +796,11 @@ export default function Finance() {
       </Panel>
 
       <Panel title="Détail commercial — achats, ventes, marge" meta={mois || annee} flush
-        actions={<Checkbox label="Inclure le carburant commandé non reçu" checked={achatCarburantInclutNonRecu} onChange={setAchatCarburantInclutNonRecu} />}>
+        actions={<Checkbox label="Inclure les commandes non reçues (tous pôles)" checked={achatCarburantInclutNonRecu} onChange={setAchatCarburantInclutNonRecu} />}>
         <LedgerTable rows={detailCommercialRows} />
         <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
           Vue achat/vente classique, en plus du Compte de résultat par commissions ci-dessus (qui reste la référence pour RÉSULTAT). Les deux marges peuvent différer légèrement : un achat ce mois-ci peut se vendre le mois suivant (décalage de stock non historisé ici).
-          {achatCarburantInclutNonRecu && " Attention : le carburant commandé mais pas encore livré est ici compté comme achat ET reste par ailleurs un actif « Commandes en cours » dans le Bilan — à ne pas lire comme deux fois la même trésorerie disponible."}
+          {achatCarburantInclutNonRecu && " Attention : les commandes passées mais pas encore livrées (tous pôles) sont ici comptées comme achat ET restent par ailleurs un actif « Commandes en cours » dans le Bilan — à ne pas lire comme deux fois la même trésorerie disponible."}
         </p>
       </Panel>
 
