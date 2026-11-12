@@ -17,13 +17,19 @@ import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.
 
 const N = (v) => Number(v) || 0
 const TAILLES = [['3', '3 kg'], ['6', '6 kg'], ['12', '12 kg'], ['38', '38 kg']]
-const blankForm = () => ({ report_date: today(), taille: '12', quantite: '', prix_vente_unitaire: '', montant_retour_fournisseur: '', date_echeance: '', note: '', photo_path: null })
+const tailleLabel = (t) => TAILLES.find(x => x[0] === t)?.[1] || t
+const blankLigne = () => ({ taille: '12', quantite: '', prix_vente_unitaire: '' })
+const blankForm = () => ({ report_date: today(), montant_retour_fournisseur: '', date_echeance: '', note: '', photo_path: null })
+const ligneValeur = (l) => N(l.quantite) * N(l.prix_vente_unitaire)
+const receptionValeur = (r) => (r.lignes || []).reduce((s, l) => s + N(l.quantite) * N(l.prix_vente_unitaire), 0)
+const receptionQte = (r) => (r.lignes || []).reduce((s, l) => s + N(l.quantite), 0)
+const receptionResume = (r) => (r.lignes || []).map(l => `${tailleLabel(l.taille)}×${l.quantite}`).join(', ')
 
-// Réception de gaz promo (dépôt-vente, migration_v165) : le chef de piste déclare chaque
-// réception (jour, type, quantité, valeur) — une partie de l'argent doit retourner au
-// fournisseur par note de crédit (NCE) à une échéance connue dès la réception, saisie à la
-// main avec le reste (pas de règle automatique, l'échéance réelle vient du bon fournisseur).
-// Marquer "réglée" reste réservé à manage_finance/admin (RLS), une fois le prélèvement confirmé.
+// Réception de gaz promo (dépôt-vente, migration_v165/v166) : le chef de piste déclare chaque
+// livraison — une même livraison peut couvrir plusieurs types de bouteilles à la fois (d'où
+// plusieurs lignes), mais une seule NCE (montant à retourner + échéance) couvre toute la
+// livraison. L'échéance et le montant sont saisis à la main (pas de règle automatique, ça vient
+// du bon fournisseur). Marquer "réglée" reste réservé à manage_finance/admin (RLS).
 export default function GazPromoReceptions() {
   const { can, isAdmin, session } = useAuth()
   const { stationId } = useStation()
@@ -31,6 +37,7 @@ export default function GazPromoReceptions() {
   const [receptions, setReceptions] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(blankForm())
+  const [lignes, setLignes] = useState([blankLigne()])
   const [photoBusy, setPhotoBusy] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
@@ -44,8 +51,12 @@ export default function GazPromoReceptions() {
 
   const flash = (m) => { setMsg(m); setErr(''); setTimeout(() => setMsg(''), 2500) }
   const fail = (e) => { setErr(e.message || String(e)); setMsg('') }
-  const valeurTotale = N(form.quantite) * N(form.prix_vente_unitaire)
-  const tailleLabel = (t) => TAILLES.find(x => x[0] === t)?.[1] || t
+  const lignesValides = lignes.filter(l => N(l.quantite) > 0 && N(l.prix_vente_unitaire) > 0)
+  const valeurTotale = lignesValides.reduce((s, l) => s + ligneValeur(l), 0)
+
+  const setLigne = (i, patch) => setLignes(ls => ls.map((l, j) => j === i ? { ...l, ...patch } : l))
+  const ajouterLigne = () => setLignes(ls => [...ls, blankLigne()])
+  const retirerLigne = (i) => setLignes(ls => ls.filter((_, j) => j !== i))
 
   async function onPhoto(file) {
     if (!file) return
@@ -59,19 +70,20 @@ export default function GazPromoReceptions() {
 
   async function declarer(e) {
     e.preventDefault(); setErr('')
-    if (!form.quantite || !form.prix_vente_unitaire || !form.montant_retour_fournisseur || !form.date_echeance) {
-      setErr('Quantité, prix de vente unitaire, montant à retourner et échéance sont obligatoires.'); return
+    if (!lignesValides.length) { setErr('Renseignez au moins un type avec quantité et prix de vente unitaire.'); return }
+    if (!form.montant_retour_fournisseur || !form.date_echeance) {
+      setErr('Montant à retourner et échéance sont obligatoires.'); return
     }
     setBusy(true)
     const { error } = await supabase.from('gaz_promo_receptions').insert({
-      station_id: stationId, report_date: form.report_date, taille: form.taille,
-      quantite: numFR(form.quantite), prix_vente_unitaire: numFR(form.prix_vente_unitaire),
+      station_id: stationId, report_date: form.report_date,
+      lignes: lignesValides.map(l => ({ taille: l.taille, quantite: numFR(l.quantite), prix_vente_unitaire: numFR(l.prix_vente_unitaire) })),
       montant_retour_fournisseur: numFR(form.montant_retour_fournisseur), date_echeance: form.date_echeance,
       note: form.note || null, photo_path: form.photo_path, created_by: session.user.id,
     })
     setBusy(false)
     if (error) { fail(error); return }
-    setForm(blankForm()); setShowForm(false); flash('Réception déclarée'); load()
+    setForm(blankForm()); setLignes([blankLigne()]); setShowForm(false); flash('Réception déclarée'); load()
   }
 
   async function marquerReglee(r) {
@@ -83,9 +95,9 @@ export default function GazPromoReceptions() {
   const enAttente = receptions.filter(r => r.statut === 'a_regler')
   const columns = [
     { key: 'date', header: 'Reçu le', render: r => frDate(r.report_date) },
-    { key: 'taille', header: 'Type', render: r => tailleLabel(r.taille) },
-    { key: 'qte', header: 'Qté', numeric: true, align: 'right', render: r => r.quantite },
-    { key: 'valeur', header: 'Valeur stock', numeric: true, align: 'right', render: r => fcfa(r.quantite * r.prix_vente_unitaire) },
+    { key: 'types', header: 'Types reçus', render: r => receptionResume(r) },
+    { key: 'qte', header: 'Qté totale', numeric: true, align: 'right', render: r => receptionQte(r) },
+    { key: 'valeur', header: 'Valeur stock', numeric: true, align: 'right', render: r => fcfa(receptionValeur(r)) },
     { key: 'retour', header: 'À retourner (NCE)', numeric: true, align: 'right', render: r => fcfa(r.montant_retour_fournisseur) },
     { key: 'echeance', header: 'Échéance', render: r => <span style={{ color: r.statut === 'a_regler' && r.date_echeance < today() ? 'var(--state-alarm)' : 'var(--text-body)' }}>{frDate(r.date_echeance)}</span> },
     { key: 'statut', header: 'Statut', render: r => <Badge tone={r.statut === 'regle' ? 'ok' : (r.date_echeance < today() ? 'alarm' : 'warn')}>{r.statut === 'regle' ? 'Réglée' : 'À régler'}</Badge> },
@@ -100,31 +112,41 @@ export default function GazPromoReceptions() {
 
       <div>
         <Button tone={showForm ? 'dark' : 'primary'} icon="plus" onClick={() => setShowForm(v => !v)}>
-          {showForm ? 'Annuler' : 'Déclarer une réception de gaz promo'}
+          {showForm ? 'Annuler' : 'Réception gaz promo (dépôt-vente)'}
         </Button>
       </div>
 
       {showForm && (
         <Panel title="Déclarer une réception de gaz promo (dépôt-vente)">
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>
-            Une partie de la valeur doit retourner au fournisseur par note de crédit (NCE), à l'échéance indiquée sur son bon — à saisir telle quelle.
+            Une même livraison peut contenir plusieurs types de bouteilles — ajoutez une ligne par type. Une partie de la valeur doit retourner au fournisseur par note de crédit (NCE), à l'échéance indiquée sur son bon.
           </p>
-          <form onSubmit={declarer} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-            <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-              <Field label="Reçu le" style={{ flex: '1 1 140px' }}>
-                <Input type="date" value={form.report_date} max={today()} onChange={e => setForm(p => ({ ...p, report_date: e.target.value }))} />
-              </Field>
-              <Field label="Type" style={{ flex: '1 1 120px' }}>
-                <Select value={form.taille} onChange={e => setForm(p => ({ ...p, taille: e.target.value }))} options={TAILLES.map(([v, l]) => ({ value: v, label: l }))} style={{ width: '100%' }} />
-              </Field>
-              <Field label="Quantité (bouteilles)" style={{ flex: '1 1 140px' }}>
-                <Input type="text" inputMode="numeric" numeric value={form.quantite} onChange={e => setForm(p => ({ ...p, quantite: e.target.value }))} />
-              </Field>
-              <Field label="Prix de vente unitaire" style={{ flex: '1 1 160px' }}>
-                <Input type="text" inputMode="decimal" numeric value={form.prix_vente_unitaire} onChange={e => setForm(p => ({ ...p, prix_vente_unitaire: e.target.value }))} />
-              </Field>
+          <form onSubmit={declarer} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+            <Field label="Reçu le" style={{ maxWidth: 180 }}>
+              <Input type="date" value={form.report_date} max={today()} onChange={e => setForm(p => ({ ...p, report_date: e.target.value }))} />
+            </Field>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+              {lignes.map((l, i) => (
+                <div key={i} style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'end', padding: 'var(--sp-3)', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)' }}>
+                  <Field label="Type" style={{ flex: '1 1 120px' }}>
+                    <Select value={l.taille} onChange={e => setLigne(i, { taille: e.target.value })} options={TAILLES.map(([v, lb]) => ({ value: v, label: lb }))} style={{ width: '100%' }} />
+                  </Field>
+                  <Field label="Quantité (bouteilles)" style={{ flex: '1 1 140px' }}>
+                    <Input type="text" inputMode="numeric" numeric value={l.quantite} onChange={e => setLigne(i, { quantite: e.target.value })} />
+                  </Field>
+                  <Field label="Prix de vente unitaire" style={{ flex: '1 1 160px' }}>
+                    <Input type="text" inputMode="decimal" numeric value={l.prix_vente_unitaire} onChange={e => setLigne(i, { prix_vente_unitaire: e.target.value })} />
+                  </Field>
+                  {ligneValeur(l) > 0 && <span style={{ font: '600 14px/1.3 var(--font-ui)', alignSelf: 'center' }}>{fcfa(ligneValeur(l))}</span>}
+                  {lignes.length > 1 && <Button type="button" size="sm" tone="danger" onClick={() => retirerLigne(i)}>Retirer</Button>}
+                </div>
+              ))}
+              <Button type="button" size="sm" onClick={ajouterLigne} style={{ alignSelf: 'flex-start' }}>+ Ajouter un type</Button>
             </div>
-            {valeurTotale > 0 && <p style={{ font: '600 14px/1.3 var(--font-ui)', margin: 0 }}>Valeur totale du stock reçu : {fcfa(valeurTotale)}</p>}
+
+            {valeurTotale > 0 && <p style={{ font: '600 15px/1.3 var(--font-ui)', margin: 0 }}>Valeur totale du stock reçu : {fcfa(valeurTotale)}</p>}
+
             <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
               <Field label="Montant total à retourner au fournisseur (NCE)" style={{ flex: '1 1 220px' }}>
                 <Input type="text" inputMode="decimal" numeric value={form.montant_retour_fournisseur} onChange={e => setForm(p => ({ ...p, montant_retour_fournisseur: e.target.value }))} />

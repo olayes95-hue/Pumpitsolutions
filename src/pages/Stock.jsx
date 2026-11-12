@@ -334,6 +334,11 @@ export default function Stock() {
         )}
       </Panel>
 
+      {/* Gaz promo (dépôt-vente) : mécanique distincte (NCE fournisseur, pas un simple ajout de
+          stock) donc son propre bouton, mais regroupé ici avec les autres déclarations plutôt
+          qu'isolé en bas de page — à côté de "J'ai reçu une livraison", pas confondu avec lui. */}
+      {has('gaz_promo') && <GazPromoReceptions />}
+
       {/* ===== MÉTRIQUES — stock bas + valorisation, une seule ligne — gérant/pompiste/admin ===== */}
       {!isVendeuse && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
@@ -491,8 +496,6 @@ export default function Stock() {
           </Panel>
         )
       })()}
-
-      {has('gaz_promo') && <GazPromoReceptions />}
     </div>
   )
 }
