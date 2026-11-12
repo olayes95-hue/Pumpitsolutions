@@ -58,7 +58,11 @@ function useAccess() {
   const org = isAdmin || isPlatformAdmin
   // La page Stock suit le gaz, les lubrifiants et la supérette : sans aucune de ces
   // activités dans l'offre (carburant seul), elle n'a rien à montrer.
-  const stock = op && (isVendeuse ? activite('superette') : (activite('gaz') || activite('lubrifiant') || activite('superette')))
+  // view_stock : permission dédiée (configurable rôle par rôle dans Stations > Rôles) pour un
+  // profil qui n'est ni gérant/pompiste/vendeuse/admin ni manage_orders (ex. directeur) mais doit
+  // quand même pouvoir consulter le stock — sans ce fallback, rien dans la matrice de permissions
+  // ne pouvait donner accès à cette page, contrairement à presque toutes les autres.
+  const stock = (op || can('view_stock')) && (isVendeuse ? activite('superette') : (activite('gaz') || activite('lubrifiant') || activite('superette')))
   return { op, opMetier, can, isVendeuse, isGerant, org, isPlatformAdmin, has, stock }
 }
 
@@ -69,7 +73,7 @@ function useSpaces() {
   const spaces = [
     { key: 'jour', label: "Aujourd'hui", icon: 'sun', items: [
       op && { to: '/saisie', icon: 'file-pen-line', label: isVendeuse ? 'Saisie supérette' : 'Saisie du jour' },
-      opMetier && { to: '/controles', icon: 'shield-check', label: 'Contrôles' },
+      (opMetier || can('view_controles')) && { to: '/controles', icon: 'shield-check', label: 'Contrôles' },
     ] },
     // Son propre onglet en barre du bas (plutôt qu'un sous-onglet d'Aujourd'hui) : accès direct,
     // pas une page de plus à chercher — demandé explicitement pour la version mobile du gérant.
@@ -308,7 +312,7 @@ function AppRoutes() {
         <Routes>
           <Route path="/saisie" element={guard(op || can('view_history'), <Submit />)} />
           <Route path="/journal" element={guard(opMetier || can('view_journal'), <Journal />)} />
-          <Route path="/controles" element={guard(opMetier, <Inspections />)} />
+          <Route path="/controles" element={guard(opMetier || can('view_controles'), <Inspections />)} />
           <Route path="/tableau" element={guard(can('view_dashboard'), <Dashboard />)} />
           <Route path="/alertes" element={guard(can('view_alerts'), <AlertsPage />)} />
           <Route path="/historique" element={guard(can('view_history') && !isVendeuse, <History />)} />
