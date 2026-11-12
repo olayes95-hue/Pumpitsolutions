@@ -65,6 +65,7 @@ export default function BankRecon() {
   const [importBusy, setImportBusy] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showManual, setShowManual] = useState(false)
+  const [showBordereaux, setShowBordereaux] = useState(false)
   // Filtre période — un seul sélecteur (PeriodPicker), année(s) + mois ensemble.
   // Par défaut : année + mois en cours (pas "toutes périodes"), pour ouvrir sur les lignes récentes.
   const [years, setYears] = useState([String(today().slice(0, 4))])
@@ -534,6 +535,14 @@ export default function BankRecon() {
       </>}
 
       {voitBordereaux && (
+        <div>
+          <Button tone={showBordereaux ? 'dark' : 'neutral'} icon="camera" onClick={() => setShowBordereaux(v => !v)}>
+            {showBordereaux ? 'Masquer la vérification des bordereaux' : 'Vérification des bordereaux (déclaré vs photo)'}
+          </Button>
+        </div>
+      )}
+
+      {voitBordereaux && showBordereaux && (
         <Panel title="Vérification des bordereaux (déclaré vs photo)" flush>
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
             Un versement déjà rapproché avec la banque (ci-dessous) est vérifié automatiquement. Il ne reste ici que ce que la banque n'a pas encore confirmé — regardez la photo et comparez au montant déclaré. Sélectionnez plusieurs lignes pour les valider d'un coup.
