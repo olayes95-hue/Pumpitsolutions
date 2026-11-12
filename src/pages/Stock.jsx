@@ -18,6 +18,7 @@ import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { Tabs } from '../ds/pumpit/components/navigation/Tabs.jsx'
 import { Kpi } from '../lib/Kpi.jsx'
+import GazPromoReceptions from '../components/GazPromoReceptions.jsx'
 
 const N = (v) => (v ? (numFR(v) ?? 0) : 0)
 const PAGE_SIZE = 15
@@ -55,7 +56,7 @@ const AUTRE_MOUVEMENT_SOURCES = [
 export default function Stock() {
   const { session, isAdmin, isVendeuse, isPompiste } = useAuth()
   const { stationId } = useStation()
-  const { activite } = useOffre()   // activités incluses dans l'offre de la station courante
+  const { activite, has } = useOffre()   // activités + fonctions incluses dans l'offre de la station courante
   const [stock, setStock] = useState([])
   const [valeur, setValeur] = useState([])
   const [mvts, setMvts] = useState([])
@@ -490,6 +491,8 @@ export default function Stock() {
           </Panel>
         )
       })()}
+
+      {has('gaz_promo') && <GazPromoReceptions />}
     </div>
   )
 }

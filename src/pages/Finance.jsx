@@ -63,6 +63,7 @@ export default function Finance() {
   const [stockVal, setStockVal] = useState([])
   const [bonsRestant, setBonsRestant] = useState(0)
   const [soldeClients, setSoldeClients] = useState(0)   // v_solde_client (migration_v143) — créance totale sur les clients à crédit
+  const [gazPromoReceptions, setGazPromoReceptions] = useState([])   // migration_v165 — NCE gaz promo dues au fournisseur
   const [clientRemb, setClientRemb] = useState([])      // client_remboursements — annule la charge le mois où le remboursement est reçu
   const [stockCuve, setStockCuve] = useState({ ess_stock: 0, gas_stock: 0 })
   const [commandesEnCours, setCommandesEnCours] = useState([])   // fuel_orders lancée/partielle
@@ -99,7 +100,7 @@ export default function Finance() {
 
   async function load() {
     if (!stationId) return
-    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc, crm, dl, fc] = await Promise.all([
+    const [v, c, e, st, p, sv, ls, pr, fv, ou, br, co, rt, cb, sb, mb, cr, cs, sc, crm, dl, fc, gpr] = await Promise.all([
       supabase.from('v_ventes_mensuelles').select('*').eq('station_id', stationId).order('mois'),
       supabase.from('charges').select('*').eq('station_id', stationId),
       supabase.from('expenses').select('report_date,categorie,montant').eq('station_id', stationId),
@@ -127,6 +128,7 @@ export default function Finance() {
       // sur ces lignes) ; gaz/lubrifiant/supérette ont déjà montant_paiement précalculé (y
       // compris consigne gaz, prix au détail/gros supérette) — pas besoin de le recalculer.
       supabase.from('fuel_orders').select('report_date,quantite_commandee,prix_achat,montant_paiement,categorie,statut').eq('station_id', stationId).in('statut', ['lancee', 'partielle', 'recue']),
+      supabase.from('gaz_promo_receptions').select('statut,montant_retour_fournisseur,date_echeance').eq('station_id', stationId),
     ])
     setVentes(v.data || []); setCharges(c.data || []); setExpenses(e.data || []); setCommissionReelle(cr.data || []); setCommissionSuperette(cs.data || [])
     if (st.data) setSettings(st.data)
@@ -146,6 +148,7 @@ export default function Finance() {
     setClientRemb(crm.data || [])
     setDeliveries(dl.data || [])
     setCommandesTousPoles(fc.data || [])
+    setGazPromoReceptions(gpr.data || [])
   }
   useEffect(() => { load() }, [stationId])
   // Rafraîchit automatiquement si une saisie change pendant que la page est ouverte (ex. une
@@ -416,8 +419,11 @@ export default function Finance() {
     return s + montantTotal * (reste / commande)
   }, 0)
   const soldeBancaireActuel = N(compteBancaire?.solde_actuel)
+  // NCE gaz promo dues au fournisseur (migration_v165) — dépôt-vente, pas encore réglées à ce
+  // jour (peu importe le mois de réception, comme chargesAPayerCumule).
+  const gazPromoNceAPayer = gazPromoReceptions.filter(r => r.statut === 'a_regler').reduce((s, r) => s + N(r.montant_retour_fournisseur), 0)
   const totalActif = stockTotal + stockCarburant + commandesEnCoursValeur + bonsRestant + soldeClients + cashCumule + ouvertureMontant + soldeBancaireActuel
-  const totalPassif = chargesAPayerCumule
+  const totalPassif = chargesAPayerCumule + gazPromoNceAPayer
   const situationNette = totalActif - totalPassif
 
   const isLocked = mois && locked.has(mois)
@@ -950,6 +956,7 @@ export default function Finance() {
           <div style={{ flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
             <LedgerHead>Passif</LedgerHead>
             <LedgerRow label="Charges à payer (cumulées)" value={fcfa(chargesAPayerCumule)} />
+            {gazPromoNceAPayer > 0 && <LedgerRow label="NCE gaz promo à retourner au fournisseur (à ce jour)" value={fcfa(gazPromoNceAPayer)} />}
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 'var(--sp-5)', paddingTop: 'var(--sp-2)', borderTop: '1px solid var(--border-hairline)', font: 'var(--fw-semibold) 15px/1.2 var(--font-ui)' }}>
               <span>Total passif</span><span>{fcfa(totalPassif)}</span>
             </div>
