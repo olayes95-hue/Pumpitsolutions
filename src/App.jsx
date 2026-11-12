@@ -147,14 +147,16 @@ function Shell({ children }) {
     document.querySelector('.pi-subnav a.active')?.scrollIntoView({ inline: 'center', block: 'nearest' })
   }, [pathname])
 
-  // Pastille « réponse de l'assistance non lue ».
+  // Pastille « réponse de l'assistance non lue ». Indépendant de la navigation — ne doit PAS
+  // dépendre de `pathname` : sinon chaque changement de page relance une requête (et un nouvel
+  // intervalle) en plus de son propre polling, au lieu d'un seul comptage régulier en fond.
   useEffect(() => {
     const compter = () => supabase.from('assistance_demandes').select('id', { count: 'exact', head: true }).eq('non_lu_client', true).neq('statut', 'resolue')
       .then(({ count }) => setReponses(count || 0))
     compter()
     const t = setInterval(compter, 60000)
     return () => clearInterval(t)
-  }, [pathname])
+  }, [])
 
   return (
     <Viewport>
