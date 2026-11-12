@@ -313,7 +313,9 @@ export default function Finance() {
     { id: 'ca', kind: 'subtotal', label: 'Chiffre d\'affaires', value: fcfa(chiffreAffaires) },
     { id: 'h2', kind: 'head', label: 'Achats' },
     { id: 'achatCarb', label: achatCarburantInclutNonRecu ? 'Achat carburant (commandé, y compris non reçu)' : 'Achat carburant (commandes réceptionnées)', value: fcfa(achatCarburantRetenu) },
-    ...(achatCarburantNonRecu > 0 ? [{ id: 'achatCarbNonRecu', label: achatCarburantInclutNonRecu ? 'dont pas encore reçu (inclus ci-dessus)' : 'dont commandé non encore reçu (en plus, hors total)', value: fcfa(achatCarburantNonRecu) }] : []),
+    // Visible seulement quand la case est décochée : une fois le non-reçu inclus dans la ligne
+    // du dessus, cette précision n'a plus d'objet (plus rien d'exclu à signaler).
+    ...(!achatCarburantInclutNonRecu && achatCarburantNonRecu > 0 ? [{ id: 'achatCarbNonRecu', label: 'dont commandé non encore reçu (en plus, hors total)', value: fcfa(achatCarburantNonRecu) }] : []),
     { id: 'achatGaz', label: 'Achats gaz (livraisons réceptionnées)', value: fcfa(achatGaz) },
     { id: 'achatLub', label: 'Achats lubrifiant (livraisons réceptionnées)', value: fcfa(achatLubrifiant) },
     { id: 'achatSup', label: 'Achats supérette (livraisons réceptionnées)', value: fcfa(achatSuperette) },
