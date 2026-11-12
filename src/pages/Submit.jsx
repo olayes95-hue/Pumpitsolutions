@@ -885,7 +885,9 @@ export default function Submit() {
   )
   if (isVendeuse) return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
-      <Panel title="Date" bodyStyle={{ display: 'none' }} actions={<Input size="sm" type="date" value={date} onChange={e => setDate(e.target.value)} max={today()} />} />
+      <Panel title="Date" bodyStyle={{ display: 'none' }} actions={
+        <div style={{ paddingBottom: 'var(--gutter-panel)' }}><Input size="sm" type="date" value={date} onChange={e => setDate(e.target.value)} max={today()} /></div>
+      } />
       {err && <AlertBanner tone="alarm" title="Erreur">{err}</AlertBanner>}
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
       {locked && <AlertBanner tone="alarm" title="Verrouillé">{lockedMsg}</AlertBanner>}

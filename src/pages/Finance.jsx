@@ -746,14 +746,16 @@ export default function Finance() {
       {msg && <AlertBanner tone="ok" title="Succès">{msg}</AlertBanner>}
       {err && <AlertBanner tone="alarm" title="Erreur">{err}</AlertBanner>}
 
-      <Panel title="Point financier" bodyStyle={{ display: 'none' }} actions={<>
-        <PeriodPicker multiple={false} years={[annee]} months={mois ? [mois.slice(5, 7)] : []}
-          setYears={ys => { setAnnee(ys[0] || annee); setMois('') }}
-          setMonths={ms => setMois(ms.length ? `${annee}-${ms[0]}` : '')}
-          availableYears={annees} />
-        {mois && can('manage_finance') && <Button size="sm" tone={isLocked ? 'danger' : 'outline'} onClick={toggleLock}>{isLocked ? 'Déverrouiller le mois' : 'Verrouiller le mois'}</Button>}
-        {mois && <Button size="sm" tone="primary" disabled={exportBusy} onClick={exportRapportPDF}>{exportBusy ? 'Préparation…' : 'Exporter le rapport (PDF)'}</Button>}
-      </>} />
+      <Panel title="Point financier" bodyStyle={{ display: 'none' }} actions={
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-3)', paddingBottom: 'var(--gutter-panel)' }}>
+          <PeriodPicker multiple={false} years={[annee]} months={mois ? [mois.slice(5, 7)] : []}
+            setYears={ys => { setAnnee(ys[0] || annee); setMois('') }}
+            setMonths={ms => setMois(ms.length ? `${annee}-${ms[0]}` : '')}
+            availableYears={annees} />
+          {mois && can('manage_finance') && <Button size="sm" tone={isLocked ? 'danger' : 'outline'} onClick={toggleLock}>{isLocked ? 'Déverrouiller le mois' : 'Verrouiller le mois'}</Button>}
+          {mois && <Button size="sm" tone="primary" disabled={exportBusy} onClick={exportRapportPDF}>{exportBusy ? 'Préparation…' : 'Exporter le rapport (PDF)'}</Button>}
+        </div>
+      } />
 
       {isLocked && (
         <AlertBanner tone="info" title="Mois verrouillé">
