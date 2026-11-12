@@ -14,6 +14,7 @@ import { Field } from '../ds/pumpit/components/forms/Field.jsx'
 import { Input } from '../ds/pumpit/components/forms/Input.jsx'
 import { Select } from '../ds/pumpit/components/forms/Select.jsx'
 import { PeriodPicker } from '../ds/pumpit/components/forms/PeriodPicker.jsx'
+import { Checkbox } from '../ds/pumpit/components/forms/Checkbox.jsx'
 import { AlertBanner } from '../ds/pumpit/components/feedback/AlertBanner.jsx'
 import { DataTable } from '../ds/pumpit/components/data/DataTable.jsx'
 import { EvidenceUpload } from '../ds/pumpit/components/evidence/EvidenceUpload.jsx'
@@ -82,6 +83,10 @@ export default function Finance() {
   const [soldeBanqueForm, setSoldeBanqueForm] = useState({ montant: '', date_solde: '', note: '' })
   const [mouvementsBanque, setMouvementsBanque] = useState([])
   const [openAnnuel, setOpenAnnuel] = useState(false)
+  // Détail commercial : par défaut, achat carburant = réceptionné (base comptable, évite le
+  // double comptage avec "Commandes en cours" du Bilan) — bascule possible vers "commandé, y
+  // compris non reçu" si l'utilisateur veut suivre l'argent engagé plutôt que la marchandise reçue.
+  const [achatCarburantInclutNonRecu, setAchatCarburantInclutNonRecu] = useState(false)
   // Par défaut, mois en cours (pas le dernier mois avec des données, qui peut être ancien).
   const [annee, setAnnee] = useState(today().slice(0, 4))
   const [mois, setMois] = useState(today().slice(0, 7))
@@ -245,12 +250,15 @@ export default function Finance() {
   // livraisons réceptionnées sur la période (deliveries.montant, déjà saisi) — même logique.
   const venteCarburant = sum('ca_carburant')
   const achatCarburant = pertesP.reduce((s, p) => s + N(p.achat_carburant), 0)
-  // Référence "commandé" (demande utilisateur) — même si une commande n'est pas encore reçue,
-  // la somme engagée ce mois-ci. Purement informatif : n'entre PAS dans totalAchats/marge (sinon
-  // double compte avec "Commandes en cours", actif du Bilan pour ce qui n'est pas encore reçu).
+  // "Commandé" (toggle utilisateur) — même si une commande n'est pas encore reçue, la somme
+  // engagée ce mois-ci. Attention si inclus dans le total : double compte possible avec
+  // "Commandes en cours" (actif du Bilan pour ce qui n'est pas encore reçu) — choix assumé de
+  // l'utilisateur quand il active la bascule, pas le réglage par défaut.
   const achatCarburantCommande = commandesCarburant
     .filter(o => inPeriod((o.report_date || '').slice(0, 7)) && (o.categorie || 'carburant') === 'carburant')
     .reduce((s, o) => s + N(o.quantite_commandee) * N(o.prix_achat), 0)
+  const achatCarburantNonRecu = Math.max(achatCarburantCommande - achatCarburant, 0)
+  const achatCarburantRetenu = achatCarburantInclutNonRecu ? achatCarburantCommande : achatCarburant
   const deliveriesP = deliveries.filter(d => inPeriod((d.report_date || '').slice(0, 7)))
   const achatGaz = deliveriesP.filter(d => d.type === 'gaz').reduce((s, d) => s + N(d.montant), 0)
   const achatLubrifiant = deliveriesP.filter(d => d.type === 'lubrifiant').reduce((s, d) => s + N(d.montant), 0)
@@ -260,7 +268,7 @@ export default function Finance() {
   const venteLubrifiant = sum('ventes_lubrifiant')
   const venteSuperette = sum('ventes_superette')
   const chiffreAffaires = venteCarburant + venteGaz + venteLubrifiant + venteSuperette + autresProduits
-  const totalAchats = achatCarburant + achatGaz + achatLubrifiant + achatSuperette + achatAutre
+  const totalAchats = achatCarburantRetenu + achatGaz + achatLubrifiant + achatSuperette + achatAutre
   const margeCommerciale = chiffreAffaires - totalAchats
   // Impôt sur les résultats : 0,1 % du chiffre d'affaires (régime forfaitaire) — calculé
   // automatiquement, jamais saisi à la main ; vient en plus de totCharges (RÉSULTAT ci-dessus
@@ -304,8 +312,8 @@ export default function Finance() {
     ...(autresProduits > 0 ? [{ id: 'autresProduits2', label: 'Autres produits', value: fcfa(autresProduits) }] : []),
     { id: 'ca', kind: 'subtotal', label: 'Chiffre d\'affaires', value: fcfa(chiffreAffaires) },
     { id: 'h2', kind: 'head', label: 'Achats' },
-    { id: 'achatCarb', label: 'Achat carburant (commandes réceptionnées)', value: fcfa(achatCarburant) },
-    { id: 'achatCarbCommande', label: 'dont commandé sur la période (référence, inclut le non encore reçu)', value: fcfa(achatCarburantCommande) },
+    { id: 'achatCarb', label: achatCarburantInclutNonRecu ? 'Achat carburant (commandé, y compris non reçu)' : 'Achat carburant (commandes réceptionnées)', value: fcfa(achatCarburantRetenu) },
+    ...(achatCarburantNonRecu > 0 ? [{ id: 'achatCarbNonRecu', label: achatCarburantInclutNonRecu ? 'dont pas encore reçu (inclus ci-dessus)' : 'dont commandé non encore reçu (en plus, hors total)', value: fcfa(achatCarburantNonRecu) }] : []),
     { id: 'achatGaz', label: 'Achats gaz (livraisons réceptionnées)', value: fcfa(achatGaz) },
     { id: 'achatLub', label: 'Achats lubrifiant (livraisons réceptionnées)', value: fcfa(achatLubrifiant) },
     { id: 'achatSup', label: 'Achats supérette (livraisons réceptionnées)', value: fcfa(achatSuperette) },
@@ -767,10 +775,12 @@ export default function Finance() {
         )}
       </Panel>
 
-      <Panel title="Détail commercial — achats, ventes, marge" meta={mois || annee} flush>
+      <Panel title="Détail commercial — achats, ventes, marge" meta={mois || annee} flush
+        actions={<Checkbox label="Inclure le carburant commandé non reçu" checked={achatCarburantInclutNonRecu} onChange={setAchatCarburantInclutNonRecu} />}>
         <LedgerTable rows={detailCommercialRows} />
         <p style={{ font: '400 13px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
           Vue achat/vente classique, en plus du Compte de résultat par commissions ci-dessus (qui reste la référence pour RÉSULTAT). Les deux marges peuvent différer légèrement : un achat ce mois-ci peut se vendre le mois suivant (décalage de stock non historisé ici).
+          {achatCarburantInclutNonRecu && " Attention : le carburant commandé mais pas encore livré est ici compté comme achat ET reste par ailleurs un actif « Commandes en cours » dans le Bilan — à ne pas lire comme deux fois la même trésorerie disponible."}
         </p>
       </Panel>
 
