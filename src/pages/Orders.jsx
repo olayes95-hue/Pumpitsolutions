@@ -61,6 +61,15 @@ export default function Orders() {
   const [bonsRestant, setBonsRestant] = useState(0)
   const [openCombos, setOpenCombos] = useState(false)
   const [detailId, setDetailId] = useState(null)   // id de la commande ouverte dans le panneau de détail
+  // Correction par le validateur (directeur/validate_orders) avant d'approuver une commande
+  // proposée — signalement réel (bons saisis à 4 655 967 F au lieu de 3 650 000 F pour 5000 L) :
+  // jusqu'ici Valider/Refuser ne portait aucun motif ni correction, obligeant à tout refaire.
+  // L'édition se fait DANS l'appel qui valide (statut -> 'validee') : la policy RLS
+  // validate_orders n'autorise une écriture sur une commande proposée que si le nouveau statut
+  // est validee/annulee — pas de "sauvegarder sans valider" possible pour ce rôle.
+  const [editProposee, setEditProposee] = useState({})   // {orderId: {quantite_commandee, bons_base, cheque_montant, montant_paiement}}
+  const [showMotif, setShowMotif] = useState(null)       // id de la commande dont le formulaire de refus est ouvert
+  const [motifRefus, setMotifRefus] = useState({})       // {orderId: texte}
   const [receptions, setReceptions] = useState([])   // historique des réceptions PARTIELLES de la commande ouverte
   const [editRecId, setEditRecId] = useState(null)   // id de la réception en cours de correction (admin)
   const [editRecForm, setEditRecForm] = useState({})
@@ -243,8 +252,24 @@ export default function Orders() {
     if (error) setErr(error.message); else { setNf(blankNf()); setShowPropose(false); flash(toInsert.length > 1 ? `${toInsert.length} commandes proposées` : 'Commande proposée'); load() }
   }
   async function setStatut(o, patch) { const { error } = await supabase.from('fuel_orders').update(patch).eq('id', o.id); error ? setErr(error.message) : load() }
-  const valider = (o) => setStatut(o, { statut: 'validee', validated_by: session.user.id, validated_at: new Date().toISOString() })
-  const refuser = (o) => setStatut(o, { statut: 'annulee' })
+  function valider(o) {
+    const e = editProposee[o.id] || {}
+    const cat = o.categorie || 'carburant'
+    const patch = { statut: 'validee', validated_by: session.user.id, validated_at: new Date().toISOString() }
+    if (e.quantite_commandee !== undefined) patch.quantite_commandee = numFR(e.quantite_commandee)
+    if (cat === 'carburant') {
+      if (e.bons_base !== undefined) patch.bons_base = e.bons_base === '' ? null : numFR(e.bons_base)
+      if (e.cheque_montant !== undefined) patch.cheque_montant = e.cheque_montant === '' ? null : numFR(e.cheque_montant)
+    } else if (e.montant_paiement !== undefined) {
+      patch.montant_paiement = e.montant_paiement === '' ? null : numFR(e.montant_paiement)
+    }
+    setStatut(o, patch)
+  }
+  function refuser(o) {
+    const motif = (motifRefus[o.id] || '').trim()
+    if (!motif) { setErr('Indiquez un motif de refus.'); return }
+    setStatut(o, { statut: 'annulee', motif_refus: motif })
+  }
   const lancer = (o) => setStatut(o, { statut: 'lancee', lancee_at: new Date().toISOString(), date_lancement: launch[o.id] || today() })
 
   // Réception — logique partagée avec « Saisie du jour » (OrderReception.jsx) via lib/orderReception.js,
@@ -277,7 +302,19 @@ export default function Orders() {
     } catch (e) { setErr(e.message || String(e)) }
     finally { setRecSubmitting(p => ({ ...p, [o.id]: false })) }
   }
-  async function delOrder(o) { await supabase.from('fuel_orders').delete().eq('id', o.id); load() }
+  // Bug réel constaté : aucune gestion d'erreur ici avant — une suppression bloquée (droits,
+  // contrainte...) ne prévenait jamais l'admin, qui croyait la commande supprimée alors qu'elle
+  // restait active (cas réel : commande carburant "supprimée" toujours présente et réceptionnée
+  // le lendemain). Retourne maintenant explicitement si ça a marché, pour ne jamais fermer le
+  // tiroir sur un échec silencieux.
+  async function delOrder(o) {
+    setErr('')
+    const { error, count } = await supabase.from('fuel_orders').delete({ count: 'exact' }).eq('id', o.id)
+    if (error) { setErr(`Échec de la suppression : ${error.message}`); return false }
+    if (!count) { setErr("La commande n'a pas été supprimée (droits insuffisants ou déjà modifiée) — vérifiez avant de continuer."); return false }
+    await load()
+    return true
+  }
 
   // Recalcule les champs stampés sur fuel_orders (statut, cuve_avant/après, montant, report_date)
   // à partir des réceptions restantes — nécessaire après une correction/suppression admin, sinon
@@ -768,6 +805,9 @@ export default function Orders() {
           const cat = o.categorie || 'carburant'
           const { livre, perte, perteNA, deja, reste } = avancementInfo(o)
           const r = recv[o.id]
+          const peutValiderCette = o.statut === 'proposee' && (can('validate_orders') || can('manage_orders'))
+          const e = editProposee[o.id] || {}
+          const setE = (patch) => setEditProposee(p => ({ ...p, [o.id]: { ...p[o.id], ...patch } }))
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
               <div>
@@ -775,9 +815,28 @@ export default function Orders() {
                 {o.date_lancement && <DrawerRow label="Lancée le" value={frDate(o.date_lancement)} />}
                 {o.statut === 'recue' && o.report_date && <DrawerRow label="Reçue le" value={frDate(o.report_date)} />}
                 <DrawerRow label="Délai lancement→réception" value={delaiJours(o) != null ? `${delaiJours(o)} j` : '—'} />
-                <DrawerRow label="Paiement" mono={false} value={cat === 'carburant'
-                  ? <>{fcfa(orderMontant(o))}{o.bons_base ? ` · bons ${fcfa(o.bons_base)}` : ''}{o.cheque_montant ? ` · chèque ${fcfa(o.cheque_montant)}` : ''}</>
-                  : <>{o.mode_paiement || '—'} · {fcfa(o.montant_paiement)}</>} />
+                {peutValiderCette ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', padding: 'var(--sp-3)', margin: 'var(--sp-2) 0', background: 'var(--surface-raised)', borderRadius: 'var(--radius-1)' }}>
+                    <p style={{ font: '600 13px/1.3 var(--font-ui)', color: 'var(--text-muted)', margin: 0, textTransform: 'uppercase', letterSpacing: '.02em' }}>Vérifier avant de valider — corrigez si besoin</p>
+                    <Field label="Quantité commandée"><Input type="text" inputMode="decimal" numeric value={e.quantite_commandee ?? String(o.quantite_commandee ?? '')} onChange={ev => setE({ quantite_commandee: ev.target.value })} /></Field>
+                    {cat === 'carburant' ? (
+                      <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+                        <Field label="Bons" style={{ flex: 1 }}><Input type="text" inputMode="decimal" numeric value={e.bons_base ?? String(o.bons_base ?? '')} onChange={ev => setE({ bons_base: ev.target.value })} /></Field>
+                        <Field label="Chèque" style={{ flex: 1 }}><Input type="text" inputMode="decimal" numeric value={e.cheque_montant ?? String(o.cheque_montant ?? '')} onChange={ev => setE({ cheque_montant: ev.target.value })} /></Field>
+                      </div>
+                    ) : (
+                      <Field label={`Montant (${o.mode_paiement || 'paiement'})`}><Input type="text" inputMode="decimal" numeric value={e.montant_paiement ?? String(o.montant_paiement ?? '')} onChange={ev => setE({ montant_paiement: ev.target.value })} /></Field>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <DrawerRow label="Quantité commandée" value={`${N(o.quantite_commandee).toLocaleString('fr-FR')}${cat === 'carburant' ? ' L' : ''}`} />
+                    <DrawerRow label="Paiement" mono={false} value={cat === 'carburant'
+                      ? <>{fcfa(orderMontant(o))}{o.bons_base ? ` · bons ${fcfa(o.bons_base)}` : ''}{o.cheque_montant ? ` · chèque ${fcfa(o.cheque_montant)}` : ''}</>
+                      : <>{o.mode_paiement || '—'} · {fcfa(o.montant_paiement)}</>} />
+                  </>
+                )}
+                {o.statut === 'annulee' && o.motif_refus && <DrawerRow label="Motif du refus" mono={false} status="alarm" value={o.motif_refus} />}
                 {(o.statut === 'lancee' || o.statut === 'partielle') && <DrawerRow label="Avancement" value={`reçu ${deja.toLocaleString('fr-FR')}/${N(o.quantite_commandee).toLocaleString('fr-FR')} · reste ${reste.toLocaleString('fr-FR')}`} />}
                 {o.statut === 'recue' && cat === 'carburant' && livre != null && (
                   <DrawerRow label="Avancement" status={perteNA > 0 ? 'alarm' : 'ok'}
@@ -828,10 +887,21 @@ export default function Orders() {
                 </div>
               )}
 
-              {o.statut === 'proposee' && (can('validate_orders') || can('manage_orders')) && (
+              {peutValiderCette && showMotif !== o.id && (
                 <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
                   <Button tone="primary" onClick={() => { valider(o); setDetailId(null) }}>Valider</Button>
-                  <Button tone="danger" onClick={() => { refuser(o); setDetailId(null) }}>Refuser</Button>
+                  <Button tone="danger" onClick={() => setShowMotif(o.id)}>Refuser</Button>
+                </div>
+              )}
+              {peutValiderCette && showMotif === o.id && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+                  <Field label="Motif du refus (visible par le chef de piste)" required>
+                    <Input value={motifRefus[o.id] || ''} onChange={ev => setMotifRefus(p => ({ ...p, [o.id]: ev.target.value }))} placeholder="ex : quantité incohérente, bons mal calculés…" />
+                  </Field>
+                  <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+                    <Button tone="danger" onClick={() => { refuser(o); setShowMotif(null); setDetailId(null) }}>Confirmer le refus</Button>
+                    <Button onClick={() => setShowMotif(null)}>Annuler</Button>
+                  </div>
                 </div>
               )}
               {o.statut === 'proposee' && !can('validate_orders') && !can('manage_orders') && <AlertBanner tone="info" title="En attente">En attente de validation par l'administrateur.</AlertBanner>}
@@ -895,7 +965,7 @@ export default function Orders() {
                 </div>
               )}
 
-              {isAdmin && <Button tone="danger" onClick={() => { delOrder(o); setDetailId(null) }} style={{ alignSelf: 'flex-start' }}>Supprimer la commande</Button>}
+              {isAdmin && <Button tone="danger" onClick={async () => { if (await delOrder(o)) setDetailId(null) }} style={{ alignSelf: 'flex-start' }}>Supprimer la commande</Button>}
             </div>
           )
         })()}
