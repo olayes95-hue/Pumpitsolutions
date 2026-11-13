@@ -78,6 +78,14 @@ export default function Stock() {
   const [journalPage, setJournalPage] = useState(1)
   const [stockPage, setStockPage] = useState(1)
   const [stockSearch, setStockSearch] = useState('')
+  // Inventaire complet (plusieurs produits à la fois) — demande utilisateur : saisir "Corriger
+  // après inventaire" produit par produit n'est pas praticable pour un premier inventaire sur un
+  // catalogue de 200+ articles (ex. supérette). Un seul écran de saisie en liste + un seul enregistrement en lot.
+  const [inventaireOpen, setInventaireOpen] = useState(false)
+  const [inventaireCat, setInventaireCat] = useState(null)
+  const [inventaireSearch, setInventaireSearch] = useState('')
+  const [inventaireValues, setInventaireValues] = useState({})   // {produitNom: "quantité comptée" en texte}
+  const [inventaireBusy, setInventaireBusy] = useState(false)
   useEffect(() => { setSortiesPage(1); setHistPage(1); setJournalPage(1); setStockPage(1); setStockSearch('') }, [catTab])
 
   function openAction(action, overrides) { setNm({ ...blank(action), ...overrides }); setAction(action); setErr('') }
@@ -145,6 +153,35 @@ export default function Stock() {
     }
   }
   async function delMvt(id) { await supabase.from('stock_movements').delete().eq('id', id); load() }
+
+  function theoriqueDe(cat, produit) { return N((theorique.find(t => t.categorie === cat && t.produit === produit) || {}).stock_theorique) }
+  function startInventaire() {
+    setInventaireCat(isVendeuse ? 'superette' : (premiereCat || 'superette'))
+    setInventaireSearch(''); setInventaireValues({}); setErr(''); setInventaireOpen(true)
+  }
+  async function enregistrerInventaire() {
+    const entries = Object.entries(inventaireValues).filter(([, v]) => v !== '' && v != null)
+    if (!entries.length) { setErr('Comptez au moins un article avant d\'enregistrer.'); return }
+    setInventaireBusy(true); setErr('')
+    const rows = entries.map(([produit, v]) => {
+      const pr = products.find(p => p.categorie === inventaireCat && p.nom === produit)
+      const compte = N(v)
+      const ecart = compte - theoriqueDe(inventaireCat, produit)
+      const row = {
+        station_id: stationId, categorie: inventaireCat, produit, type: 'ajustement', source: 'inventaire',
+        quantite: ecart, unite_saisie: pr?.unite || 'unite', qte_saisie: compte,
+        note: `Inventaire du ${frDate(today())}`, date_mouvement: today(), created_by: session.user.id,
+      }
+      if (inventaireCat === 'superette') row.valeur = ecart * N(pr?.prix_achat)
+      return row
+    })
+    const { error } = await supabase.from('stock_movements').insert(rows)
+    setInventaireBusy(false)
+    if (error) { setErr(error.message); return }
+    flash(`Inventaire enregistré — ${rows.length} article(s) ajusté(s)`)
+    setInventaireOpen(false); setInventaireValues({})
+    load()
+  }
 
   const valTotal = valeur.reduce((s, v) => s + N(v.valeur), 0)
   const stockByCat = useMemo(() => { const o = {}; stock.forEach(s => { (o[s.categorie] = o[s.categorie] || []).push(s) }); return o }, [stock])
@@ -259,14 +296,58 @@ export default function Stock() {
 
       {/* ===== ACTIONS GUIDÉES — tout le monde, en premier ===== */}
       <Panel title={isVendeuse ? 'Supérette' : 'Que voulez-vous faire ?'}>
-        {!action ? (
+        {!action && !inventaireOpen ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--sp-4)' }}>
             <ActionTile icon="download" title="J'ai reçu une livraison" desc="Ajouter au stock ce qui vient d'arriver" onClick={() => openAction('entree')} />
             <ActionTile icon="rotate-ccw" title="Autre mouvement" desc="Casse, perte, consommation interne, retour…" onClick={() => openAction('sortie')} />
-            <ActionTile icon="wrench" title="Corriger après inventaire" desc="Ajuster si le compte réel diffère" onClick={() => openAction('ajustement')} />
+            <ActionTile icon="wrench" title="Corriger après inventaire" desc="Ajuster si le compte réel diffère, article par article" onClick={() => openAction('ajustement')} />
+            <ActionTile icon="clipboard-check" title="Faire un inventaire complet" desc="Saisir le comptage de plusieurs articles en une fois" onClick={startInventaire} />
             {isAdmin && <ActionTile icon="shield-alert" title="Correction d'inventaire" desc="Dernier recours — écart inexpliqué, motif obligatoire" onClick={() => openAction('correction')} />}
           </div>
-        ) : (
+        ) : inventaireOpen ? (() => {
+          const catProducts = products.filter(p => p.categorie === inventaireCat)
+          const filtered = inventaireSearch.trim()
+            ? catProducts.filter(p => p.nom.toLowerCase().includes(inventaireSearch.trim().toLowerCase()))
+            : catProducts
+          const nbSaisis = Object.values(inventaireValues).filter(v => v !== '' && v != null).length
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+              <AlertBanner tone="info" title="Inventaire complet">
+                Comptez ce que vous voulez, dans l'ordre que vous voulez — seuls les articles avec une quantité saisie seront enregistrés. L'écart avec le stock théorique est calculé et ajouté automatiquement pour chacun.
+              </AlertBanner>
+              <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'end' }}>
+                {!isVendeuse && (
+                  <Field label="Type de produit" style={{ flex: '1 1 160px' }}>
+                    <Select value={inventaireCat} onChange={e => { setInventaireCat(e.target.value); setInventaireValues({}) }} options={cats.map(([v, l]) => ({ value: v, label: l }))} style={{ width: '100%' }} />
+                  </Field>
+                )}
+                <Field label="Rechercher un article" style={{ flex: '2 1 220px' }}>
+                  <Input value={inventaireSearch} onChange={e => setInventaireSearch(e.target.value)} placeholder="ex : savon, huile…" />
+                </Field>
+                <Tag>{nbSaisis} / {catProducts.length} saisis</Tag>
+              </div>
+              <div style={{ maxHeight: 480, overflowY: 'auto', border: '1px solid var(--border-hairline)', borderRadius: 'var(--radius-1)' }}>
+                {filtered.length ? filtered.map(p => {
+                  const th = theoriqueDe(inventaireCat, p.nom)
+                  const v = inventaireValues[p.nom] ?? ''
+                  const ecart = v !== '' ? N(v) - th : null
+                  return (
+                    <div key={p.nom} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-3) var(--sp-4)', borderBottom: '1px solid var(--border-hairline)' }}>
+                      <span style={{ flex: '1 1 auto', font: '400 14px/1.3 var(--font-ui)', color: 'var(--text-body)' }}>{p.nom}</span>
+                      <span style={{ font: '400 12px/1.25 var(--font-ui)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>théorique {th.toLocaleString('fr-FR')} {p.unite || ''}</span>
+                      <Input size="sm" type="text" inputMode="decimal" numeric value={v} onChange={e => setInventaireValues(p2 => ({ ...p2, [p.nom]: e.target.value }))} placeholder="compté" style={{ width: 90 }} />
+                      {ecart != null && ecart !== 0 && <Badge tone={ecart > 0 ? 'ok' : 'alarm'}>{ecart > 0 ? '+' : ''}{ecart.toLocaleString('fr-FR')}</Badge>}
+                    </div>
+                  )
+                }) : <PanelEmpty icon="search" label="Aucun article ne correspond" />}
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+                <Button tone="primary" disabled={inventaireBusy || !nbSaisis} onClick={enregistrerInventaire}>{inventaireBusy ? 'Enregistrement…' : `Enregistrer l'inventaire (${nbSaisis})`}</Button>
+                <Button onClick={() => setInventaireOpen(false)}>Annuler</Button>
+              </div>
+            </div>
+          )
+        })() : (
           <form onSubmit={addMvt} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
             <AlertBanner tone={action === 'entree' ? 'ok' : action === 'correction' ? 'alarm' : 'warn'} title={{ entree: 'Livraison', sortie: 'Autre mouvement', ajustement: 'Correction', correction: "Correction d'inventaire" }[action]}>
               {{
