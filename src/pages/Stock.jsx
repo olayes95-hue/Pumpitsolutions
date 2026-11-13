@@ -54,7 +54,8 @@ const AUTRE_MOUVEMENT_SOURCES = [
 ]
 
 export default function Stock() {
-  const { session, isAdmin, isVendeuse, isPompiste } = useAuth()
+  const { session, isAdmin, isVendeuse, isPompiste, can } = useAuth()
+  const peutEditerProduits = isAdmin || can('manage_products')
   const { stationId } = useStation()
   const { activite, has } = useOffre()   // activités + fonctions incluses dans l'offre de la station courante
   const [stock, setStock] = useState([])
@@ -86,6 +87,14 @@ export default function Stock() {
   const [inventaireSearch, setInventaireSearch] = useState('')
   const [inventaireValues, setInventaireValues] = useState({})   // {produitNom: "quantité comptée" en texte}
   const [inventaireBusy, setInventaireBusy] = useState(false)
+  // Création d'un article à la volée pendant l'inventaire (demande : la supérette surtout, pour
+  // que l'inventaire reflète exactement ce qu'il y a en stock même pour un article pas encore
+  // au catalogue). Formulaire complet (pas juste nom/prix) pour pouvoir servir de fiche produit
+  // normale une fois validé. Si le compte ne peut pas créer directement (pas manage_products),
+  // l'article part en statut 'en_attente' (même convention que Submit.jsx > ajout vendeuse et
+  // Products.jsx > "Produits à valider") et le directeur est notifié (table `notifications`).
+  const [inventaireNouveau, setInventaireNouveau] = useState(null)   // null | objet brouillon
+  const [inventaireCreateBusy, setInventaireCreateBusy] = useState(false)
   useEffect(() => { setSortiesPage(1); setHistPage(1); setJournalPage(1); setStockPage(1); setStockSearch('') }, [catTab])
 
   function openAction(action, overrides) { setNm({ ...blank(action), ...overrides }); setAction(action); setErr('') }
@@ -157,7 +166,7 @@ export default function Stock() {
   function theoriqueDe(cat, produit) { return N((theorique.find(t => t.categorie === cat && t.produit === produit) || {}).stock_theorique) }
   function startInventaire() {
     setInventaireCat(isVendeuse ? 'superette' : (premiereCat || 'superette'))
-    setInventaireSearch(''); setInventaireValues({}); setErr(''); setInventaireOpen(true)
+    setInventaireSearch(''); setInventaireValues({}); setInventaireNouveau(null); setErr(''); setInventaireOpen(true)
   }
   async function enregistrerInventaire() {
     const entries = Object.entries(inventaireValues).filter(([, v]) => v !== '' && v != null)
@@ -181,6 +190,45 @@ export default function Stock() {
     flash(`Inventaire enregistré — ${rows.length} article(s) ajusté(s)`)
     setInventaireOpen(false); setInventaireValues({})
     load()
+  }
+
+  function ouvrirCreationProduit(nomPropose) {
+    setInventaireNouveau({
+      nom: nomPropose || '', unite: 'unité', prix_achat: '', prix_vente: '', seuil: '',
+      conditionnement_nom: '', conditionnement_qte: '', prix_achat_gros: '', compte: '',
+    })
+  }
+  async function creerProduitInventaire() {
+    const nf = inventaireNouveau
+    const nom = (nf.nom || '').trim()
+    if (!nom) { setErr('Donnez un nom à l\'article.'); return }
+    setInventaireCreateBusy(true); setErr('')
+    const payload = {
+      categorie: inventaireCat, nom, unite: nf.unite || 'unité',
+      prix_achat: numFR(nf.prix_achat), prix_vente: numFR(nf.prix_vente), seuil: numFR(nf.seuil) ?? 0,
+      conditionnement_nom: nf.conditionnement_nom || null, conditionnement_qte: numFR(nf.conditionnement_qte),
+      prix_achat_gros: numFR(nf.prix_achat_gros),
+      station_id: stationId, created_by: session.user.id, ordre: 100,
+      statut: peutEditerProduits ? 'valide' : 'en_attente', actif: true,
+    }
+    let { data, error } = await supabase.from('products').insert(payload).select().single()
+    if (error && /duplicate|unique/i.test(error.message)) {
+      const ex = await supabase.from('products').select('*').eq('categorie', inventaireCat).eq('nom', nom).maybeSingle()
+      data = ex.data
+    } else if (error) { setInventaireCreateBusy(false); setErr(error.message); return }
+    if (!data) { setInventaireCreateBusy(false); setErr('Article introuvable après création.'); return }
+    const vientDetreCree = !error
+    if (vientDetreCree && !peutEditerProduits) {
+      const catLabel = (cats.find(([v]) => v === inventaireCat) || [])[1] || inventaireCat
+      await supabase.from('notifications').insert({
+        station_id: stationId, type: 'produit_propose',
+        message: `${session.user.email} a créé l'article « ${nom} » (${catLabel}) pendant un inventaire — à valider dans Produits & prix.`,
+      })
+    }
+    setProducts(p => [...p, data])
+    if (nf.compte !== '') setInventaireValues(v => ({ ...v, [nom]: nf.compte }))
+    flash(peutEditerProduits ? 'Article créé' : 'Article créé — en attente de validation par la hiérarchie')
+    setInventaireNouveau(null); setInventaireCreateBusy(false)
   }
 
   const valTotal = valeur.reduce((s, v) => s + N(v.valeur), 0)
@@ -310,10 +358,47 @@ export default function Stock() {
             ? catProducts.filter(p => p.nom.toLowerCase().includes(inventaireSearch.trim().toLowerCase()))
             : catProducts
           const nbSaisis = Object.values(inventaireValues).filter(v => v !== '' && v != null).length
+          const avecConditionnement = inventaireCat === 'superette' || inventaireCat === 'lubrifiant'
+          if (inventaireNouveau) {
+            const nf = inventaireNouveau
+            const setNf = (patch) => setInventaireNouveau(n => ({ ...n, ...patch }))
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+                <AlertBanner tone={peutEditerProduits ? 'ok' : 'warn'} title="Nouvel article">
+                  {peutEditerProduits
+                    ? 'Cet article sera disponible immédiatement au catalogue.'
+                    : "Cet article partira en attente de validation — le directeur sera notifié et devra le valider (Produits & prix > Produits à valider) avant qu'il soit utilisable ailleurs dans l'app."}
+                </AlertBanner>
+                <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+                  <Field label="Nom" style={{ flex: '2 1 220px' }}><Input value={nf.nom} onChange={e => setNf({ nom: e.target.value })} /></Field>
+                  <Field label="Unité" style={{ flex: '1 1 140px' }}>
+                    <Select value={nf.unite} onChange={e => setNf({ unite: e.target.value })} options={['unité', 'bouteille', 'bidon', 'carton', 'fût', 'litre'].map(u => ({ value: u, label: u }))} style={{ width: '100%' }} />
+                  </Field>
+                  <Field label="Seuil d'alerte" style={{ flex: '1 1 120px' }}><Input type="text" inputMode="decimal" numeric value={nf.seuil} onChange={e => setNf({ seuil: e.target.value })} /></Field>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+                  <Field label="Prix d'achat (unité)" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric value={nf.prix_achat} onChange={e => setNf({ prix_achat: e.target.value })} /></Field>
+                  <Field label="Prix de vente" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric value={nf.prix_vente} onChange={e => setNf({ prix_vente: e.target.value })} /></Field>
+                  <Field label="Quantité comptée maintenant" style={{ flex: '1 1 180px' }}><Input type="text" inputMode="decimal" numeric value={nf.compte} onChange={e => setNf({ compte: e.target.value })} placeholder="facultatif" /></Field>
+                </div>
+                {avecConditionnement && (
+                  <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+                    <Field label="Conditionnement" style={{ flex: '1 1 160px' }}><Input value={nf.conditionnement_nom} onChange={e => setNf({ conditionnement_nom: e.target.value })} placeholder="ex : carton" /></Field>
+                    <Field label="Qté par conditionnement" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric value={nf.conditionnement_qte} onChange={e => setNf({ conditionnement_qte: e.target.value })} placeholder="ex : 12" /></Field>
+                    <Field label="Prix du gros" style={{ flex: '1 1 160px' }}><Input type="text" inputMode="decimal" numeric value={nf.prix_achat_gros} onChange={e => setNf({ prix_achat_gros: e.target.value })} /></Field>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+                  <Button tone="primary" disabled={inventaireCreateBusy} onClick={creerProduitInventaire}>{inventaireCreateBusy ? 'Création…' : 'Créer l\'article'}</Button>
+                  <Button onClick={() => setInventaireNouveau(null)}>Annuler</Button>
+                </div>
+              </div>
+            )
+          }
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
               <AlertBanner tone="info" title="Inventaire complet">
-                Comptez ce que vous voulez, dans l'ordre que vous voulez — seuls les articles avec une quantité saisie seront enregistrés. L'écart avec le stock théorique est calculé et ajouté automatiquement pour chacun.
+                Comptez ce que vous voulez, dans l'ordre que vous voulez — seuls les articles avec une quantité saisie seront enregistrés. L'écart avec le stock théorique est calculé et ajouté automatiquement pour chacun. Article absent de la liste ? Créez-le directement.
               </AlertBanner>
               <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'end' }}>
                 {!isVendeuse && (
@@ -325,6 +410,7 @@ export default function Stock() {
                   <Input value={inventaireSearch} onChange={e => setInventaireSearch(e.target.value)} placeholder="ex : savon, huile…" />
                 </Field>
                 <Tag>{nbSaisis} / {catProducts.length} saisis</Tag>
+                <Button size="sm" onClick={() => ouvrirCreationProduit(inventaireSearch.trim())}>+ Créer un article</Button>
               </div>
               <div style={{ maxHeight: 480, overflowY: 'auto', border: '1px solid var(--border-hairline)', borderRadius: 'var(--radius-1)' }}>
                 {filtered.length ? filtered.map(p => {
@@ -334,12 +420,20 @@ export default function Stock() {
                   return (
                     <div key={p.nom} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-3) var(--sp-4)', borderBottom: '1px solid var(--border-hairline)' }}>
                       <span style={{ flex: '1 1 auto', font: '400 14px/1.3 var(--font-ui)', color: 'var(--text-body)' }}>{p.nom}</span>
+                      {p.statut === 'en_attente' && <Badge tone="warn">En attente de validation</Badge>}
                       <span style={{ font: '400 12px/1.25 var(--font-ui)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>théorique {th.toLocaleString('fr-FR')} {p.unite || ''}</span>
                       <Input size="sm" type="text" inputMode="decimal" numeric value={v} onChange={e => setInventaireValues(p2 => ({ ...p2, [p.nom]: e.target.value }))} placeholder="compté" style={{ width: 90 }} />
                       {ecart != null && ecart !== 0 && <Badge tone={ecart > 0 ? 'ok' : 'alarm'}>{ecart > 0 ? '+' : ''}{ecart.toLocaleString('fr-FR')}</Badge>}
                     </div>
                   )
-                }) : <PanelEmpty icon="search" label="Aucun article ne correspond" />}
+                }) : (
+                  <div style={{ padding: 'var(--sp-4)' }}>
+                    <PanelEmpty icon="search" label="Aucun article ne correspond" />
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                      <Button size="sm" onClick={() => ouvrirCreationProduit(inventaireSearch.trim())}>+ Créer « {inventaireSearch.trim() || 'cet article'} »</Button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
                 <Button tone="primary" disabled={inventaireBusy || !nbSaisis} onClick={enregistrerInventaire}>{inventaireBusy ? 'Enregistrement…' : `Enregistrer l'inventaire (${nbSaisis})`}</Button>

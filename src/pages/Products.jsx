@@ -72,6 +72,8 @@ export default function Products() {
   // cours, pour ne pas en reproposer une deuxième tant que la première n'est pas traitée.
   const [original, setOriginal] = useState({})
   const [mesDemandes, setMesDemandes] = useState([])
+  const [pendingSel, setPendingSel] = useState(() => new Set())
+  const [pendingBusy, setPendingBusy] = useState(false)
 
   async function load() {
     const { data } = await supabase.from('products').select('*').order('categorie').order('ordre')
@@ -176,9 +178,23 @@ export default function Products() {
       categorie: p.categorie, nom: p.nom, unite: p.unite,
       prix_achat: numFR(p.prix_achat), prix_vente: numFR(p.prix_vente), seuil: numFR(p.seuil) ?? 0,
       statut: 'valide', actif: true }).eq('id', p.id)
-    error ? setErr(error.message) : (flash('Produit validé'), load())
+    return !error
   }
-  async function reject(id) { await supabase.from('products').delete().eq('id', id); load() }
+  async function reject(id) { await supabase.from('products').delete().eq('id', id) }
+  async function validateOne(p) { (await validate(p)) ? (flash('Produit validé'), load()) : setErr('Échec de la validation') }
+  async function rejectOne(id) { await reject(id); load() }
+  function togglePendingSel(id, v) { setPendingSel(s => { const n = new Set(s); v ? n.add(id) : n.delete(id); return n }) }
+  async function validateSelection() {
+    setPendingBusy(true)
+    const toValidate = pending.filter(p => pendingSel.has(p.id))
+    await Promise.all(toValidate.map(validate))
+    setPendingBusy(false); setPendingSel(new Set()); flash(`${toValidate.length} produit(s) validé(s)`); load()
+  }
+  async function rejectSelection() {
+    setPendingBusy(true)
+    await Promise.all([...pendingSel].map(reject))
+    setPendingBusy(false); setPendingSel(new Set()); flash(`${pendingSel.size} produit(s) rejeté(s)`); load()
+  }
 
   const pending = list.filter(p => p.statut === 'en_attente')
   const shownAll = list.filter(p => p.categorie === cat && p.statut !== 'en_attente'
@@ -187,6 +203,7 @@ export default function Products() {
   const shown = shownAll.slice((page - 1) * pageSize, page * pageSize)
 
   const pendingColumns = [
+    { key: 'sel', header: '', width: 32, render: p => <Checkbox checked={pendingSel.has(p.id)} onChange={v => togglePendingSel(p.id, v)} /> },
     { key: 'nom', header: 'Nom', width: 240, render: p => <Input size="sm" value={p.nom || ''} onChange={e => up(p.id, 'nom', e.target.value)} style={{ width: '100%' }} /> },
     { key: 'categorie', header: 'Catégorie', render: p => <Select size="sm" value={p.categorie || 'superette'} onChange={e => up(p.id, 'categorie', e.target.value)} options={CAT_OPTIONS} style={{ width: '100%' }} /> },
     { key: 'unite', header: 'Unité', render: p => <Select size="sm" value={p.unite || 'unité'} onChange={e => up(p.id, 'unite', e.target.value)} options={UNITE_OPTIONS} style={{ width: '100%' }} /> },
@@ -195,8 +212,8 @@ export default function Products() {
     { key: 'seuil', header: 'Seuil', align: 'right', render: p => <Input size="sm" numeric value={p.seuil ?? ''} onChange={e => up(p.id, 'seuil', e.target.value)} style={{ width: 70 }} /> },
     { key: 'actions', header: '', align: 'right', render: p => (
       <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end' }}>
-        <Button size="sm" tone="dark" onClick={() => validate(p)}>Valider</Button>
-        <Button size="sm" onClick={() => reject(p.id)}>Rejeter</Button>
+        <Button size="sm" tone="dark" onClick={() => validateOne(p)}>Valider</Button>
+        <Button size="sm" onClick={() => rejectOne(p.id)}>Rejeter</Button>
       </div>
     ) },
   ]
@@ -322,8 +339,14 @@ export default function Products() {
       {peutEditerDirect && pending.length > 0 && (
         <Panel title="Produits à valider" meta={`${pending.length}`} status="warn" flush>
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
-            Ajoutés par une vendeuse pendant la vente. Corrigez la catégorie ou les prix si besoin, puis <b>Valider</b> (ou rejeter).
+            Ajoutés pendant la vente ou un inventaire. Corrigez la catégorie ou les prix si besoin, puis <b>Valider</b> (ou rejeter) — un par un ou par lot.
           </p>
+          {pendingSel.size > 0 && (
+            <div style={{ display: 'flex', gap: 'var(--sp-3)', margin: 'var(--sp-4) var(--gutter-panel) 0' }}>
+              <Button size="sm" tone="dark" disabled={pendingBusy} onClick={validateSelection}>Valider la sélection ({pendingSel.size})</Button>
+              <Button size="sm" disabled={pendingBusy} onClick={rejectSelection}>Rejeter la sélection ({pendingSel.size})</Button>
+            </div>
+          )}
           <div style={{ marginTop: 'var(--sp-4)' }}>
             <DataTable columns={pendingColumns} rows={pending} />
           </div>
