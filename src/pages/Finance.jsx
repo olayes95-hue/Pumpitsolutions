@@ -52,7 +52,16 @@ const blankCharge = () => ({ categorie: 'LOYER', montant: '', note: '', statut: 
 
 export default function Finance() {
   const { session, can } = useAuth()
-  const { stationId, current } = useStation()
+  const { stationId, current, stations } = useStation()
+  // Vue consolidée (demande utilisateur, directeur multi-stations) : résumé volontairement
+  // limité à des totaux sûrs (produits/charges/résultat avant IS, trésorerie bancaire) — pas une
+  // reconstruction du Compte de résultat/Bilan complet station par station, trop de réglages
+  // propres à chaque station (overrides d'impôt, soldes d'ouverture, mois verrouillés) pour les
+  // additionner sans risque de donner un chiffre trompeur. Calcul et requêtes totalement séparés
+  // de tout le reste de la page, qui garde sa station active comme avant.
+  const [consolideOpen, setConsolideOpen] = useState(false)
+  const [consolideRows, setConsolideRows] = useState([])   // par station : {station_id, produits, totCharges, resultat}
+  const [tresorerieConsolidee, setTresorerieConsolidee] = useState(null)
   const [ventes, setVentes] = useState([])
   const [commissionReelle, setCommissionReelle] = useState([])   // v_commission_reelle_mensuelle — quantité vendue × (prix vente − prix achat), gaz + lubrifiant
   const [commissionSuperette, setCommissionSuperette] = useState([])   // v_commission_superette_mensuelle — idem, supérette (si settings.superette_commission_reelle)
@@ -170,6 +179,51 @@ export default function Finance() {
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [stationId])
+
+  useEffect(() => {
+    if (!consolideOpen || stations.length < 2) return
+    const ids = stations.map(s => s.id)
+    ;(async () => {
+      const [v, cr, cs, exp, pe, ch, crm, cb] = await Promise.all([
+        supabase.from('v_ventes_mensuelles').select('station_id,mois,commission_carburant,ventes_superette').in('station_id', ids),
+        supabase.from('v_commission_reelle_mensuelle').select('station_id,mois,commission_gaz,commission_lubrifiant,commission_gaz_promo').in('station_id', ids),
+        supabase.from('v_commission_superette_mensuelle').select('station_id,mois,commission_superette').in('station_id', ids),
+        supabase.from('expenses').select('station_id,report_date,categorie,montant').in('station_id', ids),
+        supabase.from('v_pertes_mensuelles').select('station_id,mois,perte_montant').in('station_id', ids),
+        supabase.from('charges').select('station_id,mois,categorie,montant').in('station_id', ids),
+        supabase.from('client_remboursements').select('station_id,report_date,montant').in('station_id', ids),
+        supabase.from('v_compte_bancaire').select('*').in('station_id', ids),
+      ])
+      // Même formule que le calcul mono-station ci-dessus (produits/totCharges/resultat), rejouée
+      // station par station — settings (taux/commission réelle supérette) est un réglage global à
+      // l'organisation, donc commun à toutes les stations, pas besoin de le recharger par station.
+      const inPeriodC = (m) => mois ? m === mois : (m || '').startsWith(annee)
+      const rows = ids.map(id => {
+        const vS = (v.data || []).filter(r => r.station_id === id && inPeriodC(r.mois))
+        const crS = (cr.data || []).filter(r => r.station_id === id && inPeriodC(r.mois))
+        const csS = (cs.data || []).filter(r => r.station_id === id && inPeriodC(r.mois))
+        const expS = (exp.data || []).filter(r => r.station_id === id && inPeriodC((r.report_date || '').slice(0, 7)) && (r.categorie === 'SBEE' || r.categorie === 'CARBURANT'))
+        const peS = (pe.data || []).filter(r => r.station_id === id && inPeriodC(r.mois))
+        const chS = (ch.data || []).filter(r => r.station_id === id && inPeriodC(r.mois))
+        const crmS = (crm.data || []).filter(r => r.station_id === id && inPeriodC((r.report_date || '').slice(0, 7)))
+        const commCarbS = vS.reduce((s, r) => s + N(r.commission_carburant), 0)
+        const commGazLubS = crS.reduce((s, r) => s + N(r.commission_gaz) + N(r.commission_lubrifiant) + N(r.commission_gaz_promo), 0)
+        const commSuperetteS = settings.superette_commission_reelle
+          ? csS.reduce((s, r) => s + N(r.commission_superette), 0)
+          : vS.reduce((s, r) => s + N(r.ventes_superette), 0) * N(settings.taux_superette) / 100
+        const autresProduitsS = chS.filter(c => c.categorie === REVENU_CAT).reduce((s, c) => s + N(c.montant), 0)
+        const totManuelS = chS.filter(c => c.categorie !== REVENU_CAT && c.categorie !== CAT_IMPOT_RESULTAT).reduce((s, c) => s + N(c.montant), 0)
+        const totAutoS = expS.reduce((s, r) => s + N(r.montant), 0)
+        const perteMontantS = peS.reduce((s, r) => s + N(r.perte_montant), 0)
+        const rembClientsS = crmS.reduce((s, r) => s + N(r.montant), 0)
+        const produitsS = commCarbS + commGazLubS + commSuperetteS + autresProduitsS
+        const totChargesS = totAutoS + totManuelS + perteMontantS - rembClientsS
+        return { station_id: id, produits: produitsS, totCharges: totChargesS, resultat: produitsS - totChargesS }
+      })
+      setConsolideRows(rows)
+      setTresorerieConsolidee((cb.data || []).reduce((s, r) => s + N(r.solde_actuel), 0))
+    })()
+  }, [consolideOpen, stations, mois, annee, settings.superette_commission_reelle, settings.taux_superette])
 
   const annees = useMemo(() => [...new Set([...ventes.map(v => v.mois.slice(0, 4)), today().slice(0, 4)])].sort(), [ventes])
 
@@ -761,6 +815,37 @@ export default function Finance() {
         <AlertBanner tone="info" title="Mois verrouillé">
           Ce mois a été clôturé — aucune charge fixe ne peut y être ajoutée, modifiée ou supprimée tant qu'il n'est pas déverrouillé.
         </AlertBanner>
+      )}
+
+      {stations.length > 1 && (
+        <Panel title="Point financier consolidé — toutes les stations" status="accent"
+          actions={<Button size="sm" tone={consolideOpen ? 'dark' : 'neutral'} onClick={() => setConsolideOpen(v => !v)}>{consolideOpen ? 'Masquer' : 'Afficher'}</Button>}>
+          {!consolideOpen ? (
+            <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
+              Résumé additionné sur : {stations.map(s => s.nom).join(', ')} — mêmes formules que ci-dessous, rejouées par station. Ne remplace pas le détail (overrides d'impôt, bilan) qui reste par station.
+            </p>
+          ) : consolideRows.length ? (() => {
+            const produitsTot = consolideRows.reduce((s, r) => s + r.produits, 0)
+            const chargesTot = consolideRows.reduce((s, r) => s + r.totCharges, 0)
+            const resultatTot = produitsTot - chargesTot
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-4)' }}>
+                  <Kpi label="Produits (commissions)" value={fcfa(produitsTot)} />
+                  <Kpi label="Charges totales" value={fcfa(chargesTot)} />
+                  <Kpi label="Résultat (avant IS)" value={fcfa(resultatTot)} status={resultatTot < 0 ? 'alarm' : 'ok'} />
+                  {tresorerieConsolidee != null && <Kpi label="Trésorerie bancaire" value={fcfa(tresorerieConsolidee)} sub="solde actuel, toutes stations" />}
+                </div>
+                <DataTable columns={[
+                  { key: 'station', header: 'Station' },
+                  { key: 'produits', header: 'Produits', numeric: true, align: 'right', render: r => fcfa(r.produits) },
+                  { key: 'totCharges', header: 'Charges', numeric: true, align: 'right', render: r => fcfa(r.totCharges) },
+                  { key: 'resultat', header: 'Résultat (avant IS)', numeric: true, align: 'right', render: r => <span style={{ color: r.resultat < 0 ? 'var(--state-alarm)' : 'var(--text-body)' }}>{fcfa(r.resultat)}</span> },
+                ]} rows={consolideRows.map(r => ({ ...r, id: r.station_id, station: stations.find(s => s.id === r.station_id)?.nom || r.station_id }))} />
+              </div>
+            )
+          })() : <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Chargement…</p>}
+        </Panel>
       )}
 
       <Tabs items={TABS} value={tab} onChange={setTab} />
