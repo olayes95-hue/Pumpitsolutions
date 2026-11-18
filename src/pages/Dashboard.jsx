@@ -38,15 +38,24 @@ function periodBounds(year, month) {
 }
 
 export default function Dashboard() {
-  const { stationId } = useStation()
+  const { stationId, setStationId, stations } = useStation()
   const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const nav = useNavigate()
+  // Vue consolidée : agrège tous les écrans de pilotage sur l'ensemble des stations accessibles
+  // (directeur multi-stations) au lieu d'une seule à la fois — demande utilisateur. Reste locale
+  // à cette page : le sélecteur de station global (en-tête) garde son sens normal pour toutes les
+  // actions de saisie ailleurs dans l'app, seule la lecture ici change de périmètre.
+  const [vueConsolidee, setVueConsolidee] = useState(false)
+  const stationIdsActifs = vueConsolidee ? stations.map(s => s.id) : (stationId ? [stationId] : [])
+  const stationIdsKey = stationIdsActifs.join(',')
+  const nomStation = (id) => stations.find(s => s.id === id)?.nom || `Station ${id}`
   const [months, setMonths] = useState([])   // v_ventes_mensuelles (agrégé, rapide)
   const [alerts, setAlerts] = useState([])   // v_alerts des 60 derniers jours (station active), triées par gravité
   const [stock, setStock] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [gazEtats, setGazEtats] = useState([])   // v_gaz_etats_bouteilles (migration_v134) — pleines/vides/consignées par taille
   const [ecartJauge, setEcartJauge] = useState(null)   // v_ecart_jauge_mensuel (migration_v142) — mois courant, {ecart_ess_cumule, ecart_gas_cumule}
+  const [stockParStation, setStockParStation] = useState([])   // vue consolidée : autonomie/écart de jauge ne se somment pas, détail station par station
   const [loading, setLoading] = useState(true)
   // Par défaut, mois en cours (pas le dernier mois avec des données, qui peut être ancien).
   const today = new Date().toISOString().slice(0, 10)
@@ -64,33 +73,33 @@ export default function Dashboard() {
   const [poleUniteSeries, setPoleUniteSeries] = useState([])   // [{mois, value}] pour gaz/supérette en mode Unité (carburant vient directement de `months`)
 
   useEffect(() => {
-    if (!stationId) return
-    supabase.from('charges').select('mois,categorie,montant').eq('station_id', stationId).then(({ data }) => setCharges(data || []))
-  }, [stationId])
+    if (!stationIdsActifs.length) return
+    supabase.from('charges').select('mois,categorie,montant').in('station_id', stationIdsActifs).then(({ data }) => setCharges(data || []))
+  }, [stationIdsKey])
 
   // Chargé seulement quand nécessaire : la tendance mensuelle en UNITÉ (pas en CFA) n'existe pas
   // dans l'agrégat v_ventes_mensuelles pour gaz/supérette (qui ne connaît que la valeur en F) —
   // il faut regrouper les lignes brutes par mois côté client. Le carburant, lui, a déjà sa
   // colonne litres_carburant dans l'agrégat mensuel : pas besoin de requête supplémentaire.
   useEffect(() => {
-    if (!uniteMode || !stationId || poleEvolution === 'carburant') { setPoleUniteSeries([]); return }
+    if (!uniteMode || !stationIdsActifs.length || poleEvolution === 'carburant') { setPoleUniteSeries([]); return }
     const { from, to } = periodBounds(year, month)
     ;(async () => {
       const byMonth = {}
       if (poleEvolution === 'gaz') {
-        const { data } = await supabase.from('daily_reports').select('report_date,gaz_vendu_3,gaz_vendu_6,gaz_vendu_12,gaz_vendu_38').eq('station_id', stationId).gte('report_date', from).lte('report_date', to)
+        const { data } = await supabase.from('daily_reports').select('report_date,gaz_vendu_3,gaz_vendu_6,gaz_vendu_12,gaz_vendu_38').in('station_id', stationIdsActifs).gte('report_date', from).lte('report_date', to)
         for (const r of (data || [])) {
           const m = r.report_date.slice(0, 7)
           byMonth[m] = (byMonth[m] || 0) + N(r.gaz_vendu_3) + N(r.gaz_vendu_6) + N(r.gaz_vendu_12) + N(r.gaz_vendu_38)
         }
       } else if (poleEvolution === 'superette') {
-        const { data } = await supabase.from('superette_sales').select('report_date,quantite').eq('station_id', stationId).gte('report_date', from).lte('report_date', to)
+        const { data } = await supabase.from('superette_sales').select('report_date,quantite').in('station_id', stationIdsActifs).gte('report_date', from).lte('report_date', to)
         for (const r of (data || [])) {
           const m = r.report_date.slice(0, 7)
           byMonth[m] = (byMonth[m] || 0) + N(r.quantite)
         }
       } else if (poleEvolution === 'lubrifiant') {
-        const { data } = await supabase.from('v_sorties_deduites').select('report_date,sortie_deduite').eq('station_id', stationId).eq('categorie', 'lubrifiant').gte('report_date', from).lte('report_date', to)
+        const { data } = await supabase.from('v_sorties_deduites').select('report_date,sortie_deduite').in('station_id', stationIdsActifs).eq('categorie', 'lubrifiant').gte('report_date', from).lte('report_date', to)
         for (const r of (data || [])) {
           const m = r.report_date.slice(0, 7)
           byMonth[m] = (byMonth[m] || 0) + Math.max(0, N(r.sortie_deduite))
@@ -98,7 +107,7 @@ export default function Dashboard() {
       }
       setPoleUniteSeries(Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).map(([mois, value]) => ({ mois, value })))
     })()
-  }, [uniteMode, poleEvolution, stationId, year, month])
+  }, [uniteMode, poleEvolution, stationIdsKey, year, month])
 
   useEffect(() => {
     supabase.from('products').select('nom,prix_vente').eq('categorie', 'gaz').then(({ data }) => {
@@ -110,39 +119,60 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (!stationId) return
+    if (!stationIdsActifs.length) return
     const { from, to } = periodBounds(year, month)
     ;(async () => {
       const [dr, recon, exp, sup, lub] = await Promise.all([
-        supabase.from('daily_reports').select('ess_litres,ess_pu,ess_bon,ess_espece,gas_litres,gas_pu,gas_bon,gas_espece,gaz_vendu_3,gaz_vendu_6,gaz_vendu_12,gaz_vendu_38').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
+        supabase.from('daily_reports').select('ess_litres,ess_pu,ess_bon,ess_espece,gas_litres,gas_pu,gas_bon,gas_espece,gaz_vendu_3,gaz_vendu_6,gaz_vendu_12,gaz_vendu_38').in('station_id', stationIdsActifs).gte('report_date', from).lte('report_date', to),
         // 3 lignes/jour (une par pôle) : sur "Toutes années", sans tri+limite explicites, la
         // limite par défaut de l'API (1000 lignes) tronque arbitrairement (cf. bug Historique).
-        supabase.from('v_pole_recon_jour').select('*').eq('station_id', stationId).gte('report_date', from).lte('report_date', to).order('report_date', { ascending: false }).limit(5000),
-        supabase.from('expenses').select('categorie,montant,non_cash').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
-        supabase.from('superette_sales').select('nom,montant,quantite').eq('station_id', stationId).gte('report_date', from).lte('report_date', to),
-        supabase.from('v_sorties_deduites').select('produit,sortie_deduite').eq('station_id', stationId).eq('categorie', 'lubrifiant').gte('report_date', from).lte('report_date', to),
+        supabase.from('v_pole_recon_jour').select('*').in('station_id', stationIdsActifs).gte('report_date', from).lte('report_date', to).order('report_date', { ascending: false }).limit(5000 * Math.max(1, stationIdsActifs.length)),
+        supabase.from('expenses').select('categorie,montant,non_cash').in('station_id', stationIdsActifs).gte('report_date', from).lte('report_date', to),
+        supabase.from('superette_sales').select('nom,montant,quantite').in('station_id', stationIdsActifs).gte('report_date', from).lte('report_date', to),
+        supabase.from('v_sorties_deduites').select('produit,sortie_deduite').in('station_id', stationIdsActifs).eq('categorie', 'lubrifiant').gte('report_date', from).lte('report_date', to),
       ])
       setPolePeriod({ dr: dr.data || [], recon: recon.data || [], exp: exp.data || [], sup: sup.data || [], lub: lub.data || [] })
     })()
-  }, [stationId, year, month])
+  }, [stationIdsKey, year, month])
 
   async function loadStock() {
-    if (!stationId) return
+    if (!stationIdsActifs.length) return
     const [ls, sf, ge, ej] = await Promise.all([
-      supabase.from('v_latest_stock').select('*').eq('station_id', stationId).maybeSingle(),
-      supabase.from('v_stock_forecast').select('*').eq('station_id', stationId).maybeSingle(),
-      supabase.from('v_gaz_etats_bouteilles').select('*').eq('station_id', stationId),
-      supabase.from('v_ecart_jauge_mensuel').select('*').eq('station_id', stationId).eq('mois', new Date().toISOString().slice(0, 7)).maybeSingle(),
+      supabase.from('v_latest_stock').select('*').in('station_id', stationIdsActifs),
+      supabase.from('v_stock_forecast').select('*').in('station_id', stationIdsActifs),
+      supabase.from('v_gaz_etats_bouteilles').select('*').in('station_id', stationIdsActifs),
+      supabase.from('v_ecart_jauge_mensuel').select('*').in('station_id', stationIdsActifs).eq('mois', new Date().toISOString().slice(0, 7)),
     ])
-    setStock(ls.data || null); setForecast(sf.data || null); setGazEtats(ge.data || []); setEcartJauge(ej.data || null)
+    const lsRows = ls.data || [], sfRows = sf.data || [], ejRows = ej.data || []
+    if (!vueConsolidee) {
+      setStock(lsRows[0] || null); setForecast(sfRows[0] || null); setEcartJauge(ejRows[0] || null)
+    } else {
+      // Essence/gasoil/bons en cuve s'additionnent sans problème ; l'autonomie (en jours) et
+      // l'écart de jauge sont des mesures par station qui ne veulent rien dire mélangées — on les
+      // garde en détail par station (stockParStation) plutôt que de fabriquer un chiffre trompeur.
+      setStock(lsRows.length ? {
+        ess_stock: lsRows.reduce((s, r) => s + N(r.ess_stock), 0),
+        gas_stock: lsRows.reduce((s, r) => s + N(r.gas_stock), 0),
+        bons_restant: lsRows.reduce((s, r) => s + N(r.bons_restant), 0),
+        bons_utilises_depuis: lsRows.reduce((s, r) => s + N(r.bons_utilises_depuis), 0),
+        derniere_date: lsRows.map(r => r.derniere_date).filter(Boolean).sort().slice(-1)[0] || null,
+      } : null)
+      setForecast(null); setEcartJauge(null)
+    }
+    setStockParStation(lsRows.map(r => {
+      const sf1 = sfRows.find(s => s.station_id === r.station_id)
+      const ej1 = ejRows.find(e => e.station_id === r.station_id)
+      return { ...r, station_nom: nomStation(r.station_id), jours_essence: sf1?.jours_essence, jours_gasoil: sf1?.jours_gasoil, ecart_ess_cumule: ej1?.ecart_ess_cumule, ecart_gas_cumule: ej1?.ecart_gas_cumule }
+    }))
+    setGazEtats(ge.data || [])
     setRefreshedAt(new Date().toLocaleTimeString('fr-FR'))
   }
-  useEffect(() => { if (!stationId) return
+  useEffect(() => { if (!stationIdsActifs.length) return
     setLoading(true)
     // Le stock (rapide) s'affiche en premier ; les autres blocs se remplissent dès qu'ils arrivent,
     // sans s'attendre les uns les autres. La vue mensuelle (la plus lourde) ne bloque plus le rendu.
     loadStock()
-    supabase.from('v_ventes_mensuelles').select('*').eq('station_id', stationId).order('mois')
+    supabase.from('v_ventes_mensuelles').select('*').in('station_id', stationIdsActifs).order('mois')
       .then(({ data }) => { setMonths(data || []); setLoading(false) })
     // les alertes (vue lourde) se chargent après l'affichage, sans bloquer — fenêtre glissante de
     // 60 jours (pas le mois calendaire en cours) : un manque à verser d'un mois encore non réglé
@@ -152,8 +182,8 @@ export default function Dashboard() {
     const day = new Date().toISOString().slice(0, 10)
     const cutoff60 = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10)
     Promise.all([
-      supabase.from('v_alerts').select('*').eq('station_id', stationId).gte('report_date', cutoff60).lte('report_date', day),
-      supabase.from('alert_dismissals').select('report_date,type').eq('station_id', stationId),
+      supabase.from('v_alerts').select('*').in('station_id', stationIdsActifs).gte('report_date', cutoff60).lte('report_date', day),
+      supabase.from('alert_dismissals').select('report_date,type').in('station_id', stationIdsActifs),
     ]).then(([al, dis]) => {
       // v_alerts n'a aucune notion de "traité" (vue calculée) — sans ce filtre, une alerte
       // marquée traitée sur la page Alertes continuait d'apparaître ici indéfiniment.
@@ -161,12 +191,14 @@ export default function Dashboard() {
       const activeAlerts = filtrerAlertes(al.data, has).filter(a => !dismissedKeys.has(a.report_date + '|' + a.type))
       setAlerts(activeAlerts.sort((a, b) => (a.gravite === 'haute' ? -1 : 1) - (b.gravite === 'haute' ? -1 : 1)))
     })
-  }, [stationId])
+  }, [stationIdsKey])
   useEffect(() => {
-    if (!stationId) return
-    const ch = supabase.channel('stock-' + stationId).on('postgres_changes', { event: '*', schema: 'public', table: 'daily_reports', filter: `station_id=eq.${stationId}` }, loadStock).subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [stationId])
+    // Abonnement temps réel : un canal par station active (la vue consolidée en suit plusieurs).
+    if (!stationIdsActifs.length) return
+    const channels = stationIdsActifs.map(id =>
+      supabase.channel('stock-' + id).on('postgres_changes', { event: '*', schema: 'public', table: 'daily_reports', filter: `station_id=eq.${id}` }, loadStock).subscribe())
+    return () => { channels.forEach(ch => supabase.removeChannel(ch)) }
+  }, [stationIdsKey])
 
 
   const years = useMemo(() => [...new Set([...months.map(m => m.mois.slice(0, 4)), today.slice(0, 4)])].sort(), [months])
@@ -337,6 +369,20 @@ export default function Dashboard() {
     ? fm.map(m => ({ mois: m.mois.slice(2), value: Math.round(N(m.litres_carburant)) }))
     : poleUniteSeries.map(r => ({ mois: r.mois.slice(2), value: Math.round(r.value) })))
 
+  // Vue consolidée : plusieurs stations peuvent avoir une ligne pour la même taille de bouteille —
+  // on les regroupe (sommées) pour le détail par taille, plutôt que des lignes en double.
+  const gazEtatsAgg = useMemo(() => {
+    if (!vueConsolidee) return gazEtats
+    const byTaille = {}
+    for (const g of gazEtats) {
+      const t = byTaille[g.taille] || { taille: g.taille, pleines_stock: 0, vides_stock: 0, consignees_circulation: 0, consigne_nette_f: 0 }
+      t.pleines_stock += N(g.pleines_stock); t.vides_stock += N(g.vides_stock)
+      t.consignees_circulation += N(g.consignees_circulation); t.consigne_nette_f += N(g.consigne_nette_f)
+      byTaille[g.taille] = t
+    }
+    return Object.values(byTaille)
+  }, [gazEtats, vueConsolidee])
+
   const reconColumns = [
     { key: 'mois', header: 'Mois' },
     { key: 'esp', header: 'Espèces', numeric: true, align: 'right', render: m => fcfa(N(m.recettes_especes)) },
@@ -347,6 +393,14 @@ export default function Dashboard() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
+      {stations.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+          <Button size="sm" tone={vueConsolidee ? 'dark' : 'neutral'} onClick={() => setVueConsolidee(v => !v)}>
+            {vueConsolidee ? `Vue consolidée (${stations.length} stations)` : 'Voir toutes les stations'}
+          </Button>
+          {vueConsolidee && <span style={{ font: '400 13px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>Chiffres additionnés sur : {stations.map(s => s.nom).join(', ')}</span>}
+        </div>
+      )}
       <Panel title="Stock en temps réel & autonomie" status="accent" meta={`maj ${refreshedAt}`} actions={<Button size="sm" onClick={loadStock}>Rafraîchir</Button>}>
         {!stock ? <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Pas encore de stock saisi.</p> : (<>
           <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', marginTop: 0 }}>Dernière saisie : {frDate(stock.derniere_date)}</p>
@@ -381,9 +435,25 @@ export default function Dashboard() {
                     { key: 'vides', header: 'Vides', numeric: true, align: 'right', render: g => N(g.vides_stock) },
                     { key: 'consignees', header: 'Consignées en circulation', numeric: true, align: 'right', render: g => N(g.consignees_circulation) },
                     { key: 'consigne_f', header: 'Consigne nette (F)', numeric: true, align: 'right', render: g => fcfa(g.consigne_nette_f) },
-                  ]} rows={[...gazEtats].sort((a, b) => parseInt(a.taille) - parseInt(b.taille)).map(g => ({ ...g, id: g.taille }))} />
+                  ]} rows={[...gazEtatsAgg].sort((a, b) => parseInt(a.taille) - parseInt(b.taille)).map(g => ({ ...g, id: g.taille }))} />
                 </div>
               )}
+            </div>
+          )}
+          {vueConsolidee && stockParStation.length > 0 && (
+            <div style={{ marginTop: 'var(--sp-5)' }}>
+              <div style={{ font: 'var(--fw-semibold) 13px/1.25 var(--font-ui)', color: 'var(--text-muted)', marginBottom: 'var(--sp-3)' }}>
+                Autonomie & écart de jauge par station (ne s'additionnent pas, affichés séparément)
+              </div>
+              <DataTable columns={[
+                { key: 'station_nom', header: 'Station' },
+                { key: 'jours_essence', header: 'Autonomie essence', numeric: true, align: 'right', render: r => r.jours_essence != null ? `${r.jours_essence} j` : '—' },
+                { key: 'jours_gasoil', header: 'Autonomie gasoil', numeric: true, align: 'right', render: r => r.jours_gasoil != null ? `${r.jours_gasoil} j` : '—' },
+                ...(has('ecart_jauge') ? [
+                  { key: 'ecart_ess_cumule', header: 'Écart jauge essence', numeric: true, align: 'right', render: r => r.ecart_ess_cumule != null ? `${N(r.ecart_ess_cumule) > 0 ? '+' : ''}${Math.round(N(r.ecart_ess_cumule))} L` : '—' },
+                  { key: 'ecart_gas_cumule', header: 'Écart jauge gasoil', numeric: true, align: 'right', render: r => r.ecart_gas_cumule != null ? `${N(r.ecart_gas_cumule) > 0 ? '+' : ''}${Math.round(N(r.ecart_gas_cumule))} L` : '—' },
+                ] : []),
+              ]} rows={stockParStation.map(r => ({ ...r, id: r.station_id }))} />
             </div>
           )}
         </>)}
@@ -537,9 +607,10 @@ export default function Dashboard() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', padding: 'var(--gutter-panel)' }}>
                 {alerts.slice(0, 5).map((a, i) => {
                   const meta = ALERT_TONES[a.type] || { label: a.type, tone: 'info' }
+                  const titre = vueConsolidee ? `${meta.label} — ${nomStation(a.station_id)}` : meta.label
                   return (
-                    <AlertBanner key={i} tone={meta.tone} title={meta.label} timestamp={frDate(a.report_date)}
-                      action={a.report_date && <Button size="sm" onClick={() => nav(`/saisie?date=${a.report_date}`)}>Traiter</Button>}>
+                    <AlertBanner key={i} tone={meta.tone} title={titre} timestamp={frDate(a.report_date)}
+                      action={a.report_date && <Button size="sm" onClick={() => { if (vueConsolidee) setStationId(a.station_id); nav(`/saisie?date=${a.report_date}`) }}>Traiter</Button>}>
                       {a.detail}
                     </AlertBanner>
                   )
