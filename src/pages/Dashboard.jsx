@@ -38,15 +38,13 @@ function periodBounds(year, month) {
 }
 
 export default function Dashboard() {
-  const { stationId, setStationId, stations } = useStation()
+  const { stationId, setStationId, stations, vueConsolidee, stationIdsActifs } = useStation()
   const { has, activite } = useOffre()   // fonctions et activités incluses dans l'offre de la station courante
   const nav = useNavigate()
-  // Vue consolidée : agrège tous les écrans de pilotage sur l'ensemble des stations accessibles
-  // (directeur multi-stations) au lieu d'une seule à la fois — demande utilisateur. Reste locale
-  // à cette page : le sélecteur de station global (en-tête) garde son sens normal pour toutes les
-  // actions de saisie ailleurs dans l'app, seule la lecture ici change de périmètre.
-  const [vueConsolidee, setVueConsolidee] = useState(false)
-  const stationIdsActifs = vueConsolidee ? stations.map(s => s.id) : (stationId ? [stationId] : [])
+  // Vue consolidée (choisie dans le sélecteur de station global, "Toutes les stations") : agrège
+  // tous les écrans de pilotage sur l'ensemble des stations accessibles au lieu d'une seule à la
+  // fois — demande utilisateur. `stationId` lui-même ne change pas de sens : les actions de
+  // saisie ailleurs dans l'app continuent de cibler une vraie station.
   const stationIdsKey = stationIdsActifs.join(',')
   const nomStation = (id) => stations.find(s => s.id === id)?.nom || `Station ${id}`
   const [months, setMonths] = useState([])   // v_ventes_mensuelles (agrégé, rapide)
@@ -202,6 +200,21 @@ export default function Dashboard() {
 
 
   const years = useMemo(() => [...new Set([...months.map(m => m.mois.slice(0, 4)), today.slice(0, 4)])].sort(), [months])
+  // Vue consolidée : plusieurs stations peuvent avoir une ligne pour la même taille de bouteille —
+  // on les regroupe (sommées) pour le détail par taille, plutôt que des lignes en double. Avant le
+  // retour anticipé "Chargement…" ci-dessous : un Hook ne peut pas être appelé après un `return`
+  // conditionnel (ordre des Hooks différent d'un rendu à l'autre → page blanche en production).
+  const gazEtatsAgg = useMemo(() => {
+    if (!vueConsolidee) return gazEtats
+    const byTaille = {}
+    for (const g of gazEtats) {
+      const t = byTaille[g.taille] || { taille: g.taille, pleines_stock: 0, vides_stock: 0, consignees_circulation: 0, consigne_nette_f: 0 }
+      t.pleines_stock += N(g.pleines_stock); t.vides_stock += N(g.vides_stock)
+      t.consignees_circulation += N(g.consignees_circulation); t.consigne_nette_f += N(g.consigne_nette_f)
+      byTaille[g.taille] = t
+    }
+    return Object.values(byTaille)
+  }, [gazEtats, vueConsolidee])
 
   const fm = months.filter(m => (year === 'all' || m.mois.slice(0, 4) === year) && (month === 'all' || m.mois.slice(5, 7) === month))
   const sum = (k) => fm.reduce((s, m) => s + N(m[k]), 0)
@@ -369,20 +382,6 @@ export default function Dashboard() {
     ? fm.map(m => ({ mois: m.mois.slice(2), value: Math.round(N(m.litres_carburant)) }))
     : poleUniteSeries.map(r => ({ mois: r.mois.slice(2), value: Math.round(r.value) })))
 
-  // Vue consolidée : plusieurs stations peuvent avoir une ligne pour la même taille de bouteille —
-  // on les regroupe (sommées) pour le détail par taille, plutôt que des lignes en double.
-  const gazEtatsAgg = useMemo(() => {
-    if (!vueConsolidee) return gazEtats
-    const byTaille = {}
-    for (const g of gazEtats) {
-      const t = byTaille[g.taille] || { taille: g.taille, pleines_stock: 0, vides_stock: 0, consignees_circulation: 0, consigne_nette_f: 0 }
-      t.pleines_stock += N(g.pleines_stock); t.vides_stock += N(g.vides_stock)
-      t.consignees_circulation += N(g.consignees_circulation); t.consigne_nette_f += N(g.consigne_nette_f)
-      byTaille[g.taille] = t
-    }
-    return Object.values(byTaille)
-  }, [gazEtats, vueConsolidee])
-
   const reconColumns = [
     { key: 'mois', header: 'Mois' },
     { key: 'esp', header: 'Espèces', numeric: true, align: 'right', render: m => fcfa(N(m.recettes_especes)) },
@@ -393,13 +392,10 @@ export default function Dashboard() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
-      {stations.length > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-          <Button size="sm" tone={vueConsolidee ? 'dark' : 'neutral'} onClick={() => setVueConsolidee(v => !v)}>
-            {vueConsolidee ? `Vue consolidée (${stations.length} stations)` : 'Voir toutes les stations'}
-          </Button>
-          {vueConsolidee && <span style={{ font: '400 13px/1.25 var(--font-ui)', color: 'var(--text-muted)' }}>Chiffres additionnés sur : {stations.map(s => s.nom).join(', ')}</span>}
-        </div>
+      {vueConsolidee && (
+        <AlertBanner tone="info" title="Vue consolidée">
+          Chiffres additionnés sur : {stations.map(s => s.nom).join(', ')} — choisissez une station précise dans le sélecteur en haut pour revenir à une vue simple.
+        </AlertBanner>
       )}
       <Panel title="Stock en temps réel & autonomie" status="accent" meta={`maj ${refreshedAt}`} actions={<Button size="sm" onClick={loadStock}>Rafraîchir</Button>}>
         {!stock ? <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>Pas encore de stock saisi.</p> : (<>

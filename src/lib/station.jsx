@@ -15,6 +15,12 @@ export function StationProvider({ children }) {
   const [allStations, setAllStations] = useState([])
   const [myStationIds, setMyStationIds] = useState([])
   const [stationId, setStationId] = useState(null)
+  // Vue consolidée (demande utilisateur) : choisie depuis le même sélecteur de station que le
+  // reste de l'app ("Toutes les stations" en plus de la liste), pour que Tableau de bord, Stock
+  // et Point financier basculent ensemble, sans bouton séparé par page. `stationId` lui-même
+  // reste toujours une vraie station — jamais "toutes" — pour qu'aucune des pages qui écrivent
+  // (Saisie du jour, Commandes, Rapprochement…) ne puisse se retrouver sans station valide.
+  const [vueConsolidee, setVueConsolidee] = useState(false)
 
   useEffect(() => {
     supabase.from('stations').select('*').order('id').then(({ data }) => setAllStations(data || []))
@@ -38,10 +44,12 @@ export function StationProvider({ children }) {
   useEffect(() => {
     setStationId(prev => (prev && stations.some(s => s.id === prev)) ? prev : (stations[0]?.id ?? null))
   }, [stations])
+  useEffect(() => { if (stations.length < 2 && vueConsolidee) setVueConsolidee(false) }, [stations.length])
 
   const current = stations.find(s => s.id === stationId) || null
+  const stationIdsActifs = vueConsolidee ? stations.map(s => s.id) : (stationId ? [stationId] : [])
   return (
-    <Ctx.Provider value={{ stations, stationId, setStationId, current, isAdmin }}>
+    <Ctx.Provider value={{ stations, stationId, setStationId, current, isAdmin, vueConsolidee, setVueConsolidee, stationIdsActifs }}>
       {children}
     </Ctx.Provider>
   )

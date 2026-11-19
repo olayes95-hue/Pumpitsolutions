@@ -123,11 +123,12 @@ function useSpaces() {
 }
 
 function StationPicker() {
-  const { stations, stationId, setStationId, current } = useStation()
+  const { stations, stationId, setStationId, current, vueConsolidee, setVueConsolidee } = useStation()
   if (stations.length <= 1) return <Tag><Icon name="map-pin" size={14} /> {current?.nom || 'Ma station'}</Tag>
   return (
-    <Select size="sm" aria-label="Station" value={stationId || ''} onChange={e => setStationId(Number(e.target.value))}
-      options={stations.map(s => ({ value: s.id, label: s.nom }))} style={{ maxWidth: 200 }} />
+    <Select size="sm" aria-label="Station" value={vueConsolidee ? 'all' : (stationId || '')}
+      onChange={e => { if (e.target.value === 'all') setVueConsolidee(true); else { setVueConsolidee(false); setStationId(Number(e.target.value)) } }}
+      options={[{ value: 'all', label: `Toutes les stations (${stations.length})` }, ...stations.map(s => ({ value: s.id, label: s.nom }))]} style={{ maxWidth: 220 }} />
   )
 }
 

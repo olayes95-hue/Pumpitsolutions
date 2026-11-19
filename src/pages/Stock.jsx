@@ -56,23 +56,22 @@ const AUTRE_MOUVEMENT_SOURCES = [
 export default function Stock() {
   const { session, isAdmin, isVendeuse, isPompiste, can } = useAuth()
   const peutEditerProduits = isAdmin || can('manage_products')
-  const { stationId, stations } = useStation()
+  const { stationId, stations, vueConsolidee, stationIdsActifs } = useStation()
   const { activite, has } = useOffre()   // activités + fonctions incluses dans l'offre de la station courante
-  // Vue consolidée (demande utilisateur, directeur multi-stations) : un résumé en lecture, à côté
-  // de tout le reste de la page qui reste volontairement scopé à la station active — compter un
-  // inventaire ou déclarer une livraison ne veut rien dire "pour plusieurs stations à la fois",
-  // donc on n'y touche pas. État et requêtes totalement séparés de `stock`/`theorique`/etc.
-  // utilisés par l'inventaire plus bas, pour ne jamais mélanger les deux.
-  const [consolideOpen, setConsolideOpen] = useState(false)
+  // Vue consolidée (choisie dans le sélecteur de station global, "Toutes les stations") : un
+  // résumé en lecture, à côté de tout le reste de la page qui reste volontairement scopé à la
+  // station active — compter un inventaire ou déclarer une livraison ne veut rien dire "pour
+  // plusieurs stations à la fois", donc on n'y touche pas. État et requêtes totalement séparés de
+  // `stock`/`theorique`/etc. utilisés par l'inventaire plus bas, pour ne jamais mélanger les deux.
   const [stockConsolide, setStockConsolide] = useState([])
   const [valeurConsolide, setValeurConsolide] = useState([])
   const [consolideCat, setConsolideCat] = useState(null)
+  const stationIdsKey = stationIdsActifs.join(',')
   useEffect(() => {
-    if (!consolideOpen || stations.length < 2) return
-    const ids = stations.map(s => s.id)
-    supabase.from('v_stock_produits').select('*').in('station_id', ids).then(({ data }) => setStockConsolide(data || []))
-    supabase.from('v_stock_valeur').select('*').in('station_id', ids).then(({ data }) => setValeurConsolide(data || []))
-  }, [consolideOpen, stations.length])
+    if (!vueConsolidee) return
+    supabase.from('v_stock_produits').select('*').in('station_id', stationIdsActifs).then(({ data }) => setStockConsolide(data || []))
+    supabase.from('v_stock_valeur').select('*').in('station_id', stationIdsActifs).then(({ data }) => setValeurConsolide(data || []))
+  }, [vueConsolidee, stationIdsKey])
   const [stock, setStock] = useState([])
   const [valeur, setValeur] = useState([])
   const [mvts, setMvts] = useState([])
@@ -564,26 +563,19 @@ export default function Stock() {
       {/* ===== VUE CONSOLIDÉE — résumé en lecture sur toutes les stations accessibles, à côté du
           reste de la page qui reste scopé à la station active (une livraison ou un inventaire
           ne concerne qu'une station à la fois). ===== */}
-      {stations.length > 1 && (
-        <Panel title="Stock consolidé — toutes les stations" status="accent"
-          actions={<Button size="sm" tone={consolideOpen ? 'dark' : 'neutral'} onClick={() => setConsolideOpen(v => !v)}>{consolideOpen ? 'Masquer' : 'Afficher'}</Button>}>
-          {!consolideOpen ? (
-            <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
-              Total par article, additionné sur : {stations.map(s => s.nom).join(', ')}.
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
-              <Tabs items={cats.map(([value, label]) => ({ value, label }))} value={consolideCat} onChange={setConsolideCat} />
-              {isAdmin && <Kpi label={`Valeur stock ${(cats.find(([v]) => v === consolideCat) || [])[1] || ''} (toutes stations)`} value={fcfa(valeurConsolideParCat[consolideCat] || 0)} />}
-              {stockConsolideParProduit.length ? (
-                <DataTable columns={[
-                  { key: 'produit', header: 'Produit', width: 240 },
-                  { key: 'stock', header: 'Stock total', numeric: true, align: 'right', render: r => Math.round(N(r.stock)).toLocaleString('fr-FR') },
-                  { key: 'detail', header: 'Détail par station', render: r => r.parStation.map(p => `${p.station} : ${Math.round(p.stock).toLocaleString('fr-FR')}`).join(' · ') },
-                ]} rows={stockConsolideParProduit.map(r => ({ ...r, id: r.produit }))} />
-              ) : <PanelEmpty icon="package" label="Aucun stock pour cette catégorie." />}
-            </div>
-          )}
+      {vueConsolidee && (
+        <Panel title="Stock consolidé — toutes les stations" status="accent">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+            <Tabs items={cats.map(([value, label]) => ({ value, label }))} value={consolideCat} onChange={setConsolideCat} />
+            {isAdmin && <Kpi label={`Valeur stock ${(cats.find(([v]) => v === consolideCat) || [])[1] || ''} (toutes stations)`} value={fcfa(valeurConsolideParCat[consolideCat] || 0)} />}
+            {stockConsolideParProduit.length ? (
+              <DataTable columns={[
+                { key: 'produit', header: 'Produit', width: 240 },
+                { key: 'stock', header: 'Stock total', numeric: true, align: 'right', render: r => Math.round(N(r.stock)).toLocaleString('fr-FR') },
+                { key: 'detail', header: 'Détail par station', render: r => r.parStation.map(p => `${p.station} : ${Math.round(p.stock).toLocaleString('fr-FR')}`).join(' · ') },
+              ]} rows={stockConsolideParProduit.map(r => ({ ...r, id: r.produit }))} />
+            ) : <PanelEmpty icon="package" label="Aucun stock pour cette catégorie." />}
+          </div>
         </Panel>
       )}
 

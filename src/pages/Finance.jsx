@@ -52,14 +52,13 @@ const blankCharge = () => ({ categorie: 'LOYER', montant: '', note: '', statut: 
 
 export default function Finance() {
   const { session, can } = useAuth()
-  const { stationId, current, stations } = useStation()
-  // Vue consolidée (demande utilisateur, directeur multi-stations) : résumé volontairement
-  // limité à des totaux sûrs (produits/charges/résultat avant IS, trésorerie bancaire) — pas une
-  // reconstruction du Compte de résultat/Bilan complet station par station, trop de réglages
-  // propres à chaque station (overrides d'impôt, soldes d'ouverture, mois verrouillés) pour les
-  // additionner sans risque de donner un chiffre trompeur. Calcul et requêtes totalement séparés
-  // de tout le reste de la page, qui garde sa station active comme avant.
-  const [consolideOpen, setConsolideOpen] = useState(false)
+  const { stationId, current, stations, vueConsolidee, stationIdsActifs } = useStation()
+  // Vue consolidée (choisie dans le sélecteur de station global, "Toutes les stations") : résumé
+  // volontairement limité à des totaux sûrs (produits/charges/résultat avant IS, trésorerie
+  // bancaire) — pas une reconstruction du Compte de résultat/Bilan complet station par station,
+  // trop de réglages propres à chaque station (overrides d'impôt, soldes d'ouverture, mois
+  // verrouillés) pour les additionner sans risque de donner un chiffre trompeur. Calcul et
+  // requêtes totalement séparés de tout le reste de la page, qui garde sa station active comme avant.
   const [consolideRows, setConsolideRows] = useState([])   // par station : {station_id, produits, totCharges, resultat}
   const [tresorerieConsolidee, setTresorerieConsolidee] = useState(null)
   const [ventes, setVentes] = useState([])
@@ -181,8 +180,8 @@ export default function Finance() {
   }, [stationId])
 
   useEffect(() => {
-    if (!consolideOpen || stations.length < 2) return
-    const ids = stations.map(s => s.id)
+    if (!vueConsolidee) return
+    const ids = stationIdsActifs
     ;(async () => {
       const [v, cr, cs, exp, pe, ch, crm, cb] = await Promise.all([
         supabase.from('v_ventes_mensuelles').select('station_id,mois,commission_carburant,ventes_superette').in('station_id', ids),
@@ -223,7 +222,7 @@ export default function Finance() {
       setConsolideRows(rows)
       setTresorerieConsolidee((cb.data || []).reduce((s, r) => s + N(r.solde_actuel), 0))
     })()
-  }, [consolideOpen, stations, mois, annee, settings.superette_commission_reelle, settings.taux_superette])
+  }, [vueConsolidee, stationIdsActifs.join(','), mois, annee, settings.superette_commission_reelle, settings.taux_superette])
 
   const annees = useMemo(() => [...new Set([...ventes.map(v => v.mois.slice(0, 4)), today().slice(0, 4)])].sort(), [ventes])
 
@@ -817,14 +816,9 @@ export default function Finance() {
         </AlertBanner>
       )}
 
-      {stations.length > 1 && (
-        <Panel title="Point financier consolidé — toutes les stations" status="accent"
-          actions={<Button size="sm" tone={consolideOpen ? 'dark' : 'neutral'} onClick={() => setConsolideOpen(v => !v)}>{consolideOpen ? 'Masquer' : 'Afficher'}</Button>}>
-          {!consolideOpen ? (
-            <p style={{ font: '400 14px/1.4 var(--font-ui)', color: 'var(--text-muted)', margin: 0 }}>
-              Résumé additionné sur : {stations.map(s => s.nom).join(', ')} — mêmes formules que ci-dessous, rejouées par station. Ne remplace pas le détail (overrides d'impôt, bilan) qui reste par station.
-            </p>
-          ) : consolideRows.length ? (() => {
+      {vueConsolidee && (
+        <Panel title="Point financier consolidé — toutes les stations" status="accent">
+          {consolideRows.length ? (() => {
             const produitsTot = consolideRows.reduce((s, r) => s + r.produits, 0)
             const chargesTot = consolideRows.reduce((s, r) => s + r.totCharges, 0)
             const resultatTot = produitsTot - chargesTot
